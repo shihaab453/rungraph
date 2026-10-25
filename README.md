@@ -191,6 +191,19 @@ file or folder paths, or globs over manifest paths (quote them; `*` also
 crosses folders). It needs targets or `--all`, so nothing is accepted by
 accident. It refuses (and writes nothing) if a target file is missing.
 
+Each target must select the same artifacts under every interpretation that
+matches. For example, if `report` is an artifact ID and also a folder holding
+other tracked files, the command refuses it with an ambiguity error (exit 2).
+Choose explicitly with `id:report`, `run:run-tuned`, `path:REPORT.md`,
+`folder:report/` or `glob:runs/*/train.log`. Quote globs to keep the shell from
+expanding them. `path:` selects exact file paths; `folder:` selects files
+inside a folder. Paths and folders can be relative to the manifest or the
+current folder. If those locations match different artifact sets, use an
+absolute path. Multiple targets combine their selected sets, but each target
+must be unambiguous on its own. Existing unambiguous targets keep working;
+an ID starting with a reserved prefix needs `id:`, for example
+`id:path:report` selects the artifact whose ID is `path:report`.
+
 When a re-recorded file is the source of a result (`artifact_id` +
 `locator`), `rehash` also updates the recorded value from the file and prints
 `old -> new`. It then lists every claim that rests on what changed: **re-read
@@ -215,6 +228,13 @@ neighbouring files all belong to one run, the new file joins that run. Use
 
 `rehash` and `add` rewrite only the values they change in `runevidence.json`.
 Other results, claims, links and field order are preserved. Indentation is normalized.
+Both commands plan from one validated manifest snapshot and compare its exact
+bytes with the on-disk manifest after staging a complete replacement. If the
+manifest changed, they refuse the save (exit 2) and leave the competing edit
+intact. Review the current manifest and retry. This is a stale-write check,
+not multi-process serialization: another writer can still race between the
+final comparison and replacement. Avoid concurrent writers, including
+`init --force`; the check does not lock out other processes.
 Commit before you run them if you want an easy undo.
 
 For a worked example on a real training run (scikit-learn, two models, real

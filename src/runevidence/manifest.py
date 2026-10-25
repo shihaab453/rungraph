@@ -27,6 +27,7 @@ class ManifestLoadError(Exception):
 class LoadedManifest:
     manifest: Manifest
     path: Path  # the manifest file itself
+    source_bytes: bytes  # the exact snapshot that was parsed and validated
 
     @property
     def root(self) -> Path:
@@ -56,7 +57,8 @@ def load_manifest(target: Path) -> LoadedManifest:
             ]
         )
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        source_bytes = path.read_bytes()
+        raw = json.loads(source_bytes.decode("utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ManifestLoadError(
             [
@@ -82,7 +84,7 @@ def load_manifest(target: Path) -> LoadedManifest:
                 for err in exc.errors()
             ]
         ) from exc
-    return LoadedManifest(manifest=manifest, path=path)
+    return LoadedManifest(manifest=manifest, path=path, source_bytes=source_bytes)
 
 
 def artifact_to_dict(artifact: Artifact) -> dict:
@@ -108,13 +110,17 @@ def save_manifest(manifest: Manifest, path: Path) -> None:
     _write(path, dump_manifest(manifest))
 
 
-def load_raw(path: Path) -> dict:
-    """The manifest file as plain JSON, for edits that must keep every field
-    exactly as the user wrote it. Call after load_manifest succeeded."""
-    return json.loads(path.read_text(encoding="utf-8"))
+def load_raw(loaded: LoadedManifest) -> dict:
+    """Editable JSON from the validated snapshot, without a second disk read."""
+    return json.loads(loaded.source_bytes.decode("utf-8"))
 
 
-def save_raw(data: dict, path: Path) -> None:
+def save_raw(data: dict, path: Path, *, expected_bytes: bytes) -> None:
+    """Reject a stale snapshot immediately before replacing the manifest.
+
+    This byte comparison is not an atomic compare-and-swap: another writer
+    can still change the file between the comparison and os.replace.
+    """
     # Stage a complete edit beside the manifest before replacing it, so a
     # failed write cannot truncate the user's existing evidence record.
     text = dump_raw(data)
@@ -130,6 +136,8 @@ def save_raw(data: dict, path: Path) -> None:
             os.fsync(fh.fileno())
         if os.name != "nt":
             os.chmod(staged, stat.S_IMODE(path.stat().st_mode))
+        if path.read_bytes() != expected_bytes:
+            raise OSError("Manifest changed since it was loaded. Review the current manifest and retry.")
         os.replace(staged, path)
     finally:
         if staged is not None:

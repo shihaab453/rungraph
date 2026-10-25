@@ -109,43 +109,75 @@ def glob_match(path: str, pattern: str) -> bool:
     return fnmatch.fnmatchcase(_norm(path), _norm(pattern))
 
 
+def _entry_index(entries: list[dict], entry_id: str, kind: str) -> int:
+    """Bind an edit to one identity, even if the editable list was reordered."""
+    hits = [i for i, entry in enumerate(entries) if entry["id"] == entry_id]
+    if len(hits) != 1:
+        raise EditError(f"Cannot identify a unique {kind} with ID {entry_id!r}; nothing can be re-recorded safely.")
+    return hits[0]
+
+
 # --- rehash ----------------------------------------------------------------
 
 
 def select_artifacts(loaded: LoadedManifest, targets: list[str], cwd: Optional[Path] = None) -> list[int]:
-    """Indexes of the artifacts the targets name. A target may be an artifact
-    ID, a run ID (every file the run produced), a file or folder path (as
-    written in the manifest, or on disk relative to the current folder), or a
-    glob over manifest paths such as ``runs/*/train.log``."""
+    """Select artifacts only when every matching interpretation agrees.
+
+    Prefixes id:, run:, path:, folder: and glob: select one interpretation.
+    Paths and folders may be manifest-relative or current-folder-relative;
+    if both match different sets, use an absolute path to choose one.
+    """
     manifest, root = loaded.manifest, loaded.root
     cwd = cwd or Path.cwd()
     runs = {r.id for r in manifest.runs}
     keys = [_key(_on_disk(root, a)) for a in manifest.artifacts]
-    chosen: dict[int, None] = {}
+    paths = [_norm(a.path) for a in manifest.artifacts]
+    chosen: set[int] = set()
     unmatched: list[str] = []
     for target in targets:
-        norm = _norm(target)
+        prefix, separator, value = target.partition(":")
+        explicit = bool(separator) and prefix in {"id", "run", "path", "folder", "glob"}
+        if not explicit:
+            value = target
+        norm = _norm(value)
         folder = norm.rstrip("/") + "/"
-        on_disk = _key(cwd / target)
+        on_disk = _key(cwd / norm)
         under_on_disk = on_disk.rstrip(os.sep) + os.sep
-        hits = [
-            i
-            for i, a in enumerate(manifest.artifacts)
-            if target == a.id
-            or (target in runs and a.run_id == target)
-            or norm == _norm(a.path)
-            or _norm(a.path).startswith(folder)
-            or keys[i] == on_disk
-            or keys[i].startswith(under_on_disk)
-            or (bool(GLOB_CHARS & set(norm)) and glob_match(a.path, norm))
+        interpretations = [
+            ("id", "id", {i for i, a in enumerate(manifest.artifacts) if value == a.id}),
+            ("run", "run", {i for i, a in enumerate(manifest.artifacts) if value in runs and a.run_id == value}),
+            ("path", "manifest path", {i for i, path in enumerate(paths) if norm == path}),
+            ("path", "current-folder path", {i for i, key in enumerate(keys) if key == on_disk}),
+            ("folder", "manifest folder", {i for i, path in enumerate(paths) if path.startswith(folder)}),
+            ("folder", "current-folder folder", {i for i, key in enumerate(keys) if key.startswith(under_on_disk)}),
+            ("glob", "glob", {
+                i for i, path in enumerate(paths)
+                if (explicit or GLOB_CHARS & set(norm)) and glob_match(path, norm)
+            }),
         ]
-        if not hits:
+        matches = [
+            (label, hits) for kind, label, hits in interpretations
+            if hits and value and (not explicit or kind == prefix)
+        ]
+        if not matches:
             unmatched.append(target)
-        chosen.update(dict.fromkeys(hits))
+            continue
+        hits = matches[0][1]
+        if any(other != hits for _, other in matches[1:]):
+            details = "; ".join(
+                f"{label}: {', '.join(manifest.artifacts[i].id for i in sorted(other))}"
+                for label, other in matches
+            )
+            raise EditError(
+                f"Ambiguous target {target!r} ({details}). "
+                "Choose id:ID, run:ID, path:PATH, folder:PATH or glob:PATTERN. "
+                "If manifest-relative and current-folder paths disagree, use an absolute path."
+            )
+        chosen.update(hits)
     if unmatched:
         raise EditError(
             "No artifact matches " + ", ".join(repr(t) for t in unmatched)
-            + ". Use an artifact ID, a run ID, a tracked file or folder, or a glob like 'runs/*/train.log'."
+            + ". Use id:ID, run:ID, path:PATH, folder:PATH or glob:PATTERN (prefixes optional when unambiguous)."
         )
     return sorted(chosen)
 
@@ -165,7 +197,10 @@ def plan_rehash(
     unreadable: list[str] = []
     for i in indexes:
         art = manifest.artifacts[i]
-        entry = raw["artifacts"][i]
+        entry_index = _entry_index(raw["artifacts"], art.id, "artifact")
+        entry = raw["artifacts"][entry_index]
+        if entry["path"] != art.path:
+            raise EditError(f"Artifact {art.id!r} no longer has its selected path {art.path!r}.")
         target = _on_disk(root, art)
         make_volatile = art.volatile if volatile is None else volatile
         try:
@@ -184,7 +219,7 @@ def plan_rehash(
             for key in ("sha256", "size_bytes"):
                 if key in entry:
                     entry[key] = None
-            raw["artifacts"][i] = _set_volatile(entry)
+            raw["artifacts"][entry_index] = _set_volatile(entry)
         else:
             entry.pop("volatile", None)
             entry["sha256"] = digest
@@ -237,7 +272,7 @@ def _reread_values(loaded: LoadedManifest, raw: dict, artifact_ids: set[str], pl
     manifest = loaded.manifest
     by_id = {a.id: a for a in manifest.artifacts}
     docs: dict[str, Any] = {}
-    for j, res in enumerate(manifest.results):
+    for res in manifest.results:
         if res.locator is None or res.artifact_id not in artifact_ids:
             continue
         art = by_id[res.artifact_id]
@@ -264,6 +299,7 @@ def _reread_values(loaded: LoadedManifest, raw: dict, artifact_ids: set[str], pl
             plan.notes.append(f"{res.id}: {res.locator} in {art.path} is not a single value; value left as is")
             continue
         if not values_match(res.value, actual):
+            j = _entry_index(raw["results"], res.id, "result")
             raw["results"][j]["value"] = actual
             plan.values.append(ValueChange(res.id, res.name, res.value, actual))
 

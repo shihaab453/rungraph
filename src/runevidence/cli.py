@@ -26,7 +26,7 @@ from .adapters import AdapterError, available_adapters, get_adapter
 from .adapters.generic import slug
 from .checks import EXIT_INVALID, EXIT_OK, Report, run_checks
 from .edit import EditError, glob_match, plan_add, plan_rehash, select_artifacts
-from .manifest import ManifestLoadError, load_manifest, load_raw, save_manifest, save_raw
+from .manifest import LoadedManifest, ManifestLoadError, load_manifest, load_raw, save_manifest, save_raw
 from .models import BACKUP_FILENAME, MANIFEST_FILENAME, Manifest, json_schema
 from .report import format_findings, format_overview, to_json
 
@@ -137,17 +137,17 @@ def _edit_error(exc: Exception) -> int:
     return EXIT_INVALID
 
 
-def _finish_edit(args: argparse.Namespace, raw: dict, path: Path, summary: str) -> int:
+def _finish_edit(args: argparse.Namespace, raw: dict, loaded: LoadedManifest, summary: str) -> int:
     if args.dry_run:
         print(summary)
         print("Dry run: nothing was written.")
         return EXIT_OK
     try:
-        save_raw(raw, path)
+        save_raw(raw, loaded.path, expected_bytes=loaded.source_bytes)
     except OSError as exc:
         return _edit_error(exc)
     print(summary)
-    print(f"Wrote {path}\nNext: runevidence validate {args.path}")
+    print(f"Wrote {loaded.path}\nNext: runevidence validate {args.path}")
     return EXIT_OK
 
 
@@ -164,7 +164,7 @@ def cmd_rehash(args: argparse.Namespace) -> int:
     loaded = _load_or_report(args.path, False)
     if loaded is None:
         return EXIT_INVALID
-    raw = load_raw(loaded.path)
+    raw = load_raw(loaded)
     try:
         if args.all:
             indexes = list(range(len(loaded.manifest.artifacts)))
@@ -198,7 +198,7 @@ def cmd_rehash(args: argparse.Namespace) -> int:
     if plan.claims:
         print(f"Re-read these claims; they rest on what changed: {', '.join(plan.claims)}")
     if changed or plan.values:
-        return _finish_edit(args, raw, loaded.path, summary)
+        return _finish_edit(args, raw, loaded, summary)
     print(summary)
     return EXIT_OK
 
@@ -210,7 +210,7 @@ def cmd_add(args: argparse.Namespace) -> int:
     loaded = _load_or_report(args.path, False)
     if loaded is None:
         return EXIT_INVALID
-    raw = load_raw(loaded.path)
+    raw = load_raw(loaded)
     try:
         plan = plan_add(
             loaded,
@@ -238,7 +238,7 @@ def cmd_add(args: argparse.Namespace) -> int:
         print("Nothing new to add.")
         return EXIT_OK
     summary = f"{'Would add' if args.dry_run else 'Added'} {_count(len(plan.added), 'artifact')}"
-    return _finish_edit(args, raw, loaded.path, summary)
+    return _finish_edit(args, raw, loaded, summary)
 
 
 def _backup_existing(out: Path, new: Manifest) -> None:
@@ -368,7 +368,10 @@ def build_parser() -> argparse.ArgumentParser:
         "targets",
         nargs="*",
         metavar="TARGET",
-        help="artifact ID, run ID (all its files), file or folder path, or glob such as 'runs/*/train.log'",
+        help=(
+            "artifact ID, run ID (all its files), file/folder path or glob; ambiguous targets are refused. "
+            "Choose explicitly with id:ID, run:ID, path:PATH, folder:PATH or glob:PATTERN"
+        ),
     )
     p.add_argument("--all", action="store_true", help="re-record every artifact in the manifest")
     vol = p.add_mutually_exclusive_group()
