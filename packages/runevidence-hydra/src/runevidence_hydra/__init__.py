@@ -8,4 +8,4 @@ Installed, it registers itself as ``hydra``:
 from .adapter import HydraAdapter
 
 __all__ = ["HydraAdapter"]
-__version__ = "0.1.0"
+__version__ = "0.1.1"

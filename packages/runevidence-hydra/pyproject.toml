@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "runevidence-hydra"
-version = "0.1.0"
+version = "0.1.1"
 description = "RunEvidence adapter for experiment folders written by Hydra (outputs/, multirun/ and .hydra/)."
 readme = "README.md"
 license = "Apache-2.0"
@@ -21,7 +21,7 @@ classifiers = [
 ]
 # Reads Hydra's output files; Hydra itself is not needed. PyYAML is the only
 # addition, and Hydra installs already include it.
-dependencies = ["runevidence>=0.1.0", "PyYAML>=6"]
+dependencies = ["runevidence>=0.1.1,<0.2.0", "PyYAML>=6"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

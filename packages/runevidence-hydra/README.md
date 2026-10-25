@@ -10,12 +10,21 @@ Hydra left on disk. Its one extra dependency is PyYAML.
 
 ## Install
 
-From a clone of this repository (the package is not on PyPI):
+From the root of a clone of this repository (neither package is on PyPI),
+install core and the adapter together:
 
 ```
-pip install ./packages/runevidence-hydra
+pip install -e . -e ./packages/runevidence-hydra
 runevidence adapters        # should now list "hydra"
 ```
+
+The adapter requires `runevidence>=0.1.1,<0.2.0`: it needs the updated core
+adapter API and stays within the same minor release while core is pre-1.0.
+Installing both local paths lets pip satisfy this requirement from your clone.
+If core is already installed in that range,
+`pip install -e ./packages/runevidence-hydra` is sufficient. For regular installs,
+use `pip install . ./packages/runevidence-hydra`. CI installs those local paths
+in two steps, core first.
 
 ## Use
 

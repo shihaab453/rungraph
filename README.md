@@ -63,7 +63,8 @@ pip install "git+https://github.com/shihaab453/rungraph.git"
 
 RunEvidence is licensed under [Apache-2.0](LICENSE). The optional Hydra adapter
 is a separate package, [packages/runevidence-hydra](packages/runevidence-hydra).
-From a clone, install it with `pip install ./packages/runevidence-hydra`;
+From the repository root, install core and the adapter together with
+`pip install -e . -e ./packages/runevidence-hydra`;
 see [Adapters](#adapters) for usage.
 
 ### 2. Inspect the example experiment (1 minute)
@@ -311,7 +312,8 @@ stays free of tool dependencies:
   Hydra itself is not needed.
 
   ```bash
-  pip install ./packages/runevidence-hydra
+  # From the repository root, install both local packages together.
+  pip install -e . -e ./packages/runevidence-hydra
   runevidence init --adapter hydra path/to/project
   ```
 
