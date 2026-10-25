@@ -35,6 +35,9 @@ class Code(str, Enum):
     path_escapes_root = "path-escapes-root"
     path_case_mismatch = "path-case-mismatch"
     untracked_file = "untracked-file"
+    # recorded values vs file contents
+    result_value_mismatch = "result-value-mismatch"
+    result_unverifiable = "result-unverifiable"
     # references and relationships
     duplicate_id = "duplicate-id"
     dangling_reference = "dangling-reference"
@@ -44,8 +47,6 @@ class Code(str, Enum):
     derivation_cycle = "derivation-cycle"
     unsupported_claim = "unsupported-claim"
     claim_at_risk = "claim-at-risk"
-    result_value_mismatch = "result-value-mismatch"
-    result_unverifiable = "result-unverifiable"
 
 
 class Finding(BaseModel):

@@ -46,7 +46,7 @@ class Report:
 
 def run_checks(loaded: LoadedManifest, include_untracked: bool = False) -> Report:
     files = check_files(loaded, include_untracked=include_untracked)
-    result_findings, mismatched = check_results(loaded.manifest, files.ok_paths, files.broken)
+    result_findings, mismatched = check_results(loaded.manifest, files.readable_paths)
     graph_findings = check_graph(loaded.manifest, files.broken | mismatched)
     findings = sorted(files.findings + result_findings + graph_findings, key=Finding.sort_key)
     return Report(manifest_path=loaded.path, findings=findings)

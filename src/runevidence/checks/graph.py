@@ -37,6 +37,10 @@ class Edge:
     origin: str  # where in the manifest this edge was written
 
 
+def _article(word: str) -> str:
+    return "an" if word[:1] in "aeiou" else "a"
+
+
 def build_index(manifest: Manifest) -> tuple[dict[str, str], list[Finding]]:
     """Map every id to its kind; report ids used more than once."""
     kinds: dict[str, str] = {}
@@ -56,7 +60,7 @@ def build_index(manifest: Manifest) -> tuple[dict[str, str], list[Finding]]:
                     code=Code.duplicate_id,
                     severity=Severity.error,
                     subject=ident,
-                    message=f"ID {ident!r} at {origin} is already used by a {kinds[ident]}",
+                    message=f"ID {ident!r} at {origin} is already used by {_article(kinds[ident])} {kinds[ident]}",
                     hint="IDs share one namespace across runs, artifacts, results and evidence.",
                 )
             )

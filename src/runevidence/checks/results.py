@@ -45,12 +45,14 @@ def values_match(recorded: Any, actual: Any) -> bool:
     return recorded == actual
 
 
-def check_results(
-    manifest: Manifest, ok_paths: dict[str, Path], broken_artifacts: set[str]
-) -> tuple[list[Finding], set[str]]:
+def check_results(manifest: Manifest, readable_paths: dict[str, Path]) -> tuple[list[Finding], set[str]]:
+    """``readable_paths`` includes files whose hash changed: if a metrics
+    file was edited, the most useful thing to say is whether the number a
+    claim relies on changed with it."""
     findings: list[Finding] = []
     mismatched: set[str] = set()
     artifact_ids = {a.id for a in manifest.artifacts}
+    paths_by_id = {a.id: a.path for a in manifest.artifacts}
 
     def unverifiable(res_id: str, msg: str) -> None:
         findings.append(
@@ -64,11 +66,9 @@ def check_results(
         if res.artifact_id is None:
             unverifiable(res.id, f"Result {res.id!r} has a locator but no artifact_id to read it from")
             continue
-        if res.artifact_id not in artifact_ids or res.artifact_id in broken_artifacts:
-            continue  # already reported as dangling / missing / changed
-        path = ok_paths.get(res.artifact_id)
-        if path is None:
-            continue
+        path = readable_paths.get(res.artifact_id)
+        if res.artifact_id not in artifact_ids or path is None:
+            continue  # already reported as a dangling reference or missing file
         if path.suffix.lower() != ".json":
             unverifiable(res.id, f"Result {res.id!r}: locators are only supported for .json files ({path.name})")
             continue
@@ -96,7 +96,7 @@ def check_results(
                     subject=res.id,
                     message=(
                         f"Result {res.id!r} ({res.name}) records {res.value!r} but "
-                        f"{path.name}{res.locator} contains {actual!r}"
+                        f"{paths_by_id[res.artifact_id]} at {res.locator} contains {actual!r}"
                     ),
                 )
             )

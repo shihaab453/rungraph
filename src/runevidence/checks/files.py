@@ -27,6 +27,9 @@ class FileCheckResult:
     findings: list[Finding] = field(default_factory=list)
     # artifact id -> resolved path, only for files that exist and match
     ok_paths: dict[str, Path] = field(default_factory=dict)
+    # artifact id -> resolved path for every file that exists and was read,
+    # including changed ones (so result values can still be compared)
+    readable_paths: dict[str, Path] = field(default_factory=dict)
     # artifact ids whose file is missing, unreadable or changed
     broken: set[str] = field(default_factory=set)
 
@@ -233,6 +236,7 @@ def check_artifact(art: Artifact, root: Path, index: _TreeIndex, out: FileCheckR
         )
         return
 
+    out.readable_paths[art.id] = target
     if art.sha256 is None:
         add(
             Finding(
