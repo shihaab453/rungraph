@@ -190,6 +190,8 @@ Result locators into volatile JSON files are still checked against their
 recorded values and can put claims at risk. Deleting it is still an error. Mark files
 volatile when you run `init` (`--volatile "*.log"`), when you `add` them, or
 afterwards with `rehash --volatile`. Undo with `rehash --no-volatile`.
+`rehash` leaves result values from volatile sources as they are and prints a
+note. Use `--no-volatile` to accept the current digest and result values.
 
 `add` takes files or folders (a folder adds every file inside that is not
 tracked yet). Paths are relative to where you run the command. If the

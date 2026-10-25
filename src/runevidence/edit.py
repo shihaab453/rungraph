@@ -200,6 +200,13 @@ def plan_rehash(
     # that disagrees with an unchanged file is a typo for validate to report,
     # not something to accept.
     new_bytes = {f.id for f in plan.files if f.new_sha256 and f.new_sha256 != f.old_sha256}
+    volatile_ids = {f.id for f in plan.files if f.volatile}
+    for res in manifest.results:
+        if res.locator is not None and res.artifact_id in volatile_ids:
+            plan.notes.append(
+                f"{res.id}: source is volatile, so its value was left as is; "
+                "use --no-volatile to record its current digest and result value"
+            )
     _reread_values(loaded, raw, new_bytes, plan)
     accepted = {f.id for f in plan.changed_files} | {v.result_id for v in plan.values}
     if accepted:

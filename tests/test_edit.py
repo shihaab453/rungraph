@@ -74,7 +74,7 @@ def test_volatile_ignores_a_stale_recorded_digest(experiment):
     assert codes(experiment) == []
 
 
-def test_volatile_metrics_still_check_recorded_result_values(experiment):
+def test_volatile_metrics_still_check_recorded_result_values(experiment, capsys):
     doc = read_doc(experiment)
     artifact(doc, "tuned-metrics")["volatile"] = True
     write_doc(experiment, doc)
@@ -83,6 +83,9 @@ def test_volatile_metrics_still_check_recorded_result_values(experiment):
     found = codes(experiment)
     assert "result-value-mismatch" in found
     assert "claim-at-risk" in found
+    assert main(["rehash", str(experiment), "tuned-metrics"]) == 0
+    assert "source is volatile, so its value was left as is" in capsys.readouterr().out
+    assert read_doc(experiment)["results"][1]["value"] == 1.0
 
 
 def test_manifests_without_the_field_still_load_and_are_written_without_it(experiment, tmp_path, capsys):
