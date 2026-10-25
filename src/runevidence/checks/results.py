@@ -41,6 +41,10 @@ def values_match(recorded: Any, actual: Any) -> bool:
     if isinstance(recorded, bool) or isinstance(actual, bool):
         return recorded is actual
     if isinstance(recorded, numeric) and isinstance(actual, numeric):
+        # A diverged run legitimately records NaN, and NaN != NaN in IEEE
+        # floats; recording it faithfully must not look like tampering.
+        if math.isnan(recorded) or math.isnan(actual):
+            return math.isnan(recorded) and math.isnan(actual)
         return math.isclose(recorded, actual, rel_tol=1e-9, abs_tol=1e-12)
     return recorded == actual
 

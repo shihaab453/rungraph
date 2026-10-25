@@ -1,0 +1,5 @@
+{"epoch": 1, "train_loss": 14162.830734, "val_rmse": 243.977461}
+{"epoch": 2, "train_loss": 6788608.079123, "val_rmse": 124346616.85223}
+{"epoch": 3, "train_loss": 1.543460464067147e+41, "val_rmse": 4.343313979139318e+59}
+{"epoch": 4, "train_loss": Infinity, "val_rmse": Infinity}
+{"epoch": 5, "train_loss": NaN, "val_rmse": NaN}

@@ -1,0 +1,5 @@
+2026-10-25T18:12:38 start learning_rate_init=0.001
+2026-10-25T18:12:38 epoch 10 val_rmse 46.7449
+2026-10-25T18:12:38 epoch 20 val_rmse 45.0106
+2026-10-25T18:12:38 epoch 30 val_rmse 44.9394
+2026-10-25T18:12:38 epoch 40 val_rmse 44.6200

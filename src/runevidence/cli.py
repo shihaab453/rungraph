@@ -20,7 +20,7 @@ from .adapters import available_adapters, get_adapter
 from .adapters.generic import slug
 from .checks import EXIT_INVALID, EXIT_OK, Report, run_checks
 from .manifest import ManifestLoadError, load_manifest, save_manifest
-from .models import BACKUP_FILENAME, MANIFEST_FILENAME, json_schema
+from .models import BACKUP_FILENAME, MANIFEST_FILENAME, Manifest, json_schema
 from .report import format_findings, format_overview, to_json
 
 
@@ -88,7 +88,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     discovery = adapter.discover(root)
     manifest = adapter.extract(root, discovery, project_id=args.id or slug(name).lower(), project_name=name)
     if out.exists():
-        _backup_existing(out)
+        _backup_existing(out, manifest)
     save_manifest(manifest, out)
     print(
         f"Wrote {out}\n"
@@ -99,24 +99,63 @@ def cmd_init(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _backup_existing(out: Path) -> None:
-    """``init --force`` regenerates from disk, which drops hand-written
-    results, claims and relationships. Keep the old file so nothing is lost."""
+def _backup_existing(out: Path, new: Manifest) -> None:
+    """``init --force`` regenerates from disk, which drops everything written
+    by hand. Keep the old file and say exactly what the new one lacks."""
     backup = out.with_name(BACKUP_FILENAME)
     backup.write_bytes(out.read_bytes())
+    print(f"Saved the previous manifest to {backup}")
     try:
         old = load_manifest(out).manifest
-        dropped = [
-            (len(old.results), "result"),
-            (len(old.evidence), "claim"),
-            (len(old.relationships), "relationship"),
-        ]
-        lost = ", ".join(f"{n} {word}{'' if n == 1 else 's'}" for n, word in dropped if n)
     except ManifestLoadError:
-        lost = ""
-    print(f"Saved the previous manifest to {backup}")
+        return
+    lost, renamed = _lost_on_regenerate(old, new)
     if lost:
-        print(f"  WARNING: the new manifest does not contain its {lost}; copy them back from the backup.")
+        print(f"  WARNING: the new manifest does not contain its {', '.join(lost)}; copy them back from the backup.")
+    if renamed:
+        examples = ", ".join(f"{a!r} is now {b!r}" for a, b in renamed[:3])
+        print(f"  NOTE: {_count(len(renamed), 'artifact')} got a new ID ({examples}); update references when copying back.")
+
+
+def _count(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _changed(old: object, new: object, fields: tuple[str, ...]) -> list[str]:
+    """Fields set on ``old`` that ``new`` does not carry over."""
+    return [f for f in fields if getattr(old, f) and getattr(old, f) != getattr(new, f, None)]
+
+
+def _lost_on_regenerate(old: Manifest, new: Manifest) -> tuple[list[str], list[tuple[str, str]]]:
+    """What a regenerated manifest lacks compared with the hand-edited one,
+    plus artifacts whose ID changed (references to them would dangle)."""
+    new_runs = {r.id: r for r in new.runs}
+    new_arts = {a.path: a for a in new.artifacts}
+    runs_lost = sum(r.id not in new_runs for r in old.runs)
+    runs_edited = sum(
+        bool(_changed(r, new_runs[r.id], ("name", "started_at", "params", "metadata")))
+        for r in old.runs
+        if r.id in new_runs
+    )
+    annotated, renamed = 0, []
+    for a in old.artifacts:
+        b = new_arts.get(a.path)
+        if b is None:
+            continue
+        annotated += bool(_changed(a, b, ("run_id", "kind", "metadata")))
+        if a.id != b.id:
+            renamed.append((a.id, b.id))
+    project = _changed(old.project, new.project, ("description", "tags", "metadata"))
+    lost = [
+        _count(len(old.results), "result") if old.results else "",
+        _count(len(old.evidence), "claim") if old.evidence else "",
+        _count(len(old.relationships), "relationship") if old.relationships else "",
+        _count(runs_lost, "run") if runs_lost else "",
+        f"name/params/metadata on {_count(runs_edited, 'run')}" if runs_edited else "",
+        f"run_id/kind/metadata on {_count(annotated, 'artifact')}" if annotated else "",
+        f"project {'/'.join(project)}" if project else "",
+    ]
+    return [item for item in lost if item], renamed
 
 
 def cmd_schema(args: argparse.Namespace) -> int:

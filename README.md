@@ -156,6 +156,11 @@ metrics), see `examples/dogfood-sklearn/` and its write-up in
 `model.pkl` files are pickles: RunEvidence only hashes them, and you should
 never unpickle files you did not create yourself.
 
+A second worked example, `examples/dogfood-mlp-sweep/`, uses a different
+layout: a preprocessing stage feeding a Hydra-style learning-rate sweep
+(`multirun/<date>/<time>/<job>/`) with per-epoch checkpoints and one
+diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](docs/dogfood-mlp-sweep-20261025.md).
+
 ---
 
 ## Commands
@@ -218,8 +223,8 @@ All IDs share one namespace. Unknown fields are rejected (so a typo like
 | `conflicting-evidence` | error | A claim both supports and contradicts the same thing; or one run reports two values for one metric. |
 | `derivation-cycle` | error | `derived_from` loops. |
 | `unsupported-claim` | warning / error | A claim cites nothing; or none of its citations are valid. |
-| `claim-at-risk` | error | A claim depends on a result, file or run input that is missing or changed. |
-| `result-value-mismatch` | error | Recorded value differs from the value at its locator in the file. |
+| `claim-at-risk` | error | A claim depends on a result, file or run input that is missing or changed. Lineage is followed upstream (`derived_from`, `input_to`, producing runs), so raw data two steps back counts; indirect causes are shown as `id (via ...)`. |
+| `result-value-mismatch` | error | Recorded value differs from the value at its locator in the file. `NaN` matches `NaN`, so a diverged run can be recorded faithfully. |
 | `result-unverifiable` | warning | A locator cannot be checked (not JSON, not found, no artifact). |
 
 ## Adapters

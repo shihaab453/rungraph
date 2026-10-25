@@ -1,0 +1,54 @@
+{
+  "sweep": {
+    "learning_rate_init": [
+      0.0003,
+      0.001,
+      0.01
+    ]
+  },
+  "best_job": 1,
+  "jobs": [
+    {
+      "job": 0,
+      "learning_rate_init": 0.0003,
+      "status": "completed",
+      "best_epoch": 24,
+      "val": {
+        "rmse": 44.856
+      },
+      "test": {
+        "rmse": 51.1836,
+        "n": 88
+      },
+      "final_train_loss": 1401.2554
+    },
+    {
+      "job": 1,
+      "learning_rate_init": 0.001,
+      "status": "completed",
+      "best_epoch": 40,
+      "val": {
+        "rmse": 44.62
+      },
+      "test": {
+        "rmse": 50.9965,
+        "n": 88
+      },
+      "final_train_loss": 1318.0961
+    },
+    {
+      "job": 2,
+      "learning_rate_init": 0.01,
+      "status": "diverged",
+      "best_epoch": 1,
+      "val": {
+        "rmse": 243.9775
+      },
+      "test": {
+        "rmse": 213.8094,
+        "n": 88
+      },
+      "final_train_loss": NaN
+    }
+  ]
+}

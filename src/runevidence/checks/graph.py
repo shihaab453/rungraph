@@ -244,8 +244,8 @@ def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
     reported_in: dict[str, str] = {e.source: e.target for e in by_type[T.reported_in]}
 
     def foundations(target: str) -> set[str]:
-        """Ids whose integrity the target depends on: the thing itself, the
-        file a result was read from, and the inputs of the run behind it."""
+        """Ids the target directly depends on: the thing itself, the file a
+        result was read from, and the inputs of the run behind it."""
         kind = kinds.get(target)
         if kind == ARTIFACT:
             return {target}
@@ -260,6 +260,39 @@ def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
         if kind == RUN:
             return produced_by_run.get(target, set()) | inputs_of_run.get(target, set())
         return set()
+
+    def upstream_of(node: str) -> list[str]:
+        """One step back along the recorded lineage."""
+        kind = kinds.get(node)
+        out: set[str] = set()
+        if kind == RESULT and node in reported_in:
+            out.add(reported_in[node])
+        if kind in (RESULT, ARTIFACT) and node in producer:
+            out.add(producer[node])
+        if kind in (ARTIFACT, RUN):
+            out |= derived.get(node, set())
+        if kind == RUN:
+            out |= inputs_of_run.get(node, set())
+        return sorted(out)
+
+    def lineage(cited: set[str]) -> dict[str, list[str]]:
+        """Everything the cited ids transitively rest on, each mapped to the
+        chain of ids that leads to it. A raw dataset two preprocessing steps
+        upstream of a result still puts a claim about that result at risk."""
+        chains: dict[str, list[str]] = {}
+        queue = []
+        for target in sorted(cited):
+            for dep in sorted(foundations(target)):
+                if dep not in chains:
+                    chains[dep] = [target] if dep != target else []
+                    queue.append(dep)
+        while queue:
+            node = queue.pop(0)
+            for dep in upstream_of(node):
+                if dep not in chains:  # also stops derivation cycles
+                    chains[dep] = chains[node] + [node]
+                    queue.append(dep)
+        return chains
 
     for ev in manifest.evidence:
         if not ev.supports and not ev.contradicts:
@@ -293,10 +326,15 @@ def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
                     hint="Every ID in 'supports' is unknown or of the wrong kind (see errors above).",
                 )
             )
-        at_risk = sorted(
-            {f for t in supports[ev.id] for f in foundations(t)} & broken
-        )
+        direct = {f for t in supports[ev.id] for f in foundations(t)}
+        chains = lineage(supports[ev.id])
+        at_risk = sorted(set(chains) & broken)
         if at_risk:
+            # Direct dependencies print bare; upstream ones show how they are reached.
+            described = [
+                ident if ident in direct else f"{ident} (via {' -> '.join(chains[ident])})"
+                for ident in at_risk
+            ]
             add(
                 Finding(
                     code=Code.claim_at_risk,
@@ -304,7 +342,7 @@ def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
                     subject=ev.id,
                     message=(
                         f"Claim {ev.id!r} rests on evidence that is missing or changed: "
-                        f"{', '.join(at_risk)}"
+                        f"{', '.join(described)}"
                     ),
                     hint=f"Claim: {ev.claim!r}",
                 )
