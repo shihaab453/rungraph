@@ -4,7 +4,7 @@ Exit codes (stable, safe to use in CI):
   0  no errors (warnings are allowed unless --strict)
   1  the evidence has problems: errors found, or warnings with --strict
   2  could not check at all: manifest missing, unreadable or schema-invalid,
-     bad arguments, or init refused to overwrite
+     bad arguments, or init refused to overwrite or could not read the folder
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from . import __version__
-from .adapters import available_adapters, get_adapter
+from .adapters import AdapterError, available_adapters, get_adapter
 from .adapters.generic import slug
 from .checks import EXIT_INVALID, EXIT_OK, Report, run_checks
 from .manifest import ManifestLoadError, load_manifest, save_manifest
@@ -85,8 +85,12 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"ERROR: {exc.args[0]}")
         return EXIT_INVALID
     name = args.name or root.name
-    discovery = adapter.discover(root)
-    manifest = adapter.extract(root, discovery, project_id=args.id or slug(name).lower(), project_name=name)
+    try:
+        discovery = adapter.discover(root)
+        manifest = adapter.extract(root, discovery, project_id=args.id or slug(name).lower(), project_name=name)
+    except AdapterError as exc:
+        print(f"ERROR: adapter {adapter.name!r} cannot read {root}: {exc}")
+        return EXIT_INVALID
     if out.exists():
         _backup_existing(out, manifest)
     save_manifest(manifest, out)

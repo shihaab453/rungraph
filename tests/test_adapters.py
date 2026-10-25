@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 import pytest
 
-from runevidence.adapters import get_adapter
+from runevidence.adapters import BUILTIN, AdapterError, get_adapter
 from runevidence.adapters.base import Adapter, Discovery
 from runevidence.adapters.generic import GenericAdapter
-from runevidence.models import Manifest
+from runevidence.cli import main
+from runevidence.models import MANIFEST_FILENAME, Manifest
 
 
 def write(root: Path, rel: str, data: bytes = b"x\n") -> Path:
@@ -101,3 +103,33 @@ class _IncompleteAdapter(Adapter):
 def test_adapter_subclass_without_extract_cannot_be_instantiated():
     with pytest.raises(TypeError, match="extract"):
         _IncompleteAdapter()
+
+
+class _RefusingAdapter(Adapter):
+    name = "refusing"
+
+    def discover(self, root: Path) -> Discovery:
+        return Discovery(root=root)
+
+    def extract(self, root: Path, discovery: Discovery, *, project_id: str, project_name: str) -> Manifest:
+        raise AdapterError("expected a tool folder here")
+
+
+def test_init_reports_adapter_error_exits_two_and_writes_nothing(tmp_path, capsys, monkeypatch):
+    monkeypatch.setitem(BUILTIN, _RefusingAdapter.name, _RefusingAdapter)
+    write(tmp_path, "data.csv")
+
+    assert main(["init", str(tmp_path), "--adapter", "refusing"]) == 2
+    out = capsys.readouterr().out
+    assert "adapter 'refusing' cannot read" in out
+    assert "expected a tool folder here" in out
+    assert not (tmp_path / MANIFEST_FILENAME).exists()
+
+
+def test_core_never_imports_tool_libraries():
+    """Tool support lives in separate adapter packages (e.g.
+    packages/runevidence-hydra), so core stays dependency-light."""
+    pattern = re.compile(r"^\s*(import|from)\s+(yaml|hydra|omegaconf|mlflow|wandb|tensorboard)\b", re.MULTILINE)
+    src = Path(__file__).resolve().parents[1] / "src" / "runevidence"
+    offenders = [p.name for p in src.rglob("*.py") if pattern.search(p.read_text(encoding="utf-8"))]
+    assert offenders == []

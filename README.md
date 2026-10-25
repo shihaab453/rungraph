@@ -134,7 +134,8 @@ runevidence init path/to/my-experiment --name "My experiment"
 ```
 
 The built-in `generic` adapter hashes every file and turns each
-`runs/<name>/` subfolder into a run. It does not guess which numbers or claims
+`runs/<name>/` subfolder into a run (for Hydra's `outputs/` and `multirun/`
+folders, use the [Hydra adapter](#adapters) instead). It does not guess which numbers or claims
 matter. Add those yourself to the generated `runevidence.json`:
 
 ```json
@@ -230,9 +231,21 @@ All IDs share one namespace. Unknown fields are rejected (so a typo like
 ## Adapters
 
 An adapter reads a folder written by some tool and produces a manifest, in two
-read-only steps: `discover(root)` then `extract(root, discovery)`. Only the
-`generic` adapter ships today. See [docs/adapters.md](docs/adapters.md) to
-write one for your tool and publish it as a separate package.
+read-only steps: `discover(root)` then `extract(root, discovery)`. The
+`generic` adapter is built in. Tool adapters are separate packages, so core
+stays free of tool dependencies:
+
+- **`hydra`** ([packages/runevidence-hydra](packages/runevidence-hydra)):
+  every folder holding a `.hydra/` subfolder becomes a run, at any depth, with
+  the job's composed config as `params` and its overrides in `metadata`.
+  Hydra itself is not needed.
+
+  ```bash
+  pip install ./packages/runevidence-hydra
+  runevidence init --adapter hydra path/to/project
+  ```
+
+See [docs/adapters.md](docs/adapters.md) to write one for your tool.
 
 ## Non-goals (V1)
 
@@ -243,18 +256,18 @@ launching or GPU use. No network access. No loading of model weights.
 
 RunEvidence is the first layer of **RunGraph**. Planned next, roughly in order:
 directory artifacts and glob patterns, `runevidence rehash` for intended
-changes, YAML manifests, adapters for common tools (MLflow file stores,
+changes, YAML manifests, more tool adapters (MLflow file stores,
 TensorBoard logs, plain CSV logs), then RunGraph proper: lineage across runs
 and comparability checks (did both runs use the same data, split and code?).
 
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev]" -e ./packages/runevidence-hydra
 python -m pytest
 ```
 
-Tests run offline in well under a second. Contributions are welcome: see
+Tests run offline in a few seconds. Contributions are welcome: see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License

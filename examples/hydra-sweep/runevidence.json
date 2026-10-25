@@ -1,0 +1,309 @@
+{
+  "schema_version": "0.1",
+  "project": {
+    "id": "hydra-sweep-example",
+    "name": "Hydra sweep example",
+    "description": null,
+    "tags": [],
+    "metadata": {}
+  },
+  "runs": [
+    {
+      "id": "run-multirun-2026-10-25-19-16-16-0",
+      "name": "multirun/2026-10-25/19-16-16/0",
+      "started_at": "2026-10-25T19:16:16",
+      "params": {
+        "optimizer": {
+          "name": "sgd",
+          "lr": 0.05,
+          "momentum": 0.0
+        },
+        "data": {
+          "path": "data/points.csv"
+        },
+        "epochs": 40,
+        "seed": 0
+      },
+      "metadata": {
+        "hydra": {
+          "overrides": [
+            "optimizer=sgd"
+          ],
+          "job_name": "train",
+          "job_num": 0,
+          "override_dirname": "optimizer=sgd",
+          "mode": "MULTIRUN",
+          "version": "1.3.8",
+          "choices": {
+            "optimizer": "sgd"
+          },
+          "sweep_dir": "multirun/2026-10-25/19-16-16"
+        }
+      }
+    },
+    {
+      "id": "run-multirun-2026-10-25-19-16-16-1",
+      "name": "multirun/2026-10-25/19-16-16/1",
+      "started_at": "2026-10-25T19:16:16",
+      "params": {
+        "optimizer": {
+          "name": "momentum",
+          "lr": 0.05,
+          "momentum": 0.9
+        },
+        "data": {
+          "path": "data/points.csv"
+        },
+        "epochs": 40,
+        "seed": 0
+      },
+      "metadata": {
+        "hydra": {
+          "overrides": [
+            "optimizer=momentum"
+          ],
+          "job_name": "train",
+          "job_num": 1,
+          "override_dirname": "optimizer=momentum",
+          "mode": "MULTIRUN",
+          "version": "1.3.8",
+          "choices": {
+            "optimizer": "momentum"
+          },
+          "sweep_dir": "multirun/2026-10-25/19-16-16"
+        }
+      }
+    },
+    {
+      "id": "run-outputs-2026-10-25-19-16-14",
+      "name": "outputs/2026-10-25/19-16-14",
+      "started_at": "2026-10-25T19:16:14",
+      "params": {
+        "optimizer": {
+          "name": "sgd",
+          "lr": 0.05,
+          "momentum": 0.0
+        },
+        "data": {
+          "path": "data/points.csv"
+        },
+        "epochs": 40,
+        "seed": 0
+      },
+      "metadata": {
+        "hydra": {
+          "overrides": [],
+          "job_name": "train",
+          "mode": "RUN",
+          "version": "1.3.8",
+          "choices": {
+            "optimizer": "sgd"
+          }
+        }
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "README.md",
+      "path": "README.md",
+      "sha256": "cdebfc89cfeb15aabee4afdb8b9e112cd0176396fbcf4fefb762c9a316aca371",
+      "size_bytes": 1023,
+      "kind": null,
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "train.py",
+      "path": "train.py",
+      "sha256": "d0e9dd0a431ad77a670ee3de990184c1520359b55693b3e0fd6814f498f51c2c",
+      "size_bytes": 2026,
+      "kind": null,
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "conf-config.yaml",
+      "path": "conf/config.yaml",
+      "sha256": "e2c1d298d978094ab6de0fa1ed43ed9b6ddbd1aa551b9d8602f9602ee5b379cc",
+      "size_bytes": 90,
+      "kind": null,
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "conf-optimizer-momentum.yaml",
+      "path": "conf/optimizer/momentum.yaml",
+      "sha256": "75d25082f879df21dba93b58ec2a5d32fa22429b1a57c18a5c6674d09c992d58",
+      "size_bytes": 38,
+      "kind": null,
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "conf-optimizer-sgd.yaml",
+      "path": "conf/optimizer/sgd.yaml",
+      "sha256": "6ebdcc1fc2f93792cf7c855147ed7f6e96e17ff3245e6a537ac8cb1074b168a7",
+      "size_bytes": 33,
+      "kind": null,
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "data-points.csv",
+      "path": "data/points.csv",
+      "sha256": "5e24874bb65f3b2f08370c80158b3d95734a6abc0c9bd254d5276012c59cc9f9",
+      "size_bytes": 124,
+      "kind": null,
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-19-16-16-multirun.yaml",
+      "path": "multirun/2026-10-25/19-16-16/multirun.yaml",
+      "sha256": "1ba7a119ba497f79c77aecb0b586c7b583c3abdb7af61179f814a4d7e8999d23",
+      "size_bytes": 3523,
+      "kind": "config",
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-19-16-16-0-metrics.json",
+      "path": "multirun/2026-10-25/19-16-16/0/metrics.json",
+      "sha256": "a12ba966f750ca473519de3bbeebaf961f086c5a5737acab95a9a449e2c1f4fc",
+      "size_bytes": 72,
+      "kind": null,
+      "run_id": "run-multirun-2026-10-25-19-16-16-0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-19-16-16-0-train.log",
+      "path": "multirun/2026-10-25/19-16-16/0/train.log",
+      "sha256": "99d7421e6ddea823d46ed6ee5a1c72d96a7b1420b28a6ef264db9279bacc6ea3",
+      "size_bytes": 332,
+      "kind": "log",
+      "run_id": "run-multirun-2026-10-25-19-16-16-0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-19-16-16-0-.hydra-config.yaml",
+      "path": "multirun/2026-10-25/19-16-16/0/.hydra/config.yaml",
+      "sha256": "8d33dc0943c172934b72d8e0ca69839352bde278da8787ca908ef420041c8e1d",
+      "size_bytes": 107,
+      "kind": "config",
+      "run_id": "run-multirun-2026-10-25-19-16-16-0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-19-16-16-0-.hydra-hydra.yaml",
+      "path": "multirun/2026-10-25/19-16-16/0/.hydra/hydra.yaml",
+      "sha256": "2c1bf7d982efa3e6155563fb8b29d3f9c0bf1c2ee76dc9889674db42cb876ef7",
+      "size_bytes": 3443,
+      "kind": "config",
+      "run_id": "run-multirun-2026-10-25-19-16-16-0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-19-16-16-0-.hydra-overrides.yaml",
+      "path": "multirun/2026-10-25/19-16-16/0/.hydra/overrides.yaml",
+      "sha256": "cc5ff34b21f9bd5407a8162187a609a90ce8f7d8b6c0f43b579cbd128542494b",
+      "size_bytes": 17,
+      "kind": "config",
+      "run_id": "run-multirun-2026-10-25-19-16-16-0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-19-16-16-1-metrics.json",
+      "path": "multirun/2026-10-25/19-16-16/1/metrics.json",
+      "sha256": "fce7ff906cfa8664b7850808d69e2544a1aeab6bdbbba2f13f1fa5109b5f445c",
+      "size_bytes": 72,
+      "kind": null,
+      "run_id": "run-multirun-2026-10-25-19-16-16-1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-19-16-16-1-train.log",
+      "path": "multirun/2026-10-25/19-16-16/1/train.log",
+      "sha256": "b3c71e31a6607b701c9a270485347f2b0ba45b2b40b4e54ccef3eb3dbe434797",
+      "size_bytes": 332,
+      "kind": "log",
+      "run_id": "run-multirun-2026-10-25-19-16-16-1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-19-16-16-1-.hydra-config.yaml",
+      "path": "multirun/2026-10-25/19-16-16/1/.hydra/config.yaml",
+      "sha256": "f003c9400e2556e048dff218a299d64b8893a847f9032e66d7448b5555d40a35",
+      "size_bytes": 112,
+      "kind": "config",
+      "run_id": "run-multirun-2026-10-25-19-16-16-1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-19-16-16-1-.hydra-hydra.yaml",
+      "path": "multirun/2026-10-25/19-16-16/1/.hydra/hydra.yaml",
+      "sha256": "32f9c36bbbdca62c676c759ddde885a6e345b5c8f57c15765d314ba8eeae699e",
+      "size_bytes": 3458,
+      "kind": "config",
+      "run_id": "run-multirun-2026-10-25-19-16-16-1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-19-16-16-1-.hydra-overrides.yaml",
+      "path": "multirun/2026-10-25/19-16-16/1/.hydra/overrides.yaml",
+      "sha256": "06f92c9838598aad82318b37a511517f6542fe4c3d122a42ae49ae522757743b",
+      "size_bytes": 22,
+      "kind": "config",
+      "run_id": "run-multirun-2026-10-25-19-16-16-1",
+      "metadata": {}
+    },
+    {
+      "id": "outputs-2026-10-25-19-16-14-metrics.json",
+      "path": "outputs/2026-10-25/19-16-14/metrics.json",
+      "sha256": "a12ba966f750ca473519de3bbeebaf961f086c5a5737acab95a9a449e2c1f4fc",
+      "size_bytes": 72,
+      "kind": null,
+      "run_id": "run-outputs-2026-10-25-19-16-14",
+      "metadata": {}
+    },
+    {
+      "id": "outputs-2026-10-25-19-16-14-train.log",
+      "path": "outputs/2026-10-25/19-16-14/train.log",
+      "sha256": "985dd78b8b8ea2bf9317178cde64e974d75eca7206b23487541cea9ff75c8d00",
+      "size_bytes": 332,
+      "kind": "log",
+      "run_id": "run-outputs-2026-10-25-19-16-14",
+      "metadata": {}
+    },
+    {
+      "id": "outputs-2026-10-25-19-16-14-.hydra-config.yaml",
+      "path": "outputs/2026-10-25/19-16-14/.hydra/config.yaml",
+      "sha256": "8d33dc0943c172934b72d8e0ca69839352bde278da8787ca908ef420041c8e1d",
+      "size_bytes": 107,
+      "kind": "config",
+      "run_id": "run-outputs-2026-10-25-19-16-14",
+      "metadata": {}
+    },
+    {
+      "id": "outputs-2026-10-25-19-16-14-.hydra-hydra.yaml",
+      "path": "outputs/2026-10-25/19-16-14/.hydra/hydra.yaml",
+      "sha256": "ca3f7b08e2443026c1f7986c6ccc9523bb6438cfc9b83ceb1a7ae098376c9fcb",
+      "size_bytes": 3403,
+      "kind": "config",
+      "run_id": "run-outputs-2026-10-25-19-16-14",
+      "metadata": {}
+    },
+    {
+      "id": "outputs-2026-10-25-19-16-14-.hydra-overrides.yaml",
+      "path": "outputs/2026-10-25/19-16-14/.hydra/overrides.yaml",
+      "sha256": "a5338d955b09046ec0b16f3a9625b7955c763aae07dc722e474e6078745f932f",
+      "size_bytes": 4,
+      "kind": "config",
+      "run_id": "run-outputs-2026-10-25-19-16-14",
+      "metadata": {}
+    }
+  ],
+  "results": [],
+  "evidence": [],
+  "relationships": []
+}

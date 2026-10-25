@@ -51,5 +51,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev]"
 
+      # Adapter packages live in packages/. Installed after core, so pip
+      # uses this checkout's runevidence instead of looking for one online.
+      - name: Install adapter packages
+        run: python -m pip install ./packages/runevidence-hydra
+
+      # The adapter's tests skip themselves when it is not installed. Fail
+      # here instead, so a broken install cannot hide behind a green run.
+      - name: Check adapters are registered
+        run: python -c "from runevidence.adapters import get_adapter; get_adapter('hydra')"
+
       - name: Run tests
         run: python -m pytest

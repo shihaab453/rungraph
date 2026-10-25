@@ -5,10 +5,10 @@ from __future__ import annotations
 
 from importlib.metadata import entry_points
 
-from .base import Adapter, Discovery
+from .base import Adapter, AdapterError, Discovery
 from .generic import GenericAdapter
 
-__all__ = ["Adapter", "Discovery", "GenericAdapter", "available_adapters", "get_adapter"]
+__all__ = ["Adapter", "AdapterError", "Discovery", "GenericAdapter", "available_adapters", "get_adapter"]
 
 ENTRY_POINT_GROUP = "runevidence.adapters"
 BUILTIN: dict[str, type[Adapter]] = {GenericAdapter.name: GenericAdapter}

@@ -1,0 +1,8 @@
+optimizer:
+  name: momentum
+  lr: 0.05
+  momentum: 0.9
+data:
+  path: data/points.csv
+epochs: 40
+seed: 0

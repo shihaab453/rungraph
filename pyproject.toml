@@ -35,5 +35,7 @@ runevidence = "runevidence.cli:main"
 packages = ["src/runevidence"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# Adapter packages keep their tests next to them; they skip themselves
+# unless that package is installed.
+testpaths = ["tests", "packages/runevidence-hydra/tests"]
 addopts = "-ra"

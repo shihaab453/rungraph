@@ -17,6 +17,11 @@ Rules every adapter must follow:
   ``pickle.load``, ``yaml.load`` without a safe loader, ``exec``). Hash raw
   bytes; parse only plain data formats such as JSON or CSV.
 * Paths in the returned manifest are relative to ``root`` with forward slashes.
+
+If the folder is not something the adapter can read (for example, none of
+the run folders it looks for exist), raise ``AdapterError`` with a message
+saying what was expected. ``runevidence init`` prints it and exits 2 without
+writing anything.
 """
 
 from __future__ import annotations
@@ -27,6 +32,10 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ..models import Manifest
+
+
+class AdapterError(Exception):
+    """The folder is not one this adapter can turn into a manifest."""
 
 
 @dataclass
