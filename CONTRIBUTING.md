@@ -10,6 +10,7 @@ python -m venv .venv
 # activate it (Windows: .venv\Scripts\Activate.ps1, macOS/Linux: source .venv/bin/activate)
 pip install -e ".[dev]"
 pip install -e ./packages/runevidence-hydra   # adapter package; its tests skip without it
+pip install -e ./packages/runevidence-mlflow  # local MLflow file-store adapter
 python -m pytest
 ```
 
@@ -26,7 +27,7 @@ a change the same way before pushing:
 ```bash
 python -m venv /tmp/ci-venv          # any new, empty folder
 /tmp/ci-venv/bin/python -m pip install ".[dev]"   # Windows: \tmp\ci-venv\Scripts\python.exe
-/tmp/ci-venv/bin/python -m pip install ./packages/runevidence-hydra
+/tmp/ci-venv/bin/python -m pip install ./packages/runevidence-hydra ./packages/runevidence-mlflow
 /tmp/ci-venv/bin/python -m pytest
 ```
 

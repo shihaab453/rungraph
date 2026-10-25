@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "runevidence-mlflow"
+version = "0.1.1"
+description = "RunEvidence adapter for local MLflow file stores (mlruns/ directories)."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Shihaab Alam" }]
+keywords = ["machine-learning", "reproducibility", "provenance", "mlflow", "runevidence"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Reads MLflow's on-disk format; the MLflow library itself is not needed.
+dependencies = ["runevidence>=0.1.1,<0.2.0", "PyYAML>=6"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+# This line is what makes `runevidence init --adapter mlflow` work: RunEvidence
+# looks up adapters in the "runevidence.adapters" entry point group.
+[project.entry-points."runevidence.adapters"]
+mlflow = "runevidence_mlflow:MlflowAdapter"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/runevidence_mlflow"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

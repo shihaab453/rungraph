@@ -13,11 +13,12 @@ RunEvidence checks an ML experiment folder against a small manifest
 - which files **changed** since you recorded them (sha256), and lets you accept the changes you meant (`rehash`),
 - which references **break when the folder is moved** (absolute paths, wrong case, paths outside the folder),
 - which **claims** ("tuning improves accuracy") rest on results that are missing, changed, contradictory or not cited at all,
-- which recorded metric values **no longer match** the metrics file they came from.
+- which recorded metric values with JSON locators **no longer match** their source file.
 
 It never trains, never launches jobs, never phones home, and never loads model
-weights: files are hashed as raw bytes, and the only thing it ever parses is
-JSON metrics. It works with any ML stack because it only looks at files.
+weights: files are hashed as raw bytes. Core checks metric values in JSON;
+optional adapters also read plain configuration and metric logs. It works
+with any ML stack because it only looks at files.
 
 RunEvidence is V1 of the **RunGraph** project, which will add lineage and
 comparability checks across runs. See [Roadmap](#roadmap).
@@ -61,11 +62,11 @@ If you only want the command, install it straight from GitHub without cloning:
 pip install "git+https://github.com/shihaab453/rungraph.git"
 ```
 
-RunEvidence is licensed under [Apache-2.0](LICENSE). The optional Hydra adapter
-is a separate package, [packages/runevidence-hydra](packages/runevidence-hydra).
-From the repository root, install core and the adapter together with
-`pip install -e . -e ./packages/runevidence-hydra`;
-see [Adapters](#adapters) for usage.
+RunEvidence is licensed under [Apache-2.0](LICENSE). The optional Hydra and
+MLflow file-store adapters are separate packages. From the repository root,
+install core and an adapter together, for example
+`pip install -e . -e ./packages/runevidence-mlflow`;
+see [Adapters](#adapters) for both packages and usage.
 
 ### 2. Inspect the example experiment (1 minute)
 
@@ -317,7 +318,22 @@ stays free of tool dependencies:
   runevidence init --adapter hydra path/to/project
   ```
 
-See [docs/adapters.md](docs/adapters.md) to write one for your tool.
+- **`mlflow`** ([packages/runevidence-mlflow](packages/runevidence-mlflow)):
+  reads local `mlruns/` file stores into experiments, runs, string params,
+  hashed artifacts and metric results. MLflow itself is not needed.
+
+  ```bash
+  # From the repository root, install both local packages together.
+  pip install -e . -e ./packages/runevidence-mlflow
+  runevidence init --adapter mlflow path/to/mlruns
+  runevidence validate path/to/mlruns
+  ```
+
+  File-store only: no tracking server, database or remote artifacts. Metric
+  text files are hash-checked; JSON value locators do not apply to them.
+
+See [docs/adapters.md](docs/adapters.md) for format details, limits and how to
+write an adapter for your tool.
 
 ## Non-goals (V1)
 
@@ -327,14 +343,14 @@ launching or GPU use. No network access. No loading of model weights.
 ## Roadmap
 
 RunEvidence is the first layer of **RunGraph**. Planned next, roughly in order:
-directory artifacts, YAML manifests, more tool adapters (MLflow file stores,
-TensorBoard logs, plain CSV logs), then RunGraph proper: lineage across runs
+directory artifacts, YAML manifests, more tool adapters (TensorBoard logs,
+plain CSV logs), then RunGraph proper: lineage across runs
 and comparability checks (did both runs use the same data, split and code?).
 
 ## Development
 
 ```bash
-pip install -e ".[dev]" -e ./packages/runevidence-hydra
+pip install -e ".[dev]" -e ./packages/runevidence-hydra -e ./packages/runevidence-mlflow
 python -m pytest
 ```
 

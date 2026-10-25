@@ -49,7 +49,8 @@ likely pointed at the wrong folder or picked the wrong adapter.
 3. **Never execute or deserialize experiment files.** No `pickle.load`,
    `torch.load`, `joblib.load`, `yaml.load` without `SafeLoader`, `exec`, or
    importing code from the folder. Hash raw bytes with
-   `runevidence.hashing.sha256_file`; parse only plain data (JSON, CSV).
+   `runevidence.hashing.sha256_file`; parse only plain data formats (JSON,
+   CSV, safely loaded YAML, or text logs), using safe parsers.
 4. **Relative POSIX paths** in every `Artifact.path`.
 5. **Unique IDs** across runs, artifacts, results and evidence (one namespace).
 6. **Tool-specific detail goes in `metadata` / `params`**, never in new
@@ -105,10 +106,11 @@ No params, results or claims.
 ### `hydra` (`packages/runevidence-hydra`)
 
 For projects run with [Hydra](https://hydra.cc). Install it next to
-RunEvidence (Hydra itself is not needed, only PyYAML):
+RunEvidence (Hydra itself is not needed, only PyYAML). From the repository
+root, install the local core and adapter together:
 
 ```
-pip install ./packages/runevidence-hydra
+pip install -e . -e ./packages/runevidence-hydra
 runevidence adapters                      # lists "hydra"
 runevidence init --adapter hydra path/to/project
 runevidence validate path/to/project
@@ -156,3 +158,92 @@ Edge cases:
 Example: `examples/hydra-sweep/` is real Hydra 1.3.8 output (one single run,
 one two-job sweep). Its `runevidence.json` is exactly what the adapter
 writes, and a test checks that it still does.
+
+### `mlflow` (`packages/runevidence-mlflow`)
+
+Reads an **existing local MLflow file store**. MLflow itself is not needed;
+the adapter parses plain files and uses PyYAML's safe loader for metadata.
+Package version `0.1.1` follows the core release line and requires
+`runevidence>=0.1.1,<0.2.0`. No package is published to PyPI by this workflow.
+
+From the repository root, install both editable packages together:
+
+```bash
+pip install -e . -e ./packages/runevidence-mlflow
+runevidence adapters                          # lists "mlflow"
+runevidence init --adapter mlflow path/to/mlruns
+runevidence validate path/to/mlruns --strict
+```
+
+For regular installs, install the local core **first**, so the adapter's
+dependency is already satisfied:
+
+```bash
+pip install .
+pip install ./packages/runevidence-mlflow
+```
+
+You can instead point `init` at a project containing `mlruns/`. Paths in the
+manifest are relative to whichever root you choose. The recognized layout is:
+
+```text
+mlruns/
+  <experiment-id>/
+    meta.yaml
+    <run-id>/
+      meta.yaml
+      params/<parameter-name>
+      metrics/<metric-name>
+      tags/<tag-name>
+      artifacts/<logged-files>
+```
+
+How it reads the folder:
+
+- **Experiments and runs:** experiment/run metadata identifies the runs.
+  Experiment details go in `metadata.mlflow`; run metadata records the
+  experiment and original run IDs. A copied `meta.yaml` inside an artifact
+  does not create another run.
+- **Params:** UTF-8 text files under `params/`, kept as strings, including
+  numeric-looking values. Nested keys retain `/` in their names.
+- **Start time:** `start_time` is read as milliseconds since the Unix epoch
+  and converted to UTC.
+- **Results:** one summary per readable metric history under `metrics/`.
+  Rows are `timestamp value step`, or the legacy `timestamp value` format
+  with step zero. The summary uses the greatest `(step, timestamp, value)`,
+  so an out-of-order append does not pick the wrong step. This follows
+  [MLflow's file-store metric selection](https://github.com/mlflow/mlflow/blob/v2.22.2/mlflow/store/tracking/file_store.py).
+  Results link to the hashed metric file. No claims are inferred.
+- **Artifacts:** ordinary files inside the selected root are hashed,
+  including metadata, params, metric histories and logged artifacts. Files
+  under a recognized run belong to that run. Experiment metadata and
+  project files have no producing run.
+
+Limits and edge cases:
+
+- This supports on-disk file stores only, with no tracking server, database,
+  API calls or network access. `artifact_uri` and `artifact_location` are
+  neither followed nor copied. External artifacts must be copied inside the
+  selected root to be tracked. All symlinks are skipped, including links
+  whose targets are inside the root.
+- Machine-specific metadata such as user IDs, source paths and arbitrary
+  tags is not copied into the manifest. Params remain the values you logged,
+  so check them before sharing a manifest if they contain private paths.
+- `.trash/` is not imported as runs. Files still present there are hashed.
+- No recognized runs: `init` exits 2 and writes nothing. Point it at the
+  file-store root or a project containing `mlruns/`, or use `--adapter generic`.
+  A single experiment folder or run folder is not a supported root.
+- Invalid or unsafe metadata YAML is refused with an adapter error. Nothing
+  is executed. Empty, malformed, non-finite or unsupported metric histories
+  produce no result; their paths are listed in `metadata.mlflow.unreadable`.
+  A bad row invalidates the whole summary. The file bytes are still hashed.
+- Metric logs are plain text. Core value locators support JSON only, so
+  these results have no locator. `validate` detects a changed metric file
+  through its hash, but does not re-read its scalar value. `rehash` accepts
+  the new bytes without refreshing these results. To refresh them, back up
+  your manifest and run `init --adapter mlflow --force`, then restore your
+  hand-written claims and links from the backup.
+
+Example: [examples/mlflow-file-store](../examples/mlflow-file-store) is a
+small synthetic store with two runs. Copy it before running `init` if you
+want to keep the checked-out example untouched.

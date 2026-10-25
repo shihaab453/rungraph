@@ -1,0 +1,2 @@
+Synthetic model card for the baseline run.
+Parameters: optimizer=adam, learning_rate=0.01.
