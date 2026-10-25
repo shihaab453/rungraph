@@ -111,6 +111,18 @@ def test_init_volatile_glob_marks_matching_files(tmp_path, capsys):
     assert main(["validate", str(tmp_path), "--strict"]) == 0
 
 
+def test_init_force_warns_when_regeneration_drops_volatile_flags(tmp_path, capsys):
+    (tmp_path / "train.log").write_bytes(b"log")
+    assert main(["init", str(tmp_path), "--volatile", "*.log"]) == 0
+    before = (tmp_path / MANIFEST).read_bytes()
+    capsys.readouterr()
+
+    assert main(["init", str(tmp_path), "--force"]) == 0
+
+    assert "volatile flag on 1 artifact" in capsys.readouterr().out
+    assert (tmp_path / (MANIFEST + ".bak")).read_bytes() == before
+
+
 # --- rehash ------------------------------------------------------------------
 
 
@@ -296,6 +308,23 @@ def test_add_dry_run_preserves_manifest_and_experiment_files(experiment, monkeyp
     assert "Would add 1 artifact" in capsys.readouterr().out
     after = {p.relative_to(experiment): p.read_bytes() for p in experiment.rglob("*") if p.is_file()}
     assert after == before
+
+
+def test_failed_manifest_replacement_preserves_original_and_removes_staging_file(experiment, monkeypatch, capsys):
+    import runevidence.manifest as manifest_io
+
+    (experiment / "new.txt").write_bytes(b"new evidence")
+    monkeypatch.chdir(experiment)
+    before = (experiment / MANIFEST).read_bytes()
+
+    def refuse_replace(source, destination):
+        raise PermissionError("replacement refused")
+
+    monkeypatch.setattr(manifest_io.os, "replace", refuse_replace)
+    assert main(["add", ".", "new.txt"]) == 2
+    assert "Nothing was written" in capsys.readouterr().out
+    assert (experiment / MANIFEST).read_bytes() == before
+    assert not list(experiment.glob(".runevidence.json.*.tmp"))
 
 
 def test_add_infers_the_run_from_neighbouring_files_and_can_be_overridden(experiment, monkeypatch, capsys):

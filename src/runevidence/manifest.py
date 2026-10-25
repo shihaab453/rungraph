@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -112,7 +114,23 @@ def load_raw(path: Path) -> dict:
 
 
 def save_raw(data: dict, path: Path) -> None:
-    _write(path, dump_raw(data))
+    # Stage a complete edit beside the manifest before replacing it, so a
+    # failed write cannot truncate the user's existing evidence record.
+    text = dump_raw(data)
+    staged = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="\n", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as fh:
+            staged = Path(fh.name)
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(staged, path)
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
 
 
 def _write(path: Path, text: str) -> None:

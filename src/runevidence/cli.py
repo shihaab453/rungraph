@@ -137,12 +137,16 @@ def _edit_error(exc: Exception) -> int:
     return EXIT_INVALID
 
 
-def _finish_edit(args: argparse.Namespace, raw: dict, path: Path) -> None:
+def _finish_edit(args: argparse.Namespace, raw: dict, path: Path) -> int:
     if args.dry_run:
         print("Dry run: nothing was written.")
-        return
-    save_raw(raw, path)
+        return EXIT_OK
+    try:
+        save_raw(raw, path)
+    except OSError as exc:
+        return _edit_error(exc)
     print(f"Wrote {path}\nNext: runevidence validate {args.path}")
+    return EXIT_OK
 
 
 def cmd_rehash(args: argparse.Namespace) -> int:
@@ -192,7 +196,7 @@ def cmd_rehash(args: argparse.Namespace) -> int:
     if plan.claims:
         print(f"Re-read these claims; they rest on what changed: {', '.join(plan.claims)}")
     if changed or plan.values:
-        _finish_edit(args, raw, loaded.path)
+        return _finish_edit(args, raw, loaded.path)
     return EXIT_OK
 
 
@@ -231,8 +235,7 @@ def cmd_add(args: argparse.Namespace) -> int:
         print("Nothing new to add.")
         return EXIT_OK
     print(f"{'Would add' if args.dry_run else 'Added'} {_count(len(plan.added), 'artifact')}")
-    _finish_edit(args, raw, loaded.path)
-    return EXIT_OK
+    return _finish_edit(args, raw, loaded.path)
 
 
 def _backup_existing(out: Path, new: Manifest) -> None:
@@ -274,11 +277,13 @@ def _lost_on_regenerate(old: Manifest, new: Manifest) -> tuple[list[str], list[t
         if r.id in new_runs
     )
     annotated, renamed = 0, []
+    volatile_lost = 0
     for a in old.artifacts:
         b = new_arts.get(a.path)
         if b is None:
             continue
         annotated += bool(_changed(a, b, ("run_id", "kind", "metadata")))
+        volatile_lost += a.volatile and not b.volatile
         if a.id != b.id:
             renamed.append((a.id, b.id))
     project = _changed(old.project, new.project, ("description", "tags", "metadata"))
@@ -289,6 +294,7 @@ def _lost_on_regenerate(old: Manifest, new: Manifest) -> tuple[list[str], list[t
         _count(runs_lost, "run") if runs_lost else "",
         f"name/params/metadata on {_count(runs_edited, 'run')}" if runs_edited else "",
         f"run_id/kind/metadata on {_count(annotated, 'artifact')}" if annotated else "",
+        f"volatile flag on {_count(volatile_lost, 'artifact')}" if volatile_lost else "",
         f"project {'/'.join(project)}" if project else "",
     ]
     return [item for item in lost if item], renamed
