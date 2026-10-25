@@ -2,6 +2,8 @@
 
 # RunEvidence
 
+[![CI](https://github.com/shihaab453/rungraph/actions/workflows/ci.yml/badge.svg?branch=feat/runevidence-mvp)](https://github.com/shihaab453/rungraph/actions/workflows/ci.yml?query=branch%3Afeat%2Frunevidence-mvp)
+
 **Does the evidence in your experiment folder still hold?**
 
 RunEvidence checks an ML experiment folder against a small manifest
@@ -30,7 +32,7 @@ PowerShell (Windows) and bash (macOS/Linux) where they differ.
 ### 1. Install (2 minutes)
 
 ```bash
-git clone <this-repo-url> rungraph
+git clone https://github.com/shihaab453/rungraph.git rungraph
 cd rungraph
 python -m venv .venv
 ```
@@ -52,6 +54,17 @@ runevidence --version
 ```
 
 `-e` ("editable") means the installed command runs the code in this folder, so edits take effect without reinstalling.
+
+If you only want the command, install it straight from GitHub without cloning:
+
+```bash
+pip install "git+https://github.com/shihaab453/rungraph.git"
+```
+
+RunEvidence is licensed under [Apache-2.0](LICENSE). The optional Hydra adapter
+is a separate package, [packages/runevidence-hydra](packages/runevidence-hydra).
+From a clone, install it with `pip install ./packages/runevidence-hydra`;
+see [Adapters](#adapters) for usage.
 
 ### 2. Inspect the example experiment (1 minute)
 
@@ -328,4 +341,4 @@ Tests run offline in a few seconds. Contributions are welcome: see
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE) for the full text.

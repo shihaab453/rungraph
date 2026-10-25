@@ -14,12 +14,21 @@ authors = [{ name = "Shihaab Alam" }]
 keywords = ["machine-learning", "reproducibility", "provenance", "experiments", "evidence"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Environment :: Console",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = ["pydantic>=2.6,<3"]
+
+[project.urls]
+Homepage = "https://github.com/shihaab453/rungraph"
+Repository = "https://github.com/shihaab453/rungraph"
+Issues = "https://github.com/shihaab453/rungraph/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
