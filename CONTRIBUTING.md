@@ -12,6 +12,25 @@ pip install -e ".[dev]"
 python -m pytest
 ```
 
+## Continuous integration
+
+Every push and pull request runs the test suite on GitHub Actions
+([.github/workflows/ci.yml](.github/workflows/ci.yml)): Linux and Windows,
+each on Python 3.10 (the oldest version we support) and 3.14. A pull request
+should be green on all four before it is merged.
+
+CI does a regular (not editable) install into a fresh environment. To check
+a change the same way before pushing:
+
+```bash
+python -m venv /tmp/ci-venv          # any new, empty folder
+/tmp/ci-venv/bin/python -m pip install ".[dev]"   # Windows: \tmp\ci-venv\Scripts\python.exe
+/tmp/ci-venv/bin/python -m pytest
+```
+
+On Linux and macOS one test is skipped: it checks a wrong-case path, which
+only resolves on a case-insensitive filesystem such as Windows.
+
 ## Ground rules
 
 - **No domain vocabulary in core.** `src/runevidence` must work for any ML
