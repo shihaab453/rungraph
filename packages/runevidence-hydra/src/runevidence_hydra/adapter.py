@@ -43,7 +43,7 @@ from typing import Any, Optional
 
 import yaml
 from runevidence.adapters import Adapter, AdapterError, Discovery, GenericAdapter
-from runevidence.adapters.generic import slug
+from runevidence.adapters.generic import slug, valid_slug
 from runevidence.hashing import sha256_file
 from runevidence.models import Artifact, Manifest, Project, Run
 
@@ -70,7 +70,7 @@ class HydraAdapter(Adapter):
         return Discovery(root=root, files=files, details={"runs": runs, "sweeps": sweeps})
 
     def extract(self, root: Path, discovery: Discovery, *, project_id: str, project_name: str) -> Manifest:
-        run_dirs: list[str] = discovery.details.get("runs", [])
+        run_dirs: list[str] = sorted(set(discovery.details.get("runs", [])))
         if not run_dirs:
             raise AdapterError(
                 f"no Hydra run folders found (a run folder contains a {HYDRA_DIR}/ subfolder). "
@@ -102,7 +102,7 @@ class HydraAdapter(Adapter):
             path = root / rel
             artifacts.append(
                 Artifact(
-                    id=_unique(slug(rel), used),
+                    id=_unique(valid_slug(rel), used),
                     path=rel,
                     sha256=sha256_file(path),
                     size_bytes=path.stat().st_size,

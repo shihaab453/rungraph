@@ -15,15 +15,30 @@ from pathlib import Path, PurePosixPath
 from ..checks.files import _within, iter_files
 from ..hashing import sha256_file
 from ..models import BACKUP_FILENAME, MANIFEST_FILENAME, Artifact, Manifest, Project, Run
-from .base import Adapter, Discovery
+from .base import Adapter, AdapterError, Discovery
 
 RUNS_DIR = "runs"
 
 
 def slug(text: str) -> str:
-    """Turn a path or name into a valid manifest ID."""
+    """Turn a path or name into a manifest-ID-shaped token.
+
+    Callers that add a valid prefix (``run-``, ``artifact-``) can use this as
+    is; both names and paths kept as IDs need :func:`valid_slug` instead.
+    """
     out = re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-.")
     return out or "item"
+
+
+def valid_slug(text: str) -> str:
+    """Like :func:`slug`, but always starts with an ASCII alphanumeric.
+
+    Manifest IDs must match ``ID_PATTERN``; a leading ``_`` (``_summary.json``,
+    ``__init__.py``) is the only shape ``slug`` leaves unusable. Prefix only
+    those, so every other generated ID stays byte-for-byte unchanged.
+    """
+    out = slug(text)
+    return out if re.match(r"[A-Za-z0-9]", out) else f"item-{out}"
 
 
 class GenericAdapter(Adapter):
@@ -36,9 +51,17 @@ class GenericAdapter(Adapter):
         return Discovery(root=root, files=files, details={"runs": runs})
 
     def extract(self, root: Path, discovery: Discovery, *, project_id: str, project_name: str) -> Manifest:
-        runs = [Run(id=f"run-{slug(name)}", name=name) for name in discovery.details.get("runs", [])]
+        # Names can arrive in any order when a discovery list is supplied;
+        # allocate in sorted order so each name always gets the same ID.
+        run_names = sorted(set(discovery.details.get("runs", [])))
+        used: set[str] = {project_id}
+        run_ids: dict[str, str] = {}
+        runs = []
+        for name in run_names:
+            run_ids[name] = _unique(f"run-{slug(name)}", used)
+            runs.append(Run(id=run_ids[name], name=name))
+
         artifacts = []
-        used: set[str] = {r.id for r in runs} | {project_id}
         for rel in discovery.files:
             path = root / rel
             if not _within(root, path):
@@ -46,14 +69,16 @@ class GenericAdapter(Adapter):
                 # that resolve outside the folder being extracted.
                 continue
             run = _run_of(rel)
-            art_id = _unique(slug(rel), used)
+            if run is not None and run not in run_ids:
+                raise AdapterError(f"Discovery omitted run folder {run!r}; rediscover the experiment folder.")
+            art_id = _unique(valid_slug(rel), used)
             artifacts.append(
                 Artifact(
                     id=art_id,
                     path=rel,
                     sha256=sha256_file(path),
                     size_bytes=path.stat().st_size,
-                    run_id=f"run-{slug(run)}" if run else None,
+                    run_id=run_ids[run] if run is not None else None,
                 )
             )
         return Manifest(

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
-from .adapters.generic import _unique, slug
+from .adapters.generic import _unique, valid_slug
 from .checks.files import _is_absolute, _within, iter_files
 from .checks.graph import check_graph
 from .checks.results import _MISSING, MAX_JSON_BYTES, resolve_pointer, values_match
@@ -381,7 +381,7 @@ def plan_add(
 
     for rel in rels:
         path = root / rel
-        new_id = art_id or _unique(slug(rel), used)
+        new_id = art_id or _unique(valid_slug(rel), used)
         used.add(new_id)
         run = run_id
         if run is None and infer_run:

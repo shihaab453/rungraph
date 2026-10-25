@@ -23,7 +23,7 @@ from pydantic import ValidationError
 
 from . import __version__
 from .adapters import AdapterError, available_adapters, get_adapter
-from .adapters.generic import slug
+from .adapters.generic import valid_slug
 from .checks import EXIT_INVALID, EXIT_OK, Report, run_checks
 from .edit import EditError, glob_match, plan_add, plan_rehash, select_artifacts
 from .manifest import LoadedManifest, ManifestLoadError, load_manifest, load_raw, save_manifest, save_raw
@@ -94,9 +94,15 @@ def cmd_init(args: argparse.Namespace) -> int:
     name = args.name or root.name
     try:
         discovery = adapter.discover(root)
-        manifest = adapter.extract(root, discovery, project_id=args.id or slug(name).lower(), project_name=name)
+        manifest = adapter.extract(
+            root, discovery, project_id=args.id or valid_slug(name).lower(), project_name=name
+        )
     except AdapterError as exc:
         print(f"ERROR: adapter {adapter.name!r} cannot read {root}: {exc}")
+        return EXIT_INVALID
+    except ValidationError as exc:
+        print(f"ERROR: adapter {adapter.name!r} produced an invalid manifest: {_validation_summary(exc)}")
+        print("Nothing was written.")
         return EXIT_INVALID
     if args.volatile:
         manifest = _mark_volatile(manifest, args.volatile)
@@ -126,6 +132,16 @@ def _mark_volatile(manifest: Manifest, patterns: list[str]) -> Manifest:
         for a in manifest.artifacts
     ]
     return manifest.model_copy(update={"artifacts": artifacts})
+
+
+def _validation_summary(exc: ValidationError) -> str:
+    """One readable line for a generated manifest that fails the schema."""
+    errors = exc.errors()
+    shown = [
+        f"{'.'.join(str(part) for part in error.get('loc', ())) or 'manifest'}: {error.get('msg', 'invalid')}"
+        for error in errors[:3]
+    ]
+    return "; ".join(shown) + (f" (and {len(errors) - 3} more)" if len(errors) > 3 else "")
 
 
 def _short(digest: Optional[str]) -> str:

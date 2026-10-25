@@ -7,9 +7,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from runevidence.adapters import BUILTIN
+from runevidence.adapters.base import Adapter, Discovery
 from runevidence.cli import main
+from runevidence.models import Manifest, Project
 
 MANIFEST = "runevidence.json"
+BACKUP = MANIFEST + ".bak"
 
 
 def read_doc(root: Path) -> dict:
@@ -140,6 +144,68 @@ def test_init_with_unknown_adapter_exits_two(tmp_path, capsys):
     assert main(["init", str(folder), "--adapter", "nope"]) == 2
     assert "Unknown adapter" in capsys.readouterr().out
     assert not (folder / MANIFEST).exists()
+
+
+def test_init_with_invalid_project_id_reports_and_writes_nothing(tmp_path, capsys):
+    folder = build_folder(tmp_path / "proj")
+    assert main(["init", str(folder)]) == 0
+    capsys.readouterr()
+    original = (folder / MANIFEST).read_bytes()
+
+    assert main(["init", str(folder), "--id", "_bad", "--force"]) == 2
+    captured = capsys.readouterr()
+
+    assert "produced an invalid manifest" in captured.out
+    assert "Traceback" not in captured.out + captured.err
+    assert (folder / MANIFEST).read_bytes() == original
+    assert not (folder / BACKUP).exists()
+
+
+class _InvalidManifestAdapter(Adapter):
+    name = "invalid-manifest"
+
+    def discover(self, root: Path) -> Discovery:
+        return Discovery(root=root)
+
+    def extract(self, root: Path, discovery: Discovery, *, project_id: str, project_name: str) -> Manifest:
+        return Manifest(project=Project(id="_bad", name=project_name))
+
+
+def test_init_adapter_validation_error_reports_and_writes_nothing(tmp_path, capsys, monkeypatch):
+    monkeypatch.setitem(BUILTIN, _InvalidManifestAdapter.name, _InvalidManifestAdapter)
+    folder = build_folder(tmp_path / "proj")
+
+    assert main(["init", str(folder), "--adapter", "invalid-manifest"]) == 2
+    captured = capsys.readouterr()
+
+    assert "produced an invalid manifest" in captured.out
+    assert "Traceback" not in captured.out + captured.err
+    assert not (folder / MANIFEST).exists()
+    assert not (folder / BACKUP).exists()
+
+
+def test_init_generic_with_root_summary_files_then_validate(tmp_path, capsys):
+    folder = build_folder(tmp_path / "proj")
+    (folder / "_summary.json").write_text("{}\n", encoding="utf-8")
+    (folder / "__init__.py").write_text("\n", encoding="utf-8")
+
+    assert main(["init", str(folder)]) == 0
+    capsys.readouterr()
+
+    assert main(["validate", str(folder), "--strict"]) == 0
+    ids = {artifact["id"] for artifact in read_doc(folder)["artifacts"]}
+    assert "item-_summary.json" in ids
+    assert "item-__init__.py" in ids
+
+
+def test_init_derives_a_valid_project_id_from_a_leading_underscore_name(tmp_path, capsys):
+    folder = build_folder(tmp_path / "_proj")
+
+    assert main(["init", str(folder)]) == 0
+    capsys.readouterr()
+
+    assert read_doc(folder)["project"]["id"] == "item-_proj"
+    assert main(["validate", str(folder)]) == 0
 
 
 def test_schema_prints_json_with_schema_key(capsys):

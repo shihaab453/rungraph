@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from runevidence.adapters import AdapterError, available_adapters  # noqa: E402
 from runevidence.checks import run_checks  # noqa: E402
 from runevidence.cli import main  # noqa: E402
 from runevidence.manifest import dump_manifest, load_manifest, save_manifest  # noqa: E402
-from runevidence.models import MANIFEST_FILENAME, Manifest  # noqa: E402
+from runevidence.models import ID_PATTERN, MANIFEST_FILENAME, Manifest  # noqa: E402
 from runevidence_hydra import HydraAdapter  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[3]
@@ -224,6 +225,36 @@ def test_custom_output_dirs_and_nested_runs(tmp_path):
     out = next(a for a in manifest.artifacts if a.path == "exp/a/inner/out.txt")
     assert out.run_id == runs["exp/a/inner"].id
     assert_clean(tmp_path, manifest)
+
+
+def test_root_and_nested_summary_ids_start_with_an_alphanumeric(tmp_path):
+    run = tmp_path / "outputs" / "2026-01-02" / "03-04-05"
+    write(run / ".hydra" / "config.yaml", "lr: 0.1\n")
+    write(tmp_path / "_summary.json", "{}\n")
+    write(tmp_path / "__init__.py", "\n")
+    write(tmp_path / "_pkg" / "__init__.py", "\n")
+    write(tmp_path / "item-_summary.json", "{}\n")
+
+    manifest = extract(tmp_path)
+
+    by_path = {artifact.path: artifact for artifact in manifest.artifacts}
+    assert by_path["_summary.json"].id == "item-_summary.json"
+    assert by_path["__init__.py"].id == "item-__init__.py"
+    assert by_path["_pkg/__init__.py"].id == "item-_pkg-__init__.py"
+    assert by_path["item-_summary.json"].id == "item-_summary.json-2"
+    assert all(re.fullmatch(ID_PATTERN, artifact.id) for artifact in manifest.artifacts)
+    assert_clean(tmp_path, manifest)
+
+
+def test_cli_init_accepts_root_summary_and_init_files(tmp_path, capsys):
+    run = tmp_path / "outputs" / "2026-01-02" / "03-04-05"
+    write(run / ".hydra" / "config.yaml", "lr: 0.1\n")
+    write(tmp_path / "_summary.json", "{}\n")
+    write(tmp_path / "__init__.py", "\n")
+
+    assert main(["init", str(tmp_path), "--adapter", "hydra"]) == 0
+    assert "1 runs" in capsys.readouterr().out
+    assert main(["validate", str(tmp_path), "--strict"]) == 0
 
 
 def test_extract_does_not_write_into_the_folder(example):
