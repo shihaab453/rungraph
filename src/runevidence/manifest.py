@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -127,6 +128,8 @@ def save_raw(data: dict, path: Path) -> None:
             fh.write(text)
             fh.flush()
             os.fsync(fh.fileno())
+        if os.name != "nt":
+            os.chmod(staged, stat.S_IMODE(path.stat().st_mode))
         os.replace(staged, path)
     finally:
         if staged is not None:

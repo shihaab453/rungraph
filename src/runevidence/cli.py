@@ -137,14 +137,16 @@ def _edit_error(exc: Exception) -> int:
     return EXIT_INVALID
 
 
-def _finish_edit(args: argparse.Namespace, raw: dict, path: Path) -> int:
+def _finish_edit(args: argparse.Namespace, raw: dict, path: Path, summary: str) -> int:
     if args.dry_run:
+        print(summary)
         print("Dry run: nothing was written.")
         return EXIT_OK
     try:
         save_raw(raw, path)
     except OSError as exc:
         return _edit_error(exc)
+    print(summary)
     print(f"Wrote {path}\nNext: runevidence validate {args.path}")
     return EXIT_OK
 
@@ -188,7 +190,7 @@ def cmd_rehash(args: argparse.Namespace) -> int:
     for note in plan.notes:
         print(f"  NOTE {note}")
     unchanged = len(plan.files) - len(changed)
-    print(
+    summary = (
         f"{'Would re-record' if args.dry_run else 'Re-recorded'} {_count(len(changed), 'file')}"
         + (f" and {_count(len(plan.values), 'result value')}" if plan.values else "")
         + (f" ({unchanged} already up to date)" if unchanged else "")
@@ -196,7 +198,8 @@ def cmd_rehash(args: argparse.Namespace) -> int:
     if plan.claims:
         print(f"Re-read these claims; they rest on what changed: {', '.join(plan.claims)}")
     if changed or plan.values:
-        return _finish_edit(args, raw, loaded.path)
+        return _finish_edit(args, raw, loaded.path, summary)
+    print(summary)
     return EXIT_OK
 
 
@@ -234,8 +237,8 @@ def cmd_add(args: argparse.Namespace) -> int:
     if not plan.added:
         print("Nothing new to add.")
         return EXIT_OK
-    print(f"{'Would add' if args.dry_run else 'Added'} {_count(len(plan.added), 'artifact')}")
-    return _finish_edit(args, raw, loaded.path)
+    summary = f"{'Would add' if args.dry_run else 'Added'} {_count(len(plan.added), 'artifact')}"
+    return _finish_edit(args, raw, loaded.path, summary)
 
 
 def _backup_existing(out: Path, new: Manifest) -> None:

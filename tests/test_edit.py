@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from pathlib import Path
+
+import pytest
 
 from runevidence.checks import run_checks
 from runevidence.cli import main
@@ -325,9 +329,23 @@ def test_failed_manifest_replacement_preserves_original_and_removes_staging_file
 
     monkeypatch.setattr(manifest_io.os, "replace", refuse_replace)
     assert main(["add", ".", "new.txt"]) == 2
-    assert "Nothing was written" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Nothing was written" in out
+    assert "Added 1 artifact" not in out
     assert (experiment / MANIFEST).read_bytes() == before
     assert not list(experiment.glob(".runevidence.json.*.tmp"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission modes")
+def test_edit_preserves_shared_manifest_permissions(experiment, monkeypatch):
+    manifest = experiment / MANIFEST
+    manifest.chmod(0o640)
+    (experiment / "new.txt").write_bytes(b"new evidence")
+    monkeypatch.chdir(experiment)
+
+    assert main(["add", ".", "new.txt"]) == 0
+
+    assert stat.S_IMODE(manifest.stat().st_mode) == 0o640
 
 
 def test_add_infers_the_run_from_neighbouring_files_and_can_be_overridden(experiment, monkeypatch, capsys):
