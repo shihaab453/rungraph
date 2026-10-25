@@ -34,13 +34,78 @@ class FileCheckResult:
     broken: set[str] = field(default_factory=set)
 
 
-def iter_files(root: Path):
-    """Yield every regular file under root as a POSIX relative path string."""
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in IGNORED_DIRS)
-        for name in sorted(filenames):
-            full = Path(dirpath) / name
+def _real(path: Path) -> Optional[str]:
+    """The physical path with links resolved, or None when it cannot be known.
+
+    Returning None lets callers fail closed instead of trusting the lexical
+    spelling of a path whose real location is unknown."""
+    try:
+        return os.path.normcase(str(path.resolve(strict=False)))
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
+def _within(root: Path, path: Path) -> bool:
+    """True when ``path`` resolves physically inside ``root``.
+
+    Symbolic links and Windows junctions are resolved, so a relative path
+    cannot reach outside the experiment folder. A link back inside stays
+    usable. If either path cannot be resolved, containment is unknown and the
+    answer is False."""
+    root_s = _real(root)
+    path_s = _real(path)
+    if root_s is None or path_s is None:
+        return False
+    root_s = root_s.rstrip(os.sep)
+    return path_s == root_s or path_s.startswith(root_s + os.sep)
+
+
+def iter_files(root: Path, folder: Optional[Path] = None):
+    """Yield every regular file physically under root as a POSIX relative path.
+
+    A directory link (symbolic link or Windows junction) is followed only when
+    it resolves inside root; anything outside is pruned before traversal, so a
+    scan never reads another folder's bytes. Resolved directories on the
+    current branch are remembered to stop link cycles deterministically."""
+    base = folder if folder is not None else root
+    base_real = _real(base)
+    if base_real is None:
+        return
+
+    def walk(current: Path, ancestors: set[str]):
+        try:
+            entries = sorted(os.scandir(current), key=lambda entry: entry.name)
+        except OSError:
+            return
+        dirs: list[tuple[Path, str]] = []
+        files: list[Path] = []
+        for entry in entries:
+            full = Path(entry.path)
+            try:
+                is_dir = entry.is_dir(follow_symlinks=True)
+            except OSError:
+                is_dir = False
+            if is_dir:
+                if entry.name in IGNORED_DIRS or not _within(root, full):
+                    continue
+                real = _real(full)
+                if real is None or real in ancestors:
+                    continue
+                dirs.append((full, real))
+                continue
+            try:
+                if not entry.is_file(follow_symlinks=True):
+                    continue
+            except OSError:
+                continue
+            if _within(root, full):
+                files.append(full)
+        for full in files:
             yield full.relative_to(root).as_posix()
+        for full, real in dirs:
+            yield from walk(full, ancestors | {real})
+
+    yield from walk(base, {base_real})
 
 
 class _TreeIndex:
@@ -63,6 +128,8 @@ class _TreeIndex:
         if art.sha256 is None or art.volatile:
             return True
         path = self.root / rel
+        if not _within(self.root, path):
+            return False
         try:
             if art.size_bytes is not None and path.stat().st_size != art.size_bytes:
                 return False
@@ -75,7 +142,9 @@ class _TreeIndex:
         (and matches the recorded digest, if any)."""
         for i in range(len(parts)):
             candidate = "/".join(parts[i:])
-            if candidate and (self.root / candidate).is_file() and self.same_content(candidate, art):
+            if not candidate or not _within(self.root, self.root / candidate):
+                continue
+            if (self.root / candidate).is_file() and self.same_content(candidate, art):
                 return candidate
         return None
 
@@ -92,12 +161,6 @@ class _TreeIndex:
 
 def _is_absolute(raw: str) -> bool:
     return PureWindowsPath(raw).is_absolute() or raw.startswith("/") or bool(PureWindowsPath(raw).drive)
-
-
-def _within(root: Path, path: Path) -> bool:
-    root_s = os.path.normcase(os.path.abspath(root))
-    path_s = os.path.normcase(os.path.abspath(path))
-    return path_s == root_s or path_s.startswith(root_s.rstrip(os.sep) + os.sep)
 
 
 def _case_mismatch(root: Path, rel_parts: tuple[str, ...]) -> Optional[str]:
@@ -150,8 +213,13 @@ def check_artifact(art: Artifact, root: Path, index: _TreeIndex, out: FileCheckR
 
     if _is_absolute(norm):
         target = Path(norm)
+        try:
+            is_file = target.is_file()
+        except OSError:
+            is_file = False
+        inside = _within(root, target)
         parts = PurePosixPath(PureWindowsPath(norm).as_posix()).parts[1:]
-        relocated = index.find_by_suffix(tuple(parts), art) if not target.is_file() else None
+        relocated = index.find_by_suffix(tuple(parts), art) if not is_file else None
         add(
             Finding(
                 code=Code.absolute_path,
@@ -166,7 +234,34 @@ def check_artifact(art: Artifact, root: Path, index: _TreeIndex, out: FileCheckR
                 ),
             )
         )
-        if not target.is_file() and relocated:
+        if not inside:
+            out.broken.add(art.id)
+            if not is_file and relocated:
+                # The old absolute location is gone, so offer the copy that
+                # moved with the folder instead of only rejecting the path.
+                add(
+                    Finding(
+                        code=Code.missing_file,
+                        severity=Severity.error,
+                        subject=art.id,
+                        path=raw,
+                        message=f"Artifact {art.id!r} not found at {raw!r} (folder looks relocated)",
+                        hint=f"A file matching it exists at {relocated!r}; update the path to that.",
+                    )
+                )
+            else:
+                add(
+                    Finding(
+                        code=Code.path_escapes_root,
+                        severity=Severity.error,
+                        subject=art.id,
+                        path=raw,
+                        message=f"Absolute path resolves outside the experiment folder: {raw!r}",
+                        hint="Copy the file into the folder (or move the manifest up) so the evidence travels together.",
+                    )
+                )
+            return
+        if not is_file and relocated:
             out.broken.add(art.id)
             add(
                 Finding(
@@ -182,6 +277,7 @@ def check_artifact(art: Artifact, root: Path, index: _TreeIndex, out: FileCheckR
     else:
         target = root / norm
         if not _within(root, target):
+            out.broken.add(art.id)
             add(
                 Finding(
                     code=Code.path_escapes_root,
@@ -192,6 +288,7 @@ def check_artifact(art: Artifact, root: Path, index: _TreeIndex, out: FileCheckR
                     hint="Copy the file into the folder (or move the manifest up) so the evidence travels together.",
                 )
             )
+            return
 
     if not target.exists():
         out.broken.add(art.id)

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from runevidence.checks import run_checks
 from runevidence.findings import Code, Severity
 from runevidence.manifest import load_manifest
@@ -227,3 +229,94 @@ def test_claim_is_not_at_risk_when_an_unrelated_file_breaks(experiment):
 
     assert codes(report) == ["missing-file"]
     assert Code.claim_at_risk not in {f.code for f in report.findings}
+
+
+def test_explicit_supports_behaves_like_an_inline_support(experiment):
+    doc = read_doc(experiment)
+    doc["evidence"][0]["supports"] = []
+    # The same edge twice must not create duplicate findings.
+    add_relationship(doc, "claim-tuned-perfect", "tuned-accuracy", "supports")
+    add_relationship(doc, "claim-tuned-perfect", "tuned-accuracy", "supports")
+    write_doc(experiment, doc)
+
+    assert check(experiment).findings == []
+
+    (experiment / "runs" / "tuned" / "metrics.json").unlink()
+
+    report = check(experiment)
+    at_risk = [f for f in report.findings if f.code is Code.claim_at_risk and f.subject == "claim-tuned-perfect"]
+
+    assert len(at_risk) == 1
+    assert "tuned-metrics" in at_risk[0].message
+    assert Code.unsupported_claim not in {f.code for f in report.findings}
+
+
+def test_explicit_contradicts_behaves_like_an_inline_contradiction(experiment):
+    doc = read_doc(experiment)
+    doc["evidence"][0]["supports"] = []
+    doc["evidence"][0]["contradicts"] = []
+    add_relationship(doc, "claim-tuned-perfect", "tuned-accuracy", "supports")
+    add_relationship(doc, "claim-tuned-perfect", "tuned-accuracy", "contradicts")
+    write_doc(experiment, doc)
+
+    finding = only(check(experiment), Code.conflicting_evidence)
+
+    assert finding.severity is Severity.error
+    assert finding.subject == "claim-tuned-perfect"
+    assert "both supporting and contradicting" in finding.message
+    assert codes(check(experiment)) == ["conflicting-evidence"]
+
+
+def test_invalid_explicit_support_only_edge_is_still_an_error(experiment):
+    doc = read_doc(experiment)
+    doc["evidence"][0]["supports"] = []
+    doc["evidence"][0]["contradicts"] = []
+    add_relationship(doc, "claim-tuned-perfect", "ghost-result", "supports")
+    write_doc(experiment, doc)
+
+    report = check(experiment)
+    matching = [f for f in report.findings if f.code is Code.unsupported_claim]
+
+    assert len(matching) == 1
+    assert matching[0].severity is Severity.error
+    assert matching[0].subject == "claim-tuned-perfect"
+    assert "no valid support" in matching[0].message
+    assert "cites nothing" not in matching[0].message
+    assert Code.dangling_reference in {f.code for f in report.findings}
+
+
+@pytest.mark.parametrize(
+    "broken_source", ["inline", "explicit-first", "explicit-last"]
+)
+def test_reported_in_keeps_every_distinct_valid_source(experiment, broken_source):
+    log = experiment / "runs" / "baseline" / "log.txt"
+    log.write_bytes(b"log\n")
+    doc = read_doc(experiment)
+    doc["artifacts"].append(
+        {"id": "baseline-log", "path": "runs/baseline/log.txt", "run_id": "run-baseline"}
+    )
+    if broken_source == "inline":
+        # Inline artifact_id is the broken source; the explicit edge is valid.
+        doc["results"][0]["artifact_id"] = "baseline-log"
+        add_relationship(doc, "baseline-accuracy", "baseline-metrics", "reported_in")
+    else:
+        # The same broken source is declared before or after the valid one.
+        targets = ["baseline-log", "baseline-metrics"]
+        if broken_source == "explicit-last":
+            targets.reverse()
+        for target in targets:
+            add_relationship(doc, "baseline-accuracy", target, "reported_in")
+    # Duplicates and an unknown target must not hide the broken valid source.
+    add_relationship(doc, "baseline-accuracy", "baseline-metrics", "reported_in")
+    add_relationship(doc, "baseline-accuracy", "baseline-metrics", "reported_in")
+    add_relationship(doc, "baseline-accuracy", "ghost-artifact", "reported_in")
+    write_doc(experiment, doc)
+    log.unlink()
+
+    report = check(experiment)
+    at_risk = [f for f in report.findings if f.code is Code.claim_at_risk and f.subject == "claim-tuning-helps"]
+
+    assert len(at_risk) == 1, codes(report)
+    assert "baseline-log" in at_risk[0].message
+    assert Code.conflicting_provenance not in {f.code for f in report.findings}
+    assert Code.dangling_reference in {f.code for f in report.findings}

@@ -151,6 +151,52 @@ def test_rehash_run_accepts_a_retrain_and_updates_the_result_value(experiment, c
     assert main(["validate", str(experiment), "--strict"]) == 0
 
 
+def test_rehash_reminds_about_a_claim_supported_only_by_a_relationship(experiment, capsys):
+    doc = read_doc(experiment)
+    doc["evidence"][0]["supports"] = []
+    doc["relationships"].append(
+        {
+            "source": "claim-tuned-perfect",
+            "target": "tuned-metrics",
+            "type": "supports",
+            "note": None,
+        }
+    )
+    write_doc(experiment, doc)
+    metrics = experiment / "runs" / "tuned" / "metrics.json"
+    metrics.write_bytes(metrics.read_bytes() + b"\n")
+
+    assert main(["rehash", str(experiment), "tuned-metrics", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+
+    assert "Re-read these claims; they rest on what changed: claim-tuned-perfect" in out
+
+
+@pytest.mark.parametrize("bad_target", [None, "ghost-result"])
+def test_rehash_does_not_remind_for_a_claim_without_valid_support(
+    experiment, capsys, bad_target
+):
+    doc = read_doc(experiment)
+    doc["evidence"][0]["supports"] = []
+    if bad_target is not None:
+        doc["relationships"].append(
+            {
+                "source": "claim-tuned-perfect",
+                "target": bad_target,
+                "type": "supports",
+                "note": None,
+            }
+        )
+    write_doc(experiment, doc)
+    metrics = experiment / "runs" / "tuned" / "metrics.json"
+    metrics.write_bytes(metrics.read_bytes() + b"\n")
+
+    assert main(["rehash", str(experiment), "tuned-metrics", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+
+    assert "claim-tuned-perfect" not in out
+
+
 def test_rehash_changes_only_the_values_it_re_records(experiment, capsys):
     doc = read_doc(experiment)
     del artifact(doc, "tuned-model")["kind"]  # hand-written: a field left out

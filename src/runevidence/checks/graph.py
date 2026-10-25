@@ -241,7 +241,12 @@ def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
     inputs_of_run: dict[str, set[str]] = defaultdict(set)
     for edge in by_type[T.input_to]:
         inputs_of_run[edge.target].add(edge.source)
-    reported_in: dict[str, str] = {e.source: e.target for e in by_type[T.reported_in]}
+    # A result may name more than one source file (an inline artifact_id and
+    # explicit reported_in edges). Keep every distinct valid source so a
+    # broken one propagates risk whichever way it was declared.
+    reported_in: dict[str, set[str]] = defaultdict(set)
+    for edge in by_type[T.reported_in]:
+        reported_in[edge.source].add(edge.target)
 
     def foundations(target: str) -> set[str]:
         """Ids the target directly depends on: the thing itself, the file a
@@ -250,9 +255,7 @@ def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
         if kind == ARTIFACT:
             return {target}
         if kind == RESULT:
-            out = {target}
-            if target in reported_in:
-                out.add(reported_in[target])
+            out = {target} | reported_in.get(target, set())
             run = producer.get(target)
             if run:
                 out |= inputs_of_run.get(run, set())
@@ -265,8 +268,8 @@ def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
         """One step back along the recorded lineage."""
         kind = kinds.get(node)
         out: set[str] = set()
-        if kind == RESULT and node in reported_in:
-            out.add(reported_in[node])
+        if kind == RESULT:
+            out |= reported_in.get(node, set())
         if kind in (RESULT, ARTIFACT) and node in producer:
             out.add(producer[node])
         if kind in (ARTIFACT, RUN):
@@ -294,8 +297,23 @@ def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
                     queue.append(dep)
         return chains
 
+    # Whether a claim cites anything is decided from both spellings, so an
+    # explicit supports/contradicts edge counts exactly like an inline one.
+    declared_supports: dict[str, set[str]] = defaultdict(set)
+    declared_contradicts: dict[str, set[str]] = defaultdict(set)
     for ev in manifest.evidence:
-        if not ev.supports and not ev.contradicts:
+        declared_supports[ev.id].update(ev.supports)
+        declared_contradicts[ev.id].update(ev.contradicts)
+    for rel in manifest.relationships:
+        if rel.type is T.supports:
+            declared_supports[rel.source].add(rel.target)
+        elif rel.type is T.contradicts:
+            declared_contradicts[rel.source].add(rel.target)
+
+    for ev in manifest.evidence:
+        cites_support = declared_supports[ev.id]
+        cites_contradiction = declared_contradicts[ev.id]
+        if not cites_support and not cites_contradiction:
             add(
                 Finding(
                     code=Code.unsupported_claim,
@@ -316,14 +334,14 @@ def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
                     message=f"Claim {ev.id!r} lists {target!r} as both supporting and contradicting it",
                 )
             )
-        if ev.supports and not supports[ev.id]:
+        if cites_support and not supports[ev.id]:
             add(
                 Finding(
                     code=Code.unsupported_claim,
                     severity=Severity.error,
                     subject=ev.id,
                     message=f"Claim {ev.id!r} has no valid support left: {ev.claim!r}",
-                    hint="Every ID in 'supports' is unknown or of the wrong kind (see errors above).",
+                    hint="Every supporting ID is unknown or of the wrong kind (see errors above).",
                 )
             )
         direct = {f for t in supports[ev.id] for f in foundations(t)}

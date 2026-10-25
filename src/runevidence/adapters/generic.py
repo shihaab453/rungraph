@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path, PurePosixPath
 
-from ..checks.files import iter_files
+from ..checks.files import _within, iter_files
 from ..hashing import sha256_file
 from ..models import BACKUP_FILENAME, MANIFEST_FILENAME, Artifact, Manifest, Project, Run
 from .base import Adapter, Discovery
@@ -40,9 +40,13 @@ class GenericAdapter(Adapter):
         artifacts = []
         used: set[str] = {r.id for r in runs} | {project_id}
         for rel in discovery.files:
+            path = root / rel
+            if not _within(root, path):
+                # A discovery list can be supplied directly; never hash bytes
+                # that resolve outside the folder being extracted.
+                continue
             run = _run_of(rel)
             art_id = _unique(slug(rel), used)
-            path = root / rel
             artifacts.append(
                 Artifact(
                     id=art_id,

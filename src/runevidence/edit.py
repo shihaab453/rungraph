@@ -20,7 +20,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
 from .adapters.generic import _unique, slug
-from .checks.files import IGNORED_DIRS, _is_absolute, _within
+from .checks.files import _is_absolute, _within, iter_files
 from .checks.graph import check_graph
 from .checks.results import _MISSING, MAX_JSON_BYTES, resolve_pointer, values_match
 from .findings import Code
@@ -202,6 +202,11 @@ def plan_rehash(
         if entry["path"] != art.path:
             raise EditError(f"Artifact {art.id!r} no longer has its selected path {art.path!r}.")
         target = _on_disk(root, art)
+        if not _within(root, target):
+            # Refuse before touching the file: re-recording bytes from outside
+            # the experiment folder would make the manifest vouch for them.
+            unreadable.append(f"{art.id!r} ({art.path}): resolves outside the experiment folder")
+            continue
         make_volatile = art.volatile if volatile is None else volatile
         try:
             if not target.is_file():
@@ -343,22 +348,22 @@ def plan_add(
     plan = AddPlan()
     rels: list[str] = []
     for given in paths:
-        full = (cwd / given).resolve()
+        try:
+            full = (cwd / given).resolve()
+        except (OSError, RuntimeError) as exc:
+            raise EditError(f"{str(given)!r} cannot be resolved safely: {exc}") from None
         if not full.exists():
             raise EditError(f"{str(given)!r} does not exist")
         if not _within(root, full):
             raise EditError(f"{str(given)!r} is outside the experiment folder {root}")
         if full.is_dir():
-            for dirpath, dirnames, filenames in os.walk(full):
-                dirnames[:] = sorted(d for d in dirnames if d not in IGNORED_DIRS)
-                for name in sorted(filenames):
-                    rel = (Path(dirpath) / name).relative_to(root).as_posix()
-                    if rel in (MANIFEST_FILENAME, BACKUP_FILENAME):
-                        continue
-                    if _key(root / rel) in tracked:
-                        plan.skipped.append(rel)
-                    elif rel not in rels:
-                        rels.append(rel)
+            for rel in iter_files(root, full):
+                if rel in (MANIFEST_FILENAME, BACKUP_FILENAME):
+                    continue
+                if _key(root / rel) in tracked:
+                    plan.skipped.append(rel)
+                elif rel not in rels:
+                    rels.append(rel)
             continue
         rel = full.relative_to(root).as_posix()
         if rel in (MANIFEST_FILENAME, BACKUP_FILENAME):
