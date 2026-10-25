@@ -15,7 +15,7 @@ from typing import Optional
 from ..findings import Code, Finding, Severity
 from ..hashing import sha256_file
 from ..manifest import LoadedManifest
-from ..models import MANIFEST_FILENAME, Artifact
+from ..models import BACKUP_FILENAME, MANIFEST_FILENAME, Artifact
 
 # Folders never treated as experiment content when scanning for hints or
 # untracked files.
@@ -53,20 +53,40 @@ class _TreeIndex:
     @property
     def files(self) -> list[str]:
         if self._files is None:
-            self._files = [p for p in iter_files(self.root) if p != MANIFEST_FILENAME]
+            self._files = [p for p in iter_files(self.root) if p not in (MANIFEST_FILENAME, BACKUP_FILENAME)]
         return self._files
 
-    def find_by_suffix(self, parts: tuple[str, ...]) -> Optional[str]:
-        """Longest trailing run of path components that exists under root."""
+    def same_content(self, rel: str, art: Artifact) -> bool:
+        """Could ``rel`` be the artifact's file? With a recorded digest this
+        is a byte-for-byte check; without one, any file qualifies."""
+        if art.sha256 is None:
+            return True
+        path = self.root / rel
+        try:
+            if art.size_bytes is not None and path.stat().st_size != art.size_bytes:
+                return False
+            return sha256_file(path) == art.sha256
+        except OSError:
+            return False
+
+    def find_by_suffix(self, parts: tuple[str, ...], art: Artifact) -> Optional[str]:
+        """Longest trailing run of path components that exists under root
+        (and matches the recorded digest, if any)."""
         for i in range(len(parts)):
             candidate = "/".join(parts[i:])
-            if candidate and (self.root / candidate).is_file():
+            if candidate and (self.root / candidate).is_file() and self.same_content(candidate, art):
                 return candidate
         return None
 
-    def find_by_name(self, name: str) -> list[str]:
+    def find_moved(self, name: str, art: Artifact) -> list[str]:
+        """Files elsewhere in the tree that could be the missing artifact.
+
+        In ML folders every run tends to have the same file names
+        (metrics.json, predictions.csv), so a name match alone is weak
+        evidence. When a digest is recorded, only identical files count."""
         lowered = name.lower()
-        return [p for p in self.files if PurePosixPath(p).name.lower() == lowered]
+        same_name = [p for p in self.files if PurePosixPath(p).name.lower() == lowered]
+        return [p for p in same_name if self.same_content(p, art)]
 
 
 def _is_absolute(raw: str) -> bool:
@@ -130,7 +150,7 @@ def check_artifact(art: Artifact, root: Path, index: _TreeIndex, out: FileCheckR
     if _is_absolute(norm):
         target = Path(norm)
         parts = PurePosixPath(PureWindowsPath(norm).as_posix()).parts[1:]
-        relocated = index.find_by_suffix(tuple(parts)) if not target.is_file() else None
+        relocated = index.find_by_suffix(tuple(parts), art) if not target.is_file() else None
         add(
             Finding(
                 code=Code.absolute_path,
@@ -175,11 +195,17 @@ def check_artifact(art: Artifact, root: Path, index: _TreeIndex, out: FileCheckR
     if not target.exists():
         out.broken.add(art.id)
         name = PurePosixPath(norm).name
-        candidates = [c for c in index.find_by_name(name) if c != norm] if name else []
+        candidates = [c for c in index.find_moved(name, art) if c != norm] if name else []
         hint = None
         if candidates:
             shown = ", ".join(repr(c) for c in candidates[:3])
-            hint = f"A file with the same name exists at {shown}. Was it moved?"
+            if art.sha256:
+                hint = f"An identical file (same sha256) exists at {shown}. Was it moved?"
+            else:
+                hint = (
+                    f"A file with the same name exists at {shown}, but with no sha256 "
+                    "recorded it cannot be confirmed to be the same file."
+                )
         add(
             Finding(
                 code=Code.missing_file,

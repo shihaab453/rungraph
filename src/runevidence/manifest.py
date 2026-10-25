@@ -73,7 +73,7 @@ def load_manifest(target: Path) -> LoadedManifest:
                 Finding(
                     code=Code.schema_invalid,
                     severity=Severity.error,
-                    message=f"{_loc(err['loc'])}: {err['msg']}",
+                    message=f"{_loc(err['loc'], raw)}: {err['msg']}",
                     path=str(path),
                 )
                 for err in exc.errors()
@@ -93,8 +93,18 @@ def save_manifest(manifest: Manifest, path: Path) -> None:
         fh.write(dump_manifest(manifest))
 
 
-def _loc(loc: tuple) -> str:
+def _loc(loc: tuple, raw: object = None) -> str:
+    """Render a Pydantic error location; name the entry by its id when the
+    raw data has one, e.g. ``artifacts[13] (id 'report').sha256``."""
     out = ""
+    node = raw
     for part in loc:
-        out += f"[{part}]" if isinstance(part, int) else (f".{part}" if out else str(part))
+        if isinstance(part, int):
+            out += f"[{part}]"
+            node = node[part] if isinstance(node, list) and part < len(node) else None
+            if isinstance(node, dict) and isinstance(node.get("id"), str):
+                out += f" (id {node['id']!r})"
+        else:
+            out += f".{part}" if out else str(part)
+            node = node.get(part) if isinstance(node, dict) else None
     return out or "<root>"

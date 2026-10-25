@@ -150,6 +150,12 @@ matter. Add those yourself to the generated `runevidence.json`:
 Then `runevidence validate path/to/my-experiment`. Commit the manifest next to
 your results; re-run validate before you publish anything.
 
+For a worked example on a real training run (scikit-learn, two models, real
+metrics), see `examples/dogfood-sklearn/` and its write-up in
+[docs/dogfood-sklearn-20261025.md](docs/dogfood-sklearn-20261025.md). Its
+`model.pkl` files are pickles: RunEvidence only hashes them, and you should
+never unpickle files you did not create yourself.
+
 ---
 
 ## Commands
@@ -158,7 +164,7 @@ your results; re-run validate before you publish anything.
 | --- | --- |
 | `runevidence validate PATH` | Run every check, print only problems. |
 | `runevidence inspect PATH` | Summarize the manifest, then run every check, also listing files the manifest does not track. |
-| `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`). |
+| `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`). With `--force`, the old manifest is kept as `runevidence.json.bak`, because a fresh scan does not carry over hand-written results and claims. |
 | `runevidence schema [-o FILE]` | Print the manifest JSON Schema (also committed at `schema/runevidence.schema.json`). |
 | `runevidence adapters` | List installed adapters. |
 

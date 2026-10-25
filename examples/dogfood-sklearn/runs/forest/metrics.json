@@ -1,0 +1,9 @@
+{
+  "test": {
+    "split": "test",
+    "n_test": 143,
+    "accuracy": 0.958,
+    "f1": 0.967,
+    "roc_auc": 0.9948
+  }
+}

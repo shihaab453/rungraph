@@ -20,14 +20,17 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SCHEMA_VERSION = "0.1"
 MANIFEST_FILENAME = "runevidence.json"
+BACKUP_FILENAME = MANIFEST_FILENAME + ".bak"  # written by `init --force`
 
 # IDs are short, path-safe tokens so they can appear in CLI output and URLs.
 ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
-SHA256_PATTERN = r"^[0-9a-f]{64}$"
+# Either case is accepted (PowerShell's Get-FileHash prints uppercase) and
+# stored lowercase.
+SHA256_PATTERN = r"^[0-9a-fA-F]{64}$"
 
 Id = str
 Scalar = Union[bool, int, float, str, None]
@@ -71,6 +74,11 @@ class Artifact(_Strict):
     )
     run_id: Optional[Id] = Field(default=None, description="Run that produced this file.")
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("sha256")
+    @classmethod
+    def _lowercase_digest(cls, v: Optional[str]) -> Optional[str]:
+        return v.lower() if v is not None else v
 
 
 class Result(_Strict):

@@ -20,7 +20,7 @@ from .adapters import available_adapters, get_adapter
 from .adapters.generic import slug
 from .checks import EXIT_INVALID, EXIT_OK, Report, run_checks
 from .manifest import ManifestLoadError, load_manifest, save_manifest
-from .models import MANIFEST_FILENAME, json_schema
+from .models import BACKUP_FILENAME, MANIFEST_FILENAME, json_schema
 from .report import format_findings, format_overview, to_json
 
 
@@ -86,7 +86,9 @@ def cmd_init(args: argparse.Namespace) -> int:
         return EXIT_INVALID
     name = args.name or root.name
     discovery = adapter.discover(root)
-    manifest = adapter.extract(root, discovery, project_id=args.id or slug(name), project_name=name)
+    manifest = adapter.extract(root, discovery, project_id=args.id or slug(name).lower(), project_name=name)
+    if out.exists():
+        _backup_existing(out)
     save_manifest(manifest, out)
     print(
         f"Wrote {out}\n"
@@ -95,6 +97,26 @@ def cmd_init(args: argparse.Namespace) -> int:
         f"  runevidence validate {args.path}"
     )
     return EXIT_OK
+
+
+def _backup_existing(out: Path) -> None:
+    """``init --force`` regenerates from disk, which drops hand-written
+    results, claims and relationships. Keep the old file so nothing is lost."""
+    backup = out.with_name(BACKUP_FILENAME)
+    backup.write_bytes(out.read_bytes())
+    try:
+        old = load_manifest(out).manifest
+        dropped = [
+            (len(old.results), "result"),
+            (len(old.evidence), "claim"),
+            (len(old.relationships), "relationship"),
+        ]
+        lost = ", ".join(f"{n} {word}{'' if n == 1 else 's'}" for n, word in dropped if n)
+    except ManifestLoadError:
+        lost = ""
+    print(f"Saved the previous manifest to {backup}")
+    if lost:
+        print(f"  WARNING: the new manifest does not contain its {lost}; copy them back from the backup.")
 
 
 def cmd_schema(args: argparse.Namespace) -> int:
