@@ -47,7 +47,7 @@ only resolves on a case-insensitive filesystem such as Windows.
   (a test fails if you forget).
 - **Fixtures are byte-exact.** Files under `examples/` and `tests/data/` are
   marked `-text` in `.gitattributes` so line endings never change their hashes.
-  If you edit one, update its `sha256` and `size_bytes` in the manifest.
+  If you edit one, re-record it with `runevidence rehash examples/<name> <artifact-id>`.
 - **Tests must pass on Windows, macOS and Linux.** Use `pathlib`, and
   `tmp_path` for anything you write.
 
@@ -55,4 +55,5 @@ only resolves on a case-insensitive filesystem such as Windows.
 
 - An adapter for a tool you use (as a separate package).
 - Directory artifacts (hash a folder as a whole).
-- A `rehash` command that re-records digests for intended changes.
+- A `remove` command, so `rehash --all` is not blocked by a file you deleted
+  on purpose.

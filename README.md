@@ -8,7 +8,7 @@ RunEvidence checks an ML experiment folder against a small manifest
 (`runevidence.json`) and tells you, offline:
 
 - which recorded files are **missing**,
-- which files **changed** since you recorded them (sha256),
+- which files **changed** since you recorded them (sha256), and lets you accept the changes you meant (`rehash`),
 - which references **break when the folder is moved** (absolute paths, wrong case, paths outside the folder),
 - which **claims** ("tuning improves accuracy") rest on results that are missing, changed, contradictory or not cited at all,
 - which recorded metric values **no longer match** the metrics file they came from.
@@ -151,6 +151,55 @@ matter. Add those yourself to the generated `runevidence.json`:
 Then `runevidence validate path/to/my-experiment`. Commit the manifest next to
 your results; re-run validate before you publish anything.
 
+### 6. When you change things on purpose
+
+A failing check is not always a mistake. You retrained a model, wrote a new
+report, or your training log carries a timestamp. Three commands record that
+the change was intended, so you never hand-edit digests:
+
+```bash
+cd path/to/my-experiment
+
+# You reran the "tuned" run: accept its new files (all files the run produced).
+runevidence rehash . run-tuned --dry-run   # preview first
+runevidence rehash . run-tuned
+
+# Logs change on every run: check only that they exist, not their bytes.
+runevidence rehash . "runs/*/train.log" --volatile
+
+# A new file appeared: track it without re-running init.
+runevidence add . REPORT.md --kind report
+```
+
+`rehash` targets can be artifact IDs, run IDs (every file that run produced),
+file or folder paths, or globs over manifest paths (quote them; `*` also
+crosses folders). It needs targets or `--all`, so nothing is accepted by
+accident. It refuses (and writes nothing) if a target file is missing.
+
+When a re-recorded file is the source of a result (`artifact_id` +
+`locator`), `rehash` also updates the recorded value from the file and prints
+`old -> new`. It then lists every claim that rests on what changed: **re-read
+those claims**, because a claim like "tuned beats baseline" may no longer be
+true even though every check now passes. A recorded value is only updated when
+its file's bytes changed. A wrong value next to an unchanged file stays an
+error.
+
+A **volatile** artifact (`"volatile": true`) is checked for existence only. No
+digest is kept for it, so `validate` never reports its bytes as changed.
+Result locators into volatile JSON files are still checked against their
+recorded values and can put claims at risk. Deleting it is still an error. Mark files
+volatile when you run `init` (`--volatile "*.log"`), when you `add` them, or
+afterwards with `rehash --volatile`. Undo with `rehash --no-volatile`.
+
+`add` takes files or folders (a folder adds every file inside that is not
+tracked yet). Paths are relative to where you run the command. If the
+neighbouring files all belong to one run, the new file joins that run. Use
+`--run RUN_ID` or `--no-run` to choose yourself.
+
+`rehash` and `add` rewrite only the values they change in `runevidence.json`.
+Other results, claims, links and field order are preserved. Indentation is normalized.
+Commit before you run them if you want an easy undo.
+
 For a worked example on a real training run (scikit-learn, two models, real
 metrics), see `examples/dogfood-sklearn/` and its write-up in
 [docs/dogfood-sklearn-20261025.md](docs/dogfood-sklearn-20261025.md). Its
@@ -170,7 +219,9 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](docs/dogfood-mlp-sw
 | --- | --- |
 | `runevidence validate PATH` | Run every check, print only problems. |
 | `runevidence inspect PATH` | Summarize the manifest, then run every check, also listing files the manifest does not track. |
-| `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`). With `--force`, the old manifest is kept as `runevidence.json.bak`, because a fresh scan does not carry over hand-written results and claims. |
+| `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`, `--volatile GLOB`). With `--force`, the old manifest is kept as `runevidence.json.bak`, because a fresh scan does not carry over hand-written results and claims. |
+| `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read result values from changed files (`--volatile`, `--no-volatile`, `--dry-run`). |
+| `runevidence add PATH FILE...` | Track new files or folders without re-running `init` (`--id`, `--kind`, `--run`, `--no-run`, `--volatile`, `--dry-run`). |
 | `runevidence schema [-o FILE]` | Print the manifest JSON Schema (also committed at `schema/runevidence.schema.json`). |
 | `runevidence adapters` | List installed adapters. |
 
@@ -186,7 +237,11 @@ know whether something passed without reading the text.
 | --- | --- |
 | `0` | No errors. Warnings may exist unless `--strict`. |
 | `1` | The evidence has problems: errors, or warnings under `--strict`. |
-| `2` | Could not check at all: manifest missing, not valid JSON, or does not match the schema; bad arguments; `init` refused to overwrite. |
+| `2` | Could not check at all: manifest missing, not valid JSON, or does not match the schema; bad arguments; `init` refused to overwrite; `rehash` or `add` could not make the change (nothing was written). |
+
+`validate`, `inspect` and `adapters` never write anything. `schema -o FILE`
+writes the schema to that file. `init`, `rehash` and `add` write the manifest;
+`init --force` also keeps the previous manifest as `runevidence.json.bak`.
 
 ## The manifest
 
@@ -194,7 +249,7 @@ know whether something passed without reading the text.
 | --- | --- | --- |
 | `project` | What the folder is about | `id`, `name`, `description`, `tags` |
 | `runs` | Executions of any kind | `id`, `name`, `started_at`, `params` |
-| `artifacts` | Files on disk | `id`, `path` (relative, forward slashes), `sha256`, `size_bytes`, `kind`, `run_id` (producer) |
+| `artifacts` | Files on disk | `id`, `path` (relative, forward slashes), `sha256`, `size_bytes`, `volatile` (existence only), `kind`, `run_id` (producer) |
 | `results` | Named values a run produced | `id`, `run_id`, `name`, `value`, `artifact_id`, `locator` (JSON Pointer) |
 | `evidence` | Claims in plain words | `id`, `claim`, `supports`, `contradicts`, `source` |
 | `relationships` | Extra typed edges | `source`, `target`, `type`: `produced_by`, `input_to`, `result_of`, `reported_in`, `derived_from`, `supports`, `contradicts` |
@@ -215,7 +270,7 @@ All IDs share one namespace. Unknown fields are rejected (so a typo like
 | `absolute-path` | warning | Path will break when the folder moves. |
 | `non-posix-path` | warning | Backslashes; use `/` so it works on every OS. |
 | `path-case-mismatch` | warning | Only resolves because this filesystem ignores case. |
-| `no-digest` | warning | No sha256 recorded, so changes cannot be detected. |
+| `no-digest` | warning | No sha256 recorded, so changes cannot be detected. Record one with `rehash`, or mark the file `volatile` if that is intended. |
 | `untracked-file` | info | In the folder but not in the manifest (`inspect` only). |
 | `duplicate-id` | error | Same ID used twice. |
 | `dangling-reference` | error | A link points at an ID that does not exist. |
@@ -255,8 +310,7 @@ launching or GPU use. No network access. No loading of model weights.
 ## Roadmap
 
 RunEvidence is the first layer of **RunGraph**. Planned next, roughly in order:
-directory artifacts and glob patterns, `runevidence rehash` for intended
-changes, YAML manifests, more tool adapters (MLflow file stores,
+directory artifacts, YAML manifests, more tool adapters (MLflow file stores,
 TensorBoard logs, plain CSV logs), then RunGraph proper: lineage across runs
 and comparability checks (did both runs use the same data, split and code?).
 

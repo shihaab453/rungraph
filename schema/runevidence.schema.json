@@ -40,6 +40,12 @@
           "default": null,
           "title": "Size Bytes"
         },
+        "volatile": {
+          "default": false,
+          "description": "Content is expected to change on every rerun (e.g. a log with timestamps). Only the file's existence is checked; sha256 and size_bytes are ignored.",
+          "title": "Volatile",
+          "type": "boolean"
+        },
         "kind": {
           "anyOf": [
             {

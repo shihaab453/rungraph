@@ -58,8 +58,9 @@ class _TreeIndex:
 
     def same_content(self, rel: str, art: Artifact) -> bool:
         """Could ``rel`` be the artifact's file? With a recorded digest this
-        is a byte-for-byte check; without one, any file qualifies."""
-        if art.sha256 is None:
+        is a byte-for-byte check; without one (or for a volatile file),
+        any file qualifies."""
+        if art.sha256 is None or art.volatile:
             return True
         path = self.root / rel
         try:
@@ -199,7 +200,7 @@ def check_artifact(art: Artifact, root: Path, index: _TreeIndex, out: FileCheckR
         hint = None
         if candidates:
             shown = ", ".join(repr(c) for c in candidates[:3])
-            if art.sha256:
+            if art.sha256 and not art.volatile:
                 hint = f"An identical file (same sha256) exists at {shown}. Was it moved?"
             else:
                 hint = (
@@ -246,6 +247,12 @@ def check_artifact(art: Artifact, root: Path, index: _TreeIndex, out: FileCheckR
                 )
             )
 
+    if art.volatile:
+        # Existence is the whole check: the bytes change on every rerun.
+        out.readable_paths[art.id] = target
+        out.ok_paths[art.id] = target
+        return
+
     try:
         digest = sha256_file(target)
         size = target.stat().st_size
@@ -271,7 +278,10 @@ def check_artifact(art: Artifact, root: Path, index: _TreeIndex, out: FileCheckR
                 subject=art.id,
                 path=raw,
                 message=f"Artifact {art.id!r} has no recorded sha256, so changes cannot be detected",
-                hint=f'Record it: "sha256": "{digest}"',
+                hint=(
+                    f'Record it with `runevidence rehash <folder> {art.id}` (or "sha256": "{digest}"); '
+                    "if its bytes change on every rerun, add --volatile"
+                ),
             )
         )
     elif digest != art.sha256:
@@ -289,7 +299,10 @@ def check_artifact(art: Artifact, root: Path, index: _TreeIndex, out: FileCheckR
                     f"Artifact {art.id!r} changed since it was recorded: "
                     f"sha256 {art.sha256[:12]}... recorded, {digest[:12]}... on disk.{size_note}"
                 ),
-                hint="If the change is intended, re-record the digest; otherwise restore the original file.",
+                hint=(
+                    f"If the change is intended, accept it with `runevidence rehash <folder> {art.id}`; "
+                    "otherwise restore the original file."
+                ),
             )
         )
         return

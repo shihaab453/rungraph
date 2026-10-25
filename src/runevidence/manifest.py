@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .findings import Code, Finding, Severity
-from .models import MANIFEST_FILENAME, Manifest
+from .models import MANIFEST_FILENAME, Artifact, Manifest
 
 
 class ManifestLoadError(Exception):
@@ -82,15 +82,43 @@ def load_manifest(target: Path) -> LoadedManifest:
     return LoadedManifest(manifest=manifest, path=path)
 
 
+def artifact_to_dict(artifact: Artifact) -> dict:
+    data = artifact.model_dump(mode="json", exclude_defaults=False)
+    # Written only when set, so manifests from before the field existed
+    # come out of a rewrite unchanged.
+    if not data["volatile"]:
+        del data["volatile"]
+    return data
+
+
 def dump_manifest(manifest: Manifest) -> str:
     data = manifest.model_dump(mode="json", exclude_defaults=False)
+    data["artifacts"] = [artifact_to_dict(a) for a in manifest.artifacts]
+    return dump_raw(data)
+
+
+def dump_raw(data: dict) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
 def save_manifest(manifest: Manifest, path: Path) -> None:
+    _write(path, dump_manifest(manifest))
+
+
+def load_raw(path: Path) -> dict:
+    """The manifest file as plain JSON, for edits that must keep every field
+    exactly as the user wrote it. Call after load_manifest succeeded."""
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def save_raw(data: dict, path: Path) -> None:
+    _write(path, dump_raw(data))
+
+
+def _write(path: Path, text: str) -> None:
     # newline="\n" keeps the file byte-identical across Windows and POSIX.
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(dump_manifest(manifest))
+        fh.write(text)
 
 
 def _loc(loc: tuple, raw: object = None) -> str:

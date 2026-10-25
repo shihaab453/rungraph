@@ -68,6 +68,13 @@ class Artifact(_Strict):
     )
     sha256: Optional[str] = Field(default=None, pattern=SHA256_PATTERN)
     size_bytes: Optional[int] = Field(default=None, ge=0)
+    volatile: bool = Field(
+        default=False,
+        description=(
+            "Content is expected to change on every rerun (e.g. a log with timestamps). "
+            "Only the file's existence is checked; sha256 and size_bytes are ignored."
+        ),
+    )
     kind: Optional[str] = Field(
         default=None,
         description="Free-form label, e.g. dataset, config, checkpoint, metrics, log.",

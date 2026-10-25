@@ -64,7 +64,7 @@ def format_overview(manifest: Manifest) -> str:
 
     lines.append(f"\nArtifacts ({len(manifest.artifacts)}):")
     for a in manifest.artifacts:
-        digest = a.sha256[:12] if a.sha256 else "(no sha256)"
+        digest = "(volatile)" if a.volatile else a.sha256[:12] if a.sha256 else "(no sha256)"
         kind = f" {a.kind}" if a.kind else ""
         lines.append(f"  {a.id}: {a.path}  {digest}{kind}")
 
