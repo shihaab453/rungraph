@@ -332,7 +332,7 @@ All IDs share one namespace. Unknown fields are rejected (so a typo like
 | `invalid-relationship` | error | A link joins the wrong kinds (e.g. a run "produced by" an artifact). |
 | `conflicting-provenance` | error / warning | One file or result attributed to two runs; or a result read from another run's file. |
 | `conflicting-evidence` | error | A claim both supports and contradicts the same thing; or one run reports two values for one metric. |
-| `derivation-cycle` | error | `derived_from` loops. |
+| `derivation-cycle` | error | `derived_from` loops. The search is iterative, so long valid chains (tested with 5,000 steps) are checked instead of crashing. |
 | `unsupported-claim` | warning / error | A claim cites nothing; or none of its citations are valid. |
 | `claim-at-risk` | error | A claim depends on a result, file or run input that is missing or changed. Lineage is followed upstream (`derived_from`, `input_to`, producing runs), so raw data two steps back counts; indirect causes are shown as `id (via ...)`. |
 | `result-value-mismatch` | error | Recorded value differs from the value at its locator in the file. `NaN` matches `NaN`, so a diverged run can be recorded faithfully. |

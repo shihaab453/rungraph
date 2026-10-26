@@ -29,7 +29,16 @@ and claims are for people to write. Absolute paths from ``hydra.yaml``
 
 YAML is read with ``yaml.safe_load`` only: tags such as ``!!python/object``
 are refused, never executed. A file that cannot be read is still hashed and
-is listed under ``metadata["hydra"]["unreadable"]``.
+is listed under ``metadata["hydra"]["unreadable"]``, with a short reason in
+``metadata["hydra"]["unreadable_reasons"]``.
+
+YAML anchors and aliases let a few hundred bytes describe a structure with
+billions of values, and an alias may even contain itself. Every parsed file
+is therefore converted to plain JSON data without recursion and under fixed
+limits (``MAX_VALUES``, ``MAX_TEXT``, ``MAX_DEPTH``), counted on the expanded
+result. Conversion stops as soon as a limit is passed, before the large
+structure is built, and the file is treated as unreadable. A self-referencing
+alias is reported the same way instead of raising ``RecursionError``.
 """
 
 from __future__ import annotations
@@ -57,6 +66,12 @@ SETTINGS_FILE = "hydra.yaml"
 MISSING = "???"
 # Hydra's default folder names: <YYYY-MM-DD>/<HH-MM-SS>.
 DEFAULT_TIMESTAMP = re.compile(r"(?:^|/)(\d{4}-\d{2}-\d{2})/(\d{2}-\d{2}-\d{2})(?:/|$)")
+
+# Limits for one parsed .hydra file, counted after YAML aliases are expanded.
+# Real Hydra configs are a few hundred values; these leave a wide margin.
+MAX_VALUES = 100_000  # mappings, lists and scalars
+MAX_TEXT = 2_000_000  # characters in keys and string values (and digits of integers)
+MAX_DEPTH = 64  # nesting levels
 
 
 class HydraAdapter(Adapter):
@@ -118,6 +133,12 @@ def _read_run(root: Path, run_dir: str, sweeps: list[str]) -> dict[str, Any]:
     hydra_dir = root / run_dir / HYDRA_DIR
     info: dict[str, Any] = {}
     unreadable: list[str] = []
+    reasons: dict[str, str] = {}
+
+    def refuse(name: str, reason: str) -> None:
+        rel = _join(run_dir, HYDRA_DIR, name)
+        unreadable.append(rel)
+        reasons[rel] = reason
 
     def load(name: str) -> Any:
         path = hydra_dir / name
@@ -125,10 +146,23 @@ def _read_run(root: Path, run_dir: str, sweeps: list[str]) -> dict[str, Any]:
             return None
         try:
             text = path.read_text(encoding="utf-8")
-            return json.loads(text) if path.suffix == ".json" else yaml.safe_load(text)
-        except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError):
+        except (OSError, UnicodeDecodeError) as exc:
+            refuse(name, f"cannot be read as UTF-8 text ({type(exc).__name__})")
+            return None
+        try:
+            parsed = json.loads(text) if path.suffix == ".json" else yaml.safe_load(text)
+        except (ValueError, yaml.YAMLError) as exc:
             # ValueError covers json.JSONDecodeError.
-            unreadable.append(_join(run_dir, HYDRA_DIR, name))
+            kind = "JSON" if path.suffix == ".json" else "YAML under safe loading"
+            refuse(name, f"is not valid {kind} ({type(exc).__name__})")
+            return None
+        except RecursionError:
+            refuse(name, "is nested too deeply to parse")
+            return None
+        try:
+            return _plain(parsed)
+        except _TooComplex as exc:
+            refuse(name, str(exc))
             return None
 
     def first(names: tuple[str, ...], expected: type) -> Any:
@@ -136,7 +170,7 @@ def _read_run(root: Path, run_dir: str, sweeps: list[str]) -> dict[str, Any]:
             if (hydra_dir / name).is_file():
                 value = load(name)
                 if value is not None and not isinstance(value, expected):
-                    unreadable.append(_join(run_dir, HYDRA_DIR, name))
+                    refuse(name, f"is {_a(type(value))}, not {_a(expected)}")
                     return None
                 return value
         return None
@@ -171,6 +205,7 @@ def _read_run(root: Path, run_dir: str, sweeps: list[str]) -> dict[str, Any]:
         info["sweep_dir"] = sweep or "."
     if unreadable:
         info["unreadable"] = unreadable
+        info["unreadable_reasons"] = reasons
     return {"params": _jsonable(params), "metadata": {"hydra": _jsonable(info)} if info else {}}
 
 
@@ -217,6 +252,103 @@ def _started_at(run_dir: str) -> Optional[datetime]:
 
 def _mapping(value: Any) -> dict:
     return value if isinstance(value, dict) else {}
+
+
+def _a(kind: type) -> str:
+    return {dict: "a mapping", list: "a list"}.get(kind, f"a {kind.__name__} value")
+
+
+class _TooComplex(Exception):
+    """A parsed file is cyclic, too deep or too large to convert."""
+
+
+def _plain(value: Any) -> Any:
+    """``_jsonable`` for freshly parsed data that may be hostile.
+
+    YAML aliases make shared or even self-containing structures, which a
+    plain recursive walk would expand without bound or recurse on forever.
+    This walk uses its own stack, counts every value it emits (so a shared
+    structure is counted each time it is expanded), and raises
+    ``_TooComplex`` as soon as a limit is passed or a structure contains
+    itself. Memory therefore stays proportional to the limits, never to the
+    expanded size. The result equals ``_jsonable(value)``."""
+    values = 0
+    text = 0
+
+    def account(n_text: int) -> None:
+        nonlocal values, text
+        values += 1
+        text += n_text
+        if values > MAX_VALUES:
+            raise _TooComplex(
+                f"expands to more than {MAX_VALUES:,} values "
+                "(each use of a YAML alias counts again)"
+            )
+        if text > MAX_TEXT:
+            raise _TooComplex(
+                f"expands to more than {MAX_TEXT:,} characters of text "
+                "(each use of a YAML alias counts again)"
+            )
+
+    def leaf(item: Any) -> Any:
+        if isinstance(item, str):
+            account(len(item))
+        elif isinstance(item, bytes):
+            account(2 * len(item))
+        elif isinstance(item, int) and not isinstance(item, bool):
+            account(item.bit_length() * 30103 // 100000 + 1)  # about its decimal digits
+        else:
+            account(32)
+        return _jsonable(item)
+
+    def is_container(item: Any) -> bool:
+        return isinstance(item, (dict, list, tuple, set, frozenset))
+
+    if not is_container(value):
+        return leaf(value)
+
+    on_path: set[int] = set()
+
+    def open_frame(item: Any, depth: int) -> list[Any]:
+        if depth > MAX_DEPTH:
+            raise _TooComplex(f"is nested more than {MAX_DEPTH} levels deep")
+        if id(item) in on_path:
+            raise _TooComplex("contains itself through a YAML alias (a cyclic structure)")
+        account(0)
+        on_path.add(id(item))
+        if isinstance(item, dict):
+            return [item, {}, iter(item.items()), depth]
+        return [item, [], iter(item), depth]
+
+    root = open_frame(value, 1)
+    stack = [root]
+    while stack:
+        source, out, items, depth = stack[-1]
+        try:
+            entry = next(items)
+        except StopIteration:
+            if isinstance(source, (set, frozenset)):
+                out.sort(key=repr)
+            on_path.discard(id(source))
+            stack.pop()
+            continue
+        if isinstance(out, dict):
+            key, child = entry
+            key = str(key)
+            account(len(key))
+        else:
+            child = entry
+        if is_container(child):
+            frame = open_frame(child, depth + 1)
+            converted = frame[1]
+            stack.append(frame)
+        else:
+            converted = leaf(child)
+        if isinstance(out, dict):
+            out[key] = converted
+        else:
+            out.append(converted)
+    return root[1]
 
 
 def _jsonable(value: Any) -> Any:

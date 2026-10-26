@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import threading
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -270,3 +272,210 @@ def test_params_round_trip_through_the_manifest_file(example):
     reloaded = json.loads((example / MANIFEST_FILENAME).read_text(encoding="utf-8"))
 
     assert reloaded["runs"][0]["params"] == manifest.runs[0].params
+
+
+# --- hostile YAML: alias expansion, cycles, depth (F-02, RE-09) -------------
+
+
+def extract_within(root: Path, seconds: float = 60.0) -> Manifest:
+    """Extract in a daemon thread so an unbounded expansion fails the test
+    instead of hanging the run or exhausting memory for minutes."""
+    out: dict = {}
+
+    def go() -> None:
+        try:
+            out["manifest"] = extract(root)
+        except BaseException as exc:  # reported in the main thread
+            out["error"] = exc
+
+    worker = threading.Thread(target=go, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    assert not worker.is_alive(), f"extract did not finish within {seconds} seconds"
+    if "error" in out:
+        raise out["error"]
+    return out["manifest"]
+
+
+def alias_bomb(levels: int = 9) -> str:
+    """Under 1 KB of YAML that expands to 10**levels list items."""
+    lines = ["l0: &l0 [x, x, x, x, x, x, x, x, x, x]"]
+    for i in range(1, levels):
+        refs = ", ".join([f"*l{i - 1}"] * 10)
+        lines.append(f"l{i}: &l{i} [{refs}]")
+    return "\n".join(lines) + "\n"
+
+
+def alias_bomb_list(levels: int = 7) -> str:
+    """The same idea as a top-level YAML list, the shape of overrides.yaml."""
+    lines = ["- &o0 [x, x, x, x, x, x, x, x, x, x]"]
+    for i in range(1, levels):
+        refs = ", ".join([f"*o{i - 1}"] * 10)
+        lines.append(f"- &o{i} [{refs}]")
+    return "\n".join(lines) + "\n"
+
+
+def reasons_of(manifest: Manifest) -> dict[str, str]:
+    (run,) = manifest.runs
+    hydra = run.metadata["hydra"]
+    assert sorted(hydra["unreadable"]) == sorted(hydra["unreadable_reasons"])
+    return hydra["unreadable_reasons"]
+
+
+def test_an_alias_bomb_is_refused_quickly_with_bounded_memory(tmp_path):
+    run = tmp_path / "exp"
+    text = alias_bomb()
+    assert len(text) < 1024
+    write(run / ".hydra" / "config.yaml", text)
+    write(run / ".hydra" / "overrides.yaml", "- lr=0.1\n")
+
+    tracemalloc.start()
+    try:
+        manifest = extract_within(tmp_path)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+    assert reasons_of(manifest) == {
+        "exp/.hydra/config.yaml": "expands to more than 100,000 values (each use of a YAML alias counts again)"
+    }
+    (only,) = manifest.runs
+    assert only.params == {}
+    assert only.metadata["hydra"]["overrides"] == ["lr=0.1"]
+    # The limits bound memory, not the 10**9 values the file describes.
+    assert peak < 64_000_000
+    assert len(dump_manifest(manifest)) < 10_000
+    assert_clean(tmp_path, manifest)
+
+
+def test_a_bomb_in_overrides_or_hydra_settings_is_refused_too(tmp_path):
+    run = tmp_path / "exp"
+    write(run / ".hydra" / "config.yaml", "lr: 0.1\n")
+    write(run / ".hydra" / "overrides.yaml", alias_bomb_list())
+    write(run / ".hydra" / "hydra.yaml", "hydra:\n  job: &j {name: [" + ", ".join(["x"] * 10) + "]}\n" + "  runtime: {choices: {a: *j, b: *j}}\n")
+
+    manifest = extract_within(tmp_path)
+
+    reasons = reasons_of(manifest)
+    assert list(reasons) == ["exp/.hydra/overrides.yaml"]
+    assert "more than 100,000 values" in reasons["exp/.hydra/overrides.yaml"]
+    (only,) = manifest.runs
+    assert only.params == {"lr": 0.1}
+    assert only.metadata["hydra"]["job_name"] == ["x"] * 10
+    assert_clean(tmp_path, manifest)
+
+
+def test_repeated_long_strings_are_limited_by_total_text(tmp_path):
+    run = tmp_path / "exp"
+    long_text = "y" * 100_000
+    write(run / ".hydra" / "config.yaml", f"s: &s {long_text}\nmany: [{', '.join(['*s'] * 30)}]\n")
+
+    manifest = extract_within(tmp_path)
+
+    assert reasons_of(manifest) == {
+        "exp/.hydra/config.yaml": "expands to more than 2,000,000 characters of text (each use of a YAML alias counts again)"
+    }
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "a: &a [*a]\n",
+        "&m {self: *m}\n",
+        "top: &t {inner: [1, 2, {back: *t}]}\n",
+        "- &l [*l, 1]\n",
+    ],
+)
+def test_self_referencing_aliases_are_unreadable_not_a_recursion_error(tmp_path, text):
+    run = tmp_path / "exp"
+    write(run / ".hydra" / "config.yaml", text)
+
+    manifest = extract_within(tmp_path)
+
+    reasons = reasons_of(manifest)
+    assert set(reasons) == {"exp/.hydra/config.yaml"}
+    assert "contains itself" in reasons["exp/.hydra/config.yaml"]
+    assert manifest.runs[0].params == {}
+    assert_clean(tmp_path, manifest)
+
+
+def test_cyclic_overrides_and_settings_are_unreadable(tmp_path):
+    run = tmp_path / "exp"
+    write(run / ".hydra" / "config.yaml", "lr: 0.1\n")
+    write(run / ".hydra" / "overrides.yaml", "&o [a, *o]\n")
+    write(run / ".hydra" / "hydra.yaml", "&h {hydra: *h}\n")
+
+    manifest = extract_within(tmp_path)
+
+    reasons = reasons_of(manifest)
+    assert set(reasons) == {"exp/.hydra/overrides.yaml", "exp/.hydra/hydra.yaml"}
+    assert all("contains itself" in r for r in reasons.values())
+    assert manifest.runs[0].params == {"lr": 0.1}
+
+
+def test_deep_nesting_is_unreadable_whether_parsing_or_converting_fails(tmp_path):
+    write(tmp_path / "a" / ".hydra" / "config.yaml", "x: " + "[" * 100 + "]" * 100 + "\n")
+    write(tmp_path / "b" / ".hydra" / "config.yaml", "x: " + "[" * 20_000 + "]" * 20_000 + "\n")
+    write(tmp_path / "c" / ".hydra" / "config.json", '{"x": ' + "[" * 200_000 + "]" * 200_000 + "}")
+
+    manifest = extract_within(tmp_path)
+
+    reasons = {}
+    for run in manifest.runs:
+        reasons.update(run.metadata["hydra"]["unreadable_reasons"])
+    assert reasons["a/.hydra/config.yaml"] == "is nested more than 64 levels deep"
+    assert reasons["b/.hydra/config.yaml"] == "is nested too deeply to parse"
+    assert reasons["c/.hydra/config.json"] == "is nested too deeply to parse"
+
+
+def test_ordinary_anchors_and_aliases_still_expand(tmp_path):
+    write(
+        tmp_path / "exp" / ".hydra" / "config.yaml",
+        "base: &base {lr: 0.1, layers: [64, 64]}\n"
+        "model: *base\n"
+        "merged:\n  <<: *base\n  lr: 0.2\n",
+    )
+
+    manifest = extract_within(tmp_path)
+
+    (only,) = manifest.runs
+    assert only.params == {
+        "base": {"lr": 0.1, "layers": [64, 64]},
+        "model": {"lr": 0.1, "layers": [64, 64]},
+        "merged": {"lr": 0.2, "layers": [64, 64]},
+    }
+    assert "unreadable" not in only.metadata.get("hydra", {})
+
+
+def test_bounded_conversion_matches_the_plain_conversion():
+    from datetime import date, datetime
+
+    from runevidence_hydra import adapter as hydra_adapter
+
+    shared = {"k": [1, 2.5, None, True]}
+    values = [
+        None,
+        "text",
+        7,
+        float("nan"),
+        b"\x00\xff",
+        date(2026, 10, 26),
+        {"a": shared, "b": shared, 3: {"nested": [shared, {"x": float("-inf")}]}},
+        [datetime(2026, 10, 26, 1, 2, 3), {"s": {"b", "a", "c"}}],
+        frozenset({3, 1, 2}),
+        (1, [2, (3,)]),
+    ]
+    for value in values:
+        converted = hydra_adapter._plain(value)
+        assert json.dumps(converted) == json.dumps(hydra_adapter._jsonable(value))
+
+
+def test_cli_init_survives_hostile_configs_and_validates(tmp_path, capsys):
+    write(tmp_path / "bomb" / ".hydra" / "config.yaml", alias_bomb())
+    write(tmp_path / "loop" / ".hydra" / "config.yaml", "a: &a [*a]\n")
+    write(tmp_path / "fine" / ".hydra" / "config.yaml", "lr: 0.1\n")
+
+    assert main(["init", str(tmp_path), "--adapter", "hydra"]) == 0
+    assert main(["validate", str(tmp_path), "--strict"]) == 0
+    capsys.readouterr()
+    assert (tmp_path / MANIFEST_FILENAME).stat().st_size < 20_000

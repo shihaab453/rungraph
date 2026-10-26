@@ -146,8 +146,19 @@ Edge cases:
   recognized; use `--adapter generic` for those.
 - **A `.hydra/` file that will not parse** (broken YAML, an unsafe tag such
   as `!!python/object`, or the wrong shape) is still hashed, its contents are
-  skipped, and its path is listed in `metadata.hydra.unreadable`. YAML is only
+  skipped, and its path is listed in `metadata.hydra.unreadable`, with a
+  short reason per path in `metadata.hydra.unreadable_reasons`. YAML is only
   read with `yaml.safe_load`, so nothing in it is ever executed.
+- **YAML aliases that expand too far or refer to themselves.** Anchors and
+  aliases let a file of a few hundred bytes describe billions of values, or
+  a structure that contains itself. Each parsed `.hydra/` file is converted
+  without recursion and under fixed limits, counted after aliases are
+  expanded: 100,000 values, 2,000,000 characters of text (keys, strings and
+  integer digits) and 64 nesting levels. Conversion stops as soon as a limit
+  is passed, so memory stays bounded. A file over a limit, a self-referencing
+  alias, or nesting too deep for the YAML/JSON parser is treated like any
+  other unreadable file: hashed, contents skipped, reason recorded. Normal
+  anchors and `<<` merges well under the limits are expanded as before.
 - **YAML-only values** (dates, `.nan`, sets, non-string keys) are converted
   to plain JSON (`"2026-10-25"`, `"nan"`, a sorted list, string keys), so the
   manifest stays standard JSON.

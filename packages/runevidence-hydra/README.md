@@ -63,8 +63,14 @@ you report yourself), no claims, and no absolute paths copied from
   are not recognized. If no run is found at all, `init` exits 2 and suggests
   `--adapter generic`.
 - A `.hydra/` file that cannot be parsed is still hashed; its path is listed
-  in `metadata.hydra.unreadable`. YAML is read with `yaml.safe_load`, so
+  in `metadata.hydra.unreadable`, and the reason in
+  `metadata.hydra.unreadable_reasons`. YAML is read with `yaml.safe_load`, so
   tags like `!!python/object` are refused, never executed.
+- Each `.hydra/` file is converted under fixed limits counted after YAML
+  aliases are expanded: 100,000 values, 2,000,000 characters of text and 64
+  nesting levels. A file past a limit (for example a small "alias bomb"), a
+  self-referencing alias, or nesting too deep to parse is treated as
+  unreadable instead of producing a huge manifest or a `RecursionError`.
 
 ## Development
 

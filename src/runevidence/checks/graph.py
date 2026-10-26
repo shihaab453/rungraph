@@ -8,7 +8,7 @@ that list, so both spellings behave the same.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Optional
 
@@ -89,29 +89,32 @@ def collect_edges(manifest: Manifest) -> list[Edge]:
 
 
 def _find_cycle(graph: dict[str, set[str]]) -> Optional[list[str]]:
+    """The first cycle found by a depth-first search in sorted order, or None.
+
+    The search keeps its own stack instead of recursing, so a long valid
+    chain (thousands of derived_from steps) cannot hit Python's recursion
+    limit. Each node and edge is visited once."""
     WHITE, GREY, BLACK = 0, 1, 2
     color: dict[str, int] = defaultdict(int)
-    stack: list[str] = []
 
-    def visit(node: str) -> Optional[list[str]]:
-        color[node] = GREY
-        stack.append(node)
-        for nxt in sorted(graph.get(node, ())):
+    for start in sorted(graph):
+        if color[start] != WHITE:
+            continue
+        color[start] = GREY
+        path = [start]
+        pending = [iter(sorted(graph.get(start, ())))]
+        while pending:
+            nxt = next(pending[-1], None)
+            if nxt is None:
+                color[path.pop()] = BLACK
+                pending.pop()
+                continue
             if color[nxt] == GREY:
-                return stack[stack.index(nxt):] + [nxt]
+                return path[path.index(nxt):] + [nxt]
             if color[nxt] == WHITE:
-                found = visit(nxt)
-                if found:
-                    return found
-        stack.pop()
-        color[node] = BLACK
-        return None
-
-    for node in sorted(graph):
-        if color[node] == WHITE:
-            found = visit(node)
-            if found:
-                return found
+                color[nxt] = GREY
+                path.append(nxt)
+                pending.append(iter(sorted(graph.get(nxt, ()))))
     return None
 
 
@@ -278,24 +281,41 @@ def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
             out |= inputs_of_run.get(node, set())
         return sorted(out)
 
-    def lineage(cited: set[str]) -> dict[str, list[str]]:
-        """Everything the cited ids transitively rest on, each mapped to the
-        chain of ids that leads to it. A raw dataset two preprocessing steps
-        upstream of a result still puts a claim about that result at risk."""
-        chains: dict[str, list[str]] = {}
-        queue = []
+    def lineage(cited: set[str]) -> dict[str, tuple[Optional[str], Optional[str]]]:
+        """Everything the cited ids transitively rest on. A raw dataset two
+        preprocessing steps upstream of a result still puts a claim about
+        that result at risk.
+
+        Each reached id maps to ``(previous id, cited id)``: one step back
+        toward the claim, and for a direct foundation the cited id it came
+        from. Storing one step instead of the whole chain keeps memory linear
+        on long lineages; ``chain`` rebuilds a path only when one is shown."""
+        reached: dict[str, tuple[Optional[str], Optional[str]]] = {}
+        queue: deque[str] = deque()
         for target in sorted(cited):
             for dep in sorted(foundations(target)):
-                if dep not in chains:
-                    chains[dep] = [target] if dep != target else []
+                if dep not in reached:
+                    reached[dep] = (None, target if dep != target else None)
                     queue.append(dep)
         while queue:
-            node = queue.pop(0)
+            node = queue.popleft()
             for dep in upstream_of(node):
-                if dep not in chains:  # also stops derivation cycles
-                    chains[dep] = chains[node] + [node]
+                if dep not in reached:  # also stops derivation cycles
+                    reached[dep] = (node, None)
                     queue.append(dep)
-        return chains
+        return reached
+
+    def chain(reached: dict[str, tuple[Optional[str], Optional[str]]], ident: str) -> list[str]:
+        """The ids leading from the claim's citation to ``ident``, oldest first."""
+        steps: list[str] = []
+        previous, origin = reached[ident]
+        while previous is not None:
+            steps.append(previous)
+            previous, origin = reached[previous]
+        if origin is not None:
+            steps.append(origin)
+        steps.reverse()
+        return steps
 
     # Whether a claim cites anything is decided from both spellings, so an
     # explicit supports/contradicts edge counts exactly like an inline one.
@@ -345,12 +365,12 @@ def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
                 )
             )
         direct = {f for t in supports[ev.id] for f in foundations(t)}
-        chains = lineage(supports[ev.id])
-        at_risk = sorted(set(chains) & broken)
+        reached = lineage(supports[ev.id])
+        at_risk = sorted(set(reached) & broken)
         if at_risk:
             # Direct dependencies print bare; upstream ones show how they are reached.
             described = [
-                ident if ident in direct else f"{ident} (via {' -> '.join(chains[ident])})"
+                ident if ident in direct else f"{ident} (via {' -> '.join(chain(reached, ident))})"
                 for ident in at_risk
             ]
             add(
