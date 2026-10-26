@@ -204,13 +204,27 @@ must be unambiguous on its own. Existing unambiguous targets keep working;
 an ID starting with a reserved prefix needs `id:`, for example
 `id:path:report` selects the artifact whose ID is `path:report`.
 
-When a re-recorded file is the source of a result (`artifact_id` +
-`locator`), `rehash` also updates the recorded value from the file and prints
-`old -> new`. It then lists every claim that rests on what changed: **re-read
-those claims**, because a claim like "tuned beats baseline" may no longer be
-true even though every check now passes. A recorded value is only updated when
-its file's bytes changed. A wrong value next to an unchanged file stays an
-error.
+When a re-recorded file is the source of a result with a supported,
+resolvable scalar JSON locator (`artifact_id` + `locator`) and that file's
+digest changed, `rehash` also updates the recorded value from the file and
+prints `old -> new`. This includes recording a digest again with
+`--no-volatile` for a source that was volatile. Only JSON locators that
+resolve to a single scalar are refreshed; other result metadata is not.
+Results without a locator never refresh, whatever the file's bytes. It then
+lists every claim that rests on what changed: **re-read those claims**, because
+a claim like "tuned beats baseline" may no longer be true even though every
+check now passes. Refresh requires the current digest to differ from the
+recorded digest (or no digest to have been kept while volatile). A wrong
+value next to an unchanged, hash-checked file stays an error.
+
+**RE-10: MLflow metric summaries can stay stale.** For MLflow text metric
+results, `rehash` accepts the current source bytes and digest, but the recorded
+summary **value, step and timestamp may stay old**. A later `validate --strict`
+can then exit 0 after that acceptance. Changed bytes do not always mean the
+summary is stale, and validation makes no scientific truth or general
+freshness claim. See [Refreshing MLflow results
+safely](docs/adapters.md#refreshing-mlflow-results-safely-re-10) and the
+[draft alpha release notes](docs/alpha-release-notes-draft.md).
 
 A **volatile** artifact (`"volatile": true`) is checked for existence only. No
 digest is kept for it, so `validate` never reports its bytes as changed.
@@ -218,8 +232,10 @@ Result locators into volatile JSON files are still checked against their
 recorded values and can put claims at risk. Deleting it is still an error. Mark files
 volatile when you run `init` (`--volatile "*.log"`), when you `add` them, or
 afterwards with `rehash --volatile`. Undo with `rehash --no-volatile`.
-`rehash` leaves result values from volatile sources as they are and prints a
-note. Use `--no-volatile` to accept the current digest and result values.
+When a volatile source has a result with a locator, `rehash` leaves that
+result value as it is and prints a note; results without a locator never
+refresh. Use `--no-volatile` to record the current digest and, for supported
+scalar JSON-located results, the current value.
 
 `add` takes files or folders (a folder adds every file inside that is not
 tracked yet). Paths are relative to where you run the command. If the
@@ -257,7 +273,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](docs/dogfood-mlp-sw
 | `runevidence validate PATH` | Run every check, print only problems. |
 | `runevidence inspect PATH` | Summarize the manifest, then run every check, also listing files the manifest does not track. |
 | `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`, `--volatile GLOB`). With `--force`, the old manifest is kept as a backup, because a fresh scan does not carry over hand-written results and claims. See [Backups from `init --force`](#backups-from-init---force). |
-| `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read result values from changed files (`--volatile`, `--no-volatile`, `--dry-run`). |
+| `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read values only for supported, resolvable scalar JSON-located results in changed files (`--volatile`, `--no-volatile`, `--dry-run`). |
 | `runevidence add PATH FILE...` | Track new files or folders without re-running `init` (`--id`, `--kind`, `--run`, `--no-run`, `--volatile`, `--dry-run`). |
 | `runevidence schema [-o FILE]` | Print the manifest JSON Schema (also committed at `schema/runevidence.schema.json`). |
 | `runevidence adapters` | List installed adapters. |
@@ -391,10 +407,16 @@ Read these before relying on a green `validate` for anything important.
 - **MLflow metric summaries can go stale (RE-10).** MLflow metric logs are
   plain text, so their results have no JSON locator. `validate` detects a
   changed metric file through its hash, but `rehash` accepts the new bytes
-  without re-reading the summarized value, so the recorded result can keep
-  the old number. To refresh, run `init --adapter mlflow --force` (the old
-  manifest is kept as a backup generation) and copy your hand-written claims
-  back.
+  without re-reading the summary value, step or timestamp, so the recorded
+  result can keep old values. `validate --strict` can still exit 0 after that
+  acceptance. Changed bytes do not always mean the summary is stale. To
+  refresh, follow [Refreshing MLflow results
+  safely](docs/adapters.md#refreshing-mlflow-results-safely-re-10): run
+  `init PATH --adapter mlflow --force`, compare the backup with the
+  regenerated manifest, keep the newly extracted summaries, and manually
+  restore only reviewed claims, relationships, annotations, volatile flags and
+  project settings after verifying IDs. Do not copy old metric results back.
+  Version control and a separate backup are strongly recommended.
 - **Bounded input.** Folder scans never follow symbolic links or Windows
   junctions out of the folder, and the MLflow adapter enters each physical
   folder once, so link loops cannot make a scan repeat itself. Hydra
@@ -408,16 +430,17 @@ Read these before relying on a green `validate` for anything important.
   locator) can still stop `validate`, `inspect` or `rehash` with a Python
   `RecursionError` traceback instead of a finding. Hydra's `config.json` and
   `overrides.json` are already guarded as described above.
-- **Supported versions.** Python 3.10 or newer. CI runs Linux and Windows on
-  Python 3.10 and 3.14 with the newest dependencies, plus Python 3.10 with
-  the lowest declared versions (`pydantic` 2.6.0, `PyYAML` 6.0). Those
-  oldest releases publish no binary wheels for Python 3.14, so on 3.14 pip
-  picks newer releases; that combination is not tested. `runevidence schema`
-  output is spelled slightly differently before Pydantic 2.11 (it omits
-  `"additionalProperties": true` on free-form fields and `"type": "string"`
-  beside the version constant). Both spellings accept exactly the same
-  manifests; the committed `schema/runevidence.schema.json` uses the 2.11+
-  spelling.
+- **Supported versions.** Python 3.10 or newer. CI has six jobs: Ubuntu and
+  Windows, each on Python 3.10 with the newest dependencies, Python 3.14 with
+  the newest dependencies, and Python 3.10 with the lowest declared versions
+  (`pydantic` 2.6.0, `PyYAML` 6.0). Python 3.14 with the pinned minimum
+  dependencies is not directly verified. Python 3.11 to 3.13 and macOS are not
+  directly verified either; they are not declared unsupported. `runevidence
+  schema` output is spelled slightly differently before Pydantic 2.11 (it
+  omits `"additionalProperties": true` on free-form fields and `"type":
+  "string"` beside the version constant). Both spellings accept exactly the
+  same manifests; the committed `schema/runevidence.schema.json` uses the
+  2.11+ spelling.
 
 ## Non-goals (V1)
 

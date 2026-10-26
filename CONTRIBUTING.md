@@ -21,7 +21,11 @@ Every push and pull request runs the test suite on GitHub Actions
 each on Python 3.10 (the oldest version we support) and 3.14, plus Linux and
 Windows on Python 3.10 with the lowest dependency versions the packages
 declare (pinned in [.github/constraints-minimum.txt](.github/constraints-minimum.txt)).
-A pull request should be green on all six jobs before it is merged. If you
+A pull request should be green on all six jobs before it is merged. Those jobs
+are Ubuntu and Windows on Python 3.10 and 3.14 with the newest dependencies,
+plus Ubuntu and Windows on Python 3.10 with the pinned minimum versions.
+Python 3.14 with the pinned minimum versions, Python 3.11 to 3.13, and macOS
+are not directly tested; they are not declared unsupported. If you
 raise a version floor in a `pyproject.toml`, update that file too.
 
 CI does a regular (not editable) install into a fresh environment. To check

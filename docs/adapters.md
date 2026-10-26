@@ -254,11 +254,43 @@ Limits and edge cases:
 - Metric logs are plain text. Core value locators support JSON only, so
   these results have no locator. `validate` detects a changed metric file
   through its hash, but does not re-read its scalar value. `rehash` accepts
-  the new bytes without refreshing these results, so a recorded value can
-  stay stale after you accept a changed metric file. To refresh them, run
-  `init --adapter mlflow --force`; the previous manifest is kept as a new
-  backup generation that is never overwritten, so you can copy your
-  hand-written claims and links back from it.
+  the new bytes without refreshing these results, so a recorded summary
+  **value, step or timestamp can stay old** after you accept a changed metric file.
+  `validate --strict` can still exit 0 after that acceptance. Changed bytes do
+  not always mean the summary is stale, and validation makes no scientific
+  truth or general freshness claim. To refresh, follow [Refreshing MLflow
+  results safely](#refreshing-mlflow-results-safely-re-10).
+
+#### Refreshing MLflow results safely (RE-10)
+
+Use forced regeneration to re-extract MLflow metric summaries from the
+current files. Save your work before running it, and use one writer at a time.
+
+`init --force` writes the manifest it is about to replace to the next backup
+generation: `runevidence.json.bak`, then `runevidence.json.bak.2`,
+`runevidence.json.bak.3`, and so on. Existing backups are never overwritten or
+deleted. The regenerated manifest is a fresh scan, so it does not merge
+hand-written claims, relationships, annotations, volatile flags, or project
+fields and settings. The warning printed by `init --force` counts every old
+result as missing even when the adapter regenerates it, so do not copy result
+entries back wholesale.
+
+1. Commit the manifest and relevant files to version control or make a separate
+   backup before starting.
+2. Regenerate with `runevidence init path/to/mlruns --adapter mlflow --force`.
+3. Compare the backup with the regenerated `runevidence.json`. Keep the newly
+   extracted metric results, including their value, step and
+   timestamp.
+4. Manually restore only reviewed claims, relationships, annotations, volatile
+   flags and project settings. Verify IDs and claim links against the
+   regenerated entries.
+5. Do not copy old metric results back. They may be the stale summaries this
+   refresh is meant to replace.
+6. Run `runevidence validate path/to/mlruns --strict` and treat the result as
+   consistency evidence, not scientific proof.
+
+Version control plus a separate backup is strongly recommended. The automatic
+backup generations protect the manifest bytes but are not a merge tool.
 
 Example: [examples/mlflow-file-store](../examples/mlflow-file-store) is a
 small synthetic store with two runs. Copy it before running `init` if you

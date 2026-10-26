@@ -93,11 +93,23 @@ chosen `step` and `timestamp_ms`.
 
 `validate` detects changed metric bytes through their hash. It does not
 compare the result value again, and `rehash` accepts new bytes without
-refreshing these text-derived results, so a recorded value can stay stale
-after you accept a changed metric file. To refresh them, run
-`init --adapter mlflow --force`: the previous manifest is kept as a new backup
-generation (`runevidence.json.bak`, `.bak.2`, ...; never overwritten), so you
-can copy your hand-written claims and links back from it.
+refreshing these text-derived results. **RE-10:** the recorded summary
+**value, step and timestamp can stay old** after you accept a changed metric file, and
+`validate --strict` can still exit 0 after that acceptance. Changed bytes do
+not always mean the summary is stale, and validation makes no scientific truth
+or general freshness claim.
+
+To refresh summaries, run `init --adapter mlflow --force` and follow the
+[central safe refresh procedure](../../docs/adapters.md#refreshing-mlflow-results-safely-re-10).
+The previous manifest is kept as a new backup generation
+(`runevidence.json.bak`, `.bak.2`, ...; never overwritten). Forced
+regeneration does not merge hand-written claims, relationships, annotations,
+volatile flags, or project fields and settings. Compare the backup with the
+regenerated manifest, keep the newly extracted summaries, and manually restore
+only reviewed annotations and settings after verifying IDs and claims. Do not
+copy old metric results back. The `init --force` warning counts every old
+result as missing even when the adapter regenerates it. Version control and a
+separate backup are recommended.
 
 A metric file that is empty, malformed, non-finite (for example `nan` or
 `inf`), not valid UTF-8, or uses an unsupported row shape produces no Result at
