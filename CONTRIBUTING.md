@@ -18,8 +18,11 @@ python -m pytest
 
 Every push and pull request runs the test suite on GitHub Actions
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)): Linux and Windows,
-each on Python 3.10 (the oldest version we support) and 3.14. A pull request
-should be green on all four before it is merged.
+each on Python 3.10 (the oldest version we support) and 3.14, plus Linux and
+Windows on Python 3.10 with the lowest dependency versions the packages
+declare (pinned in [.github/constraints-minimum.txt](.github/constraints-minimum.txt)).
+A pull request should be green on all six jobs before it is merged. If you
+raise a version floor in a `pyproject.toml`, update that file too.
 
 CI does a regular (not editable) install into a fresh environment. To check
 a change the same way before pushing:
@@ -32,7 +35,11 @@ python -m venv /tmp/ci-venv          # any new, empty folder
 ```
 
 On Linux and macOS one test is skipped: it checks a wrong-case path, which
-only resolves on a case-insensitive filesystem such as Windows.
+only resolves on a case-insensitive filesystem such as Windows. With
+Pydantic older than 2.11 (the minimum-dependency jobs), the byte-exact
+schema test is skipped as well; a semantic schema comparison still runs.
+After changing the models, regenerate the committed schema with Pydantic
+2.11 or newer: `runevidence schema -o schema/runevidence.schema.json`.
 
 ## Ground rules
 

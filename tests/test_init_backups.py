@@ -185,3 +185,23 @@ def test_backup_generation_names(name, generation):
 
     assert backup_generation(name) == generation
     assert is_own_file(name) == (generation is not None or name == MANIFEST)
+
+
+def test_a_failed_first_init_leaves_no_partial_manifest(tmp_path, capsys, monkeypatch):
+    from runevidence import manifest as manifest_module
+
+    root = tmp_path / "proj"
+    (root / "runs" / "train").mkdir(parents=True)
+    (root / "runs" / "train" / "metrics.json").write_bytes(b"{}")
+
+    def partial_write(path, text):
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text[:10])
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(manifest_module, "_write", partial_write)
+    assert main(["init", str(root)]) == 2
+
+    assert f"could not write {root / MANIFEST}" in capsys.readouterr().out
+    assert not (root / MANIFEST).exists()
+    assert backups(root) == {}

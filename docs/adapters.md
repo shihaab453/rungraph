@@ -254,9 +254,11 @@ Limits and edge cases:
 - Metric logs are plain text. Core value locators support JSON only, so
   these results have no locator. `validate` detects a changed metric file
   through its hash, but does not re-read its scalar value. `rehash` accepts
-  the new bytes without refreshing these results. To refresh them, back up
-  your manifest and run `init --adapter mlflow --force`, then restore your
-  hand-written claims and links from the backup.
+  the new bytes without refreshing these results, so a recorded value can
+  stay stale after you accept a changed metric file. To refresh them, run
+  `init --adapter mlflow --force`; the previous manifest is kept as a new
+  backup generation that is never overwritten, so you can copy your
+  hand-written claims and links back from it.
 
 Example: [examples/mlflow-file-store](../examples/mlflow-file-store) is a
 small synthetic store with two runs. Copy it before running `init` if you

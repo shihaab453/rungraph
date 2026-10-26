@@ -93,9 +93,11 @@ chosen `step` and `timestamp_ms`.
 
 `validate` detects changed metric bytes through their hash. It does not
 compare the result value again, and `rehash` accepts new bytes without
-refreshing these text-derived results. To refresh them, back up your manifest,
-run `init --adapter mlflow --force`, then restore your hand-written claims and
-links from the backup.
+refreshing these text-derived results, so a recorded value can stay stale
+after you accept a changed metric file. To refresh them, run
+`init --adapter mlflow --force`: the previous manifest is kept as a new backup
+generation (`runevidence.json.bak`, `.bak.2`, ...; never overwritten), so you
+can copy your hand-written claims and links back from it.
 
 A metric file that is empty, malformed, non-finite (for example `nan` or
 `inf`), not valid UTF-8, or uses an unsupported row shape produces no Result at

@@ -109,10 +109,15 @@ def dump_raw(data: dict) -> str:
 def save_manifest(manifest: Manifest, path: Path) -> None:
     """Write a whole manifest. An existing file is replaced only after the
     complete new text is staged beside it, so a failed write leaves the old
-    manifest intact instead of truncated."""
+    manifest intact instead of truncated. A new file that fails part-way is
+    removed, so no truncated manifest is left behind."""
     text = dump_manifest(manifest)
     if not path.exists():
-        _write(path, text)
+        try:
+            _write(path, text)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
         return
     staged = None
     try:

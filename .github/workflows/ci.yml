@@ -3,7 +3,9 @@
 # Matrix: the oldest Python we promise in pyproject.toml (requires-python
 # ">=3.10") and the newest we develop on, on both Linux and Windows. Windows
 # matters because the owner develops there and fixture hashes depend on
-# line endings (see .gitattributes).
+# line endings (see .gitattributes). Two extra jobs install the lowest
+# declared dependency versions (.github/constraints-minimum.txt) on the
+# oldest Python, so the version floors in pyproject.toml are tested too.
 
 name: CI
 
@@ -24,7 +26,7 @@ concurrency:
 
 jobs:
   test:
-    name: pytest (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    name: pytest (${{ matrix.os }}, Python ${{ matrix.python-version }}, ${{ matrix.deps }} deps)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -33,6 +35,14 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.14"]
+        deps: [latest]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+            deps: minimum
+          - os: windows-latest
+            python-version: "3.10"
+            deps: minimum
 
     steps:
       - uses: actions/checkout@v7
@@ -49,12 +59,20 @@ jobs:
       - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[dev]"
+          python -m pip install ".[dev]" ${{ matrix.deps == 'minimum' && '-c .github/constraints-minimum.txt' || '' }}
 
       # Adapter packages live in packages/. Installed after core, so pip
       # uses this checkout's runevidence instead of looking for one online.
       - name: Install adapter packages
-        run: python -m pip install ./packages/runevidence-hydra ./packages/runevidence-mlflow
+        run: python -m pip install ./packages/runevidence-hydra ./packages/runevidence-mlflow ${{ matrix.deps == 'minimum' && '-c .github/constraints-minimum.txt' || '' }}
+
+      - name: Show dependency versions
+        run: python -c "import pydantic, yaml; print('pydantic', pydantic.VERSION, 'PyYAML', yaml.__version__)"
+
+      # Fail if a minimum job did not actually get the pinned versions.
+      - name: Check minimum versions are installed
+        if: matrix.deps == 'minimum'
+        run: python -c "import pydantic, yaml; assert pydantic.VERSION == '2.6.0', pydantic.VERSION; assert yaml.__version__ == '6.0', yaml.__version__"
 
       # The adapter's tests skip themselves when it is not installed. Fail
       # here instead, so a broken install cannot hide behind a green run.

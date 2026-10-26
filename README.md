@@ -373,6 +373,52 @@ stays free of tool dependencies:
 See [docs/adapters.md](docs/adapters.md) for format details, limits and how to
 write an adapter for your tool.
 
+## Limits and guarantees
+
+Read these before relying on a green `validate` for anything important.
+
+- **Consistency, not truth.** A clean result means the folder still matches
+  what the manifest recorded: the files exist with the same bytes, recorded
+  JSON values match their files, and every claim cites valid evidence. It
+  does not mean the experiment was right, the metric is meaningful, the
+  comparison is fair or the claim is scientifically true. RunEvidence checks
+  that your evidence trail is intact, not what it proves.
+- **One writer at a time.** `rehash` and `add` refuse to save if the manifest
+  changed since they read it, but this is a stale-write check, not a lock:
+  another process can still change the file between the final check and the
+  replacement. `init --force` does not lock either. Run one writing command
+  at a time per folder.
+- **MLflow metric summaries can go stale (RE-10).** MLflow metric logs are
+  plain text, so their results have no JSON locator. `validate` detects a
+  changed metric file through its hash, but `rehash` accepts the new bytes
+  without re-reading the summarized value, so the recorded result can keep
+  the old number. To refresh, run `init --adapter mlflow --force` (the old
+  manifest is kept as a backup generation) and copy your hand-written claims
+  back.
+- **Bounded input.** Folder scans never follow symbolic links or Windows
+  junctions out of the folder, and the MLflow adapter enters each physical
+  folder once, so link loops cannot make a scan repeat itself. Hydra
+  `.hydra/` files are converted under fixed limits after YAML aliases are
+  expanded (100,000 values, 2,000,000 characters, 64 levels); a file past a
+  limit or with a self-referencing alias is recorded as unreadable instead of
+  producing a huge manifest. Long `derived_from` chains (tested with 5,000
+  steps) are checked without recursion.
+- **Deeply nested JSON is not yet guarded.** A JSON file nested tens of
+  thousands of levels deep (a manifest, or a metrics file read through a
+  locator) can still stop `validate`, `inspect` or `rehash` with a Python
+  `RecursionError` traceback instead of a finding. Hydra's `config.json` and
+  `overrides.json` are already guarded as described above.
+- **Supported versions.** Python 3.10 or newer. CI runs Linux and Windows on
+  Python 3.10 and 3.14 with the newest dependencies, plus Python 3.10 with
+  the lowest declared versions (`pydantic` 2.6.0, `PyYAML` 6.0). Those
+  oldest releases publish no binary wheels for Python 3.14, so on 3.14 pip
+  picks newer releases; that combination is not tested. `runevidence schema`
+  output is spelled slightly differently before Pydantic 2.11 (it omits
+  `"additionalProperties": true` on free-form fields and `"type": "string"`
+  beside the version constant). Both spellings accept exactly the same
+  manifests; the committed `schema/runevidence.schema.json` uses the 2.11+
+  spelling.
+
 ## Non-goals (V1)
 
 No experiment tracker, dashboard, web UI or server. No training, job

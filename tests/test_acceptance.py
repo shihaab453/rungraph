@@ -5,6 +5,9 @@ import re
 import shutil
 from pathlib import Path
 
+import pydantic
+import pytest
+
 from runevidence.checks import run_checks
 from runevidence.cli import main
 from runevidence.manifest import load_manifest
@@ -62,9 +65,53 @@ def test_absolute_path_broken_by_relocation_gets_a_hint(experiment):
     assert "data/train.csv" in by_code["missing-file"].hint
 
 
+REGENERATE = "regenerate with: runevidence schema -o schema/runevidence.schema.json"
+# The committed schema is generated with Pydantic 2.11 or newer.
+EXACT_SCHEMA_PYDANTIC = (2, 11)
+
+
+def _semantic(node):
+    """Drop spellings that do not change which manifests a schema accepts.
+
+    Pydantic 2.11+ writes ``"additionalProperties": true`` on free-form
+    dict fields (the JSON Schema default anyway) and ``"type": "string"``
+    beside a string ``const``. Older supported 2.x versions omit both, so
+    only these two spellings are ignored; any other difference still fails."""
+    if isinstance(node, list):
+        return [_semantic(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    out = {k: _semantic(v) for k, v in node.items()}
+    if out.get("additionalProperties") is True:
+        del out["additionalProperties"]
+    if "const" in out and isinstance(out["const"], str) and out.get("type") == "string":
+        del out["type"]
+    return out
+
+
 def test_committed_schema_matches_models():
+    # Holds on every supported Pydantic version (pydantic>=2.6,<3).
     committed = json.loads((REPO / "schema" / "runevidence.schema.json").read_text(encoding="utf-8"))
-    assert committed == json_schema(), "regenerate with: runevidence schema -o schema/runevidence.schema.json"
+    assert _semantic(committed) == _semantic(json_schema()), REGENERATE
+
+
+@pytest.mark.skipif(
+    tuple(int(p) for p in pydantic.VERSION.split(".")[:2]) < EXACT_SCHEMA_PYDANTIC,
+    reason="the committed schema is spelled as Pydantic 2.11+ writes it",
+)
+def test_committed_schema_is_exactly_what_current_pydantic_writes():
+    committed = json.loads((REPO / "schema" / "runevidence.schema.json").read_text(encoding="utf-8"))
+    assert committed == json_schema(), REGENERATE
+
+
+def test_semantic_comparison_still_catches_real_schema_changes():
+    schema = json_schema()
+    changed = json.loads(json.dumps(schema))
+    changed["$defs"]["Artifact"]["required"] = ["id"]
+    assert _semantic(changed) != _semantic(schema)
+    loosened = json.loads(json.dumps(schema))
+    loosened["$defs"]["Artifact"]["additionalProperties"] = True
+    assert _semantic(loosened) != _semantic(schema)
 
 
 FORBIDDEN = re.compile(r"\b(celeste|steam|rooms?|ppo|pilots?)\b", re.IGNORECASE)

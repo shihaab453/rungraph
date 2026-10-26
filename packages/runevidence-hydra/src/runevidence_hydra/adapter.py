@@ -271,7 +271,10 @@ def _plain(value: Any) -> Any:
     structure is counted each time it is expanded), and raises
     ``_TooComplex`` as soon as a limit is passed or a structure contains
     itself. Memory therefore stays proportional to the limits, never to the
-    expanded size. The result equals ``_jsonable(value)``."""
+    expanded size. Within the limits the result equals ``_jsonable(value)``.
+    Every value is counted, including one later dropped because two keys
+    convert to the same string (``1`` and ``"1"``), so such a file can be
+    refused slightly earlier than its final size suggests."""
     values = 0
     text = 0
 
