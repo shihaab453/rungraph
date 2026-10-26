@@ -33,7 +33,10 @@ What the manifest gets:
 
 Deliberately left out: user ids, source names/versions, arbitrary tags,
 ``artifact_uri`` and ``artifact_location``. Those URIs are never followed,
-even when they point at a local folder. Symlinks are never followed either.
+even when they point at a local folder. Links are never followed either:
+symbolic links and Windows directory junctions are skipped. As a second
+guard, each physical directory (device and file id) is entered at most once
+per scan, so no link-like loop can make discovery repeat itself.
 
 A metric file that is empty, malformed, non-finite, or uses an unsupported
 row shape is not summarized at all. Its raw bytes are still hashed, and its
@@ -56,7 +59,7 @@ from runevidence.adapters import Adapter, AdapterError, Discovery
 from runevidence.adapters.generic import slug
 from runevidence.checks.files import IGNORED_DIRS
 from runevidence.hashing import sha256_file
-from runevidence.models import BACKUP_FILENAME, MANIFEST_FILENAME, Artifact, Manifest, Project, Result, Run
+from runevidence.models import Artifact, Manifest, Project, Result, Run, is_own_file
 
 MLRUNS_DIR = "mlruns"
 META_FILE = "meta.yaml"
@@ -213,29 +216,75 @@ class _Summary:
 
 def _store_dir(root: Path) -> str:
     candidate = root / MLRUNS_DIR
-    if candidate.is_dir() and not candidate.is_symlink() and _within(root, os.path.realpath(candidate)):
+    if candidate.is_dir() and not _is_link(candidate) and _within(root, os.path.realpath(candidate)):
         return MLRUNS_DIR
     return ""
 
 
+def _is_link(path: Path) -> bool:
+    """A symbolic link or a Windows directory junction.
+
+    ``Path.is_symlink`` is False for a junction, and ``os.walk`` descends into
+    one even with ``followlinks=False``, so junctions are checked separately.
+    Other Windows reparse points (for example cloud-storage placeholders) are
+    ordinary folders and are not affected."""
+    if path.is_symlink():
+        return True
+    isjunction = getattr(os.path, "isjunction", None)  # Python 3.12+
+    if isjunction is not None:
+        return isjunction(path)
+    if os.name != "nt":
+        return False
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return getattr(st, "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+
+
+def _dir_identity(path: Path) -> Optional[tuple[int, int]]:
+    """(device, file id) of a directory, or None when the filesystem reports
+    no usable id (some network shares report 0)."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    if not st.st_ino:
+        return None
+    return (st.st_dev, st.st_ino)
+
+
 def _walk_files(root: Path) -> Iterator[str]:
-    """Regular files under root, never following a symlink or leaving root."""
+    """Regular files under root, never following a link or leaving root.
+
+    Each physical directory is entered at most once, so even a loop that is
+    not recognized as a link (for example a bind mount of an ancestor) ends
+    after one pass instead of repeating the same files under longer paths."""
+    seen: set[tuple[int, int]] = set()
+    root_identity = _dir_identity(root)
+    if root_identity is not None:
+        seen.add(root_identity)
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         kept: list[str] = []
         for name in sorted(dirnames):
             if name in IGNORED_DIRS:
                 continue
             full = Path(dirpath) / name
-            if full.is_symlink() or not _within(root, os.path.realpath(full)):
+            if _is_link(full) or not _within(root, os.path.realpath(full)):
                 continue
+            identity = _dir_identity(full)
+            if identity is not None:
+                if identity in seen:
+                    continue
+                seen.add(identity)
             kept.append(name)
         dirnames[:] = kept
         for name in sorted(filenames):
             full = Path(dirpath) / name
             rel = full.relative_to(root).as_posix()
-            # Only the generated manifest and its backup at the selected root
+            # Only the generated manifest and its backups at the selected root
             # are omitted. A nested file with the same name is ordinary content.
-            if rel in (MANIFEST_FILENAME, BACKUP_FILENAME):
+            if is_own_file(rel):
                 continue
             if full.is_symlink():
                 continue
@@ -313,7 +362,7 @@ def _safe_subdirs(folder: Path, root: Path) -> list[Path]:
             or entry.name in RESERVED_EXPERIMENT_DIRS
         ):
             continue
-        if not entry.is_dir() or entry.is_symlink():
+        if not entry.is_dir() or _is_link(entry):
             continue
         if not _within(root, os.path.realpath(entry)):
             continue
@@ -322,7 +371,7 @@ def _safe_subdirs(folder: Path, root: Path) -> list[Path]:
 
 
 def _safe_file(path: Path, root: Path) -> bool:
-    if path.is_symlink():
+    if _is_link(path):
         return False
     try:
         st = path.stat(follow_symlinks=False)
@@ -538,7 +587,10 @@ def _kind(rel: str, run_dir: Optional[str]) -> Optional[str]:
 
 
 def _within(root: Path, path: Any) -> bool:
-    root_text = os.path.normcase(os.path.abspath(root))
+    # Callers pass a physically resolved path, so the root is resolved too.
+    # Otherwise a root reached through a link or junction would contain
+    # nothing at all.
+    root_text = os.path.normcase(os.path.realpath(root))
     path_text = os.path.normcase(os.path.abspath(str(path)))
     return path_text == root_text or path_text.startswith(root_text.rstrip(os.sep) + os.sep)
 

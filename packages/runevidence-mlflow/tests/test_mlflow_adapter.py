@@ -8,6 +8,8 @@ import errno
 import json
 import os
 import shutil
+import subprocess
+import threading
 from datetime import datetime, timezone
 from importlib.metadata import distribution, entry_points
 from pathlib import Path
@@ -25,6 +27,7 @@ from runevidence.hashing import sha256_file  # noqa: E402
 from runevidence.manifest import dump_manifest, load_manifest, save_manifest  # noqa: E402
 from runevidence.models import MANIFEST_FILENAME, Manifest  # noqa: E402
 from runevidence_mlflow import MlflowAdapter, __version__  # noqa: E402
+from runevidence_mlflow import adapter as adapter_module  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[3]
 EXAMPLE = REPO / "examples" / "mlflow-file-store"
@@ -589,6 +592,116 @@ def test_symlinks_outside_the_root_are_not_followed(tmp_path):
     assert "mlruns/0/run1/external-dir/secret.txt" not in paths
     assert not any("linked-experiment" in path for path in paths)
     assert "secret" not in dump_manifest(manifest)
+
+
+def make_dir_link(link: Path, target: Path) -> bool:
+    """A directory link: a junction on Windows (no privilege needed), a
+    symbolic link elsewhere. Returns False when the platform refuses."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except OSError:
+        return False
+    return True
+
+
+def discover_within(root: Path, seconds: float = 60.0):
+    """Run discovery in a daemon thread so a traversal loop fails the test
+    instead of hanging the whole run."""
+    out: dict = {}
+
+    def go() -> None:
+        try:
+            out["discovery"] = MlflowAdapter().discover(root)
+        except BaseException as exc:  # reported in the main thread
+            out["error"] = exc
+
+    worker = threading.Thread(target=go, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    assert not worker.is_alive(), f"discovery did not finish within {seconds} seconds"
+    if "error" in out:
+        raise out["error"]
+    return out["discovery"]
+
+
+def looped_store(tmp_path: Path) -> tuple[Path, Path]:
+    """A store whose run folder contains a directory link back to the run
+    itself and one to the experiment above it: two in-root loops."""
+    root = tmp_path / "project"
+    run_dir = make_store(root / "mlruns")
+    write(run_dir / "artifacts" / "model.txt", "weights\n")
+    write(run_dir / "metrics" / "loss", "1729000000000 0.5 1\n")
+    if not (
+        make_dir_link(run_dir / "artifacts" / "loop", run_dir)
+        and make_dir_link(run_dir / "up", root / "mlruns" / "0")
+    ):
+        pytest.skip("this platform cannot create directory links")
+    return root, run_dir
+
+
+LOOPED_FILES = [
+    "mlruns/0/meta.yaml",
+    "mlruns/0/run1/artifacts/model.txt",
+    "mlruns/0/run1/meta.yaml",
+    "mlruns/0/run1/metrics/loss",
+]
+
+
+def test_in_root_directory_link_loops_are_not_followed(tmp_path):
+    # F-01: os.walk(followlinks=False) still enters a Windows junction, so a
+    # junction back to an ancestor repeated every file under ever longer
+    # paths. Links of either kind are now skipped, and discovery ends.
+    root, _ = looped_store(tmp_path)
+
+    discovery = discover_within(root)
+
+    assert discovery.files == LOOPED_FILES
+    manifest = extract(root)
+    assert [a.path for a in manifest.artifacts] == LOOPED_FILES
+    assert [r.name for r in manifest.runs] == ["run-run1"]
+    assert [(r.name, r.value) for r in manifest.results] == [("loss", 0.5)]
+    assert_clean(root, manifest)
+
+
+def test_each_physical_directory_is_entered_once_even_if_a_link_is_missed(tmp_path, monkeypatch):
+    # Second guard: pretend link detection failed and let os.walk follow
+    # links. The directory identity check alone must stop the loops.
+    root, _ = looped_store(tmp_path)
+    real_walk = os.walk
+    monkeypatch.setattr(adapter_module, "_is_link", lambda path: False)
+    monkeypatch.setattr(
+        adapter_module.os,
+        "walk",
+        lambda top, followlinks=False, **kw: real_walk(top, followlinks=True, **kw),
+    )
+
+    files = discover_within(root).files
+
+    assert len(files) == len(set(files))
+    assert sorted(f for f in files if "/loop/" not in f and "/up/" not in f) == LOOPED_FILES
+    assert len(files) == len(LOOPED_FILES)
+
+
+def test_a_root_reached_through_a_directory_link_is_read_normally(tmp_path):
+    real = copy_example(tmp_path)
+    alias = tmp_path / "alias"
+    if not make_dir_link(alias, real):
+        pytest.skip("this platform cannot create directory links")
+
+    via_alias = discover_within(alias)
+    direct = discover_within(real)
+
+    assert via_alias.files == direct.files
+    assert len(via_alias.files) > 0
+    assert {r.name for r in extract(alias).runs} == {"baseline", "tuned"}
 
 
 def test_trash_files_are_hashed_but_never_become_runs(tmp_path):

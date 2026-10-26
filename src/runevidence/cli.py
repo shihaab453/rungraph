@@ -4,17 +4,20 @@ Exit codes (stable, safe to use in CI):
   0  no errors (warnings are allowed unless --strict)
   1  the evidence has problems: errors found, or warnings with --strict
   2  could not check at all: manifest missing, unreadable or schema-invalid,
-     bad arguments, or init refused to overwrite or could not read the folder;
+     bad arguments, or init refused to overwrite, could not read the folder,
+     or could not write its backup or the new manifest (nothing is replaced);
      for rehash and add: the change could not be made, and nothing was written
 
 validate, inspect and adapters never write. schema -o writes a schema file.
-init, rehash and add write the manifest; init --force also keeps a backup.
+init, rehash and add write the manifest; init --force also keeps a backup
+and never overwrites or deletes an earlier one.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
@@ -27,7 +30,7 @@ from .adapters.generic import valid_slug
 from .checks import EXIT_INVALID, EXIT_OK, Report, run_checks
 from .edit import EditError, glob_match, plan_add, plan_rehash, select_artifacts
 from .manifest import LoadedManifest, ManifestLoadError, load_manifest, load_raw, save_manifest, save_raw
-from .models import BACKUP_FILENAME, MANIFEST_FILENAME, Manifest, json_schema
+from .models import BACKUP_FILENAME, MANIFEST_FILENAME, Manifest, backup_generation, json_schema
 from .report import format_findings, format_overview, to_json
 
 
@@ -106,9 +109,21 @@ def cmd_init(args: argparse.Namespace) -> int:
         return EXIT_INVALID
     if args.volatile:
         manifest = _mark_volatile(manifest, args.volatile)
+    backup: Optional[Path] = None
     if out.exists():
-        _backup_existing(out, manifest)
-    save_manifest(manifest, out)
+        try:
+            backup = _backup_existing(out, manifest)
+        except OSError as exc:
+            print(f"ERROR: could not back up the existing manifest: {exc}")
+            print(f"Nothing was written; {out} is unchanged.")
+            return EXIT_INVALID
+    try:
+        save_manifest(manifest, out)
+    except OSError as exc:
+        print(f"ERROR: could not write {out}: {exc}")
+        if backup is not None:
+            print(f"{out} was not replaced. Its previous contents are also saved in {backup}.")
+        return EXIT_INVALID
     volatile = sum(a.volatile for a in manifest.artifacts)
     print(
         f"Wrote {out}\n"
@@ -257,22 +272,71 @@ def cmd_add(args: argparse.Namespace) -> int:
     return _finish_edit(args, raw, loaded, summary)
 
 
-def _backup_existing(out: Path, new: Manifest) -> None:
+def _backup_existing(out: Path, new: Manifest) -> Path:
     """``init --force`` regenerates from disk, which drops everything written
-    by hand. Keep the old file and say exactly what the new one lacks."""
-    backup = out.with_name(BACKUP_FILENAME)
-    backup.write_bytes(out.read_bytes())
-    print(f"Saved the previous manifest to {backup}")
+    by hand. Keep the old file and say exactly what the new one lacks.
+
+    Every backup is a new generation: runevidence.json.bak first, then
+    runevidence.json.bak.2, .bak.3, ... An earlier backup is never
+    overwritten or deleted, so repeated runs cannot destroy the only copy of
+    a hand-edited manifest. If the newest backup already holds exactly the
+    current bytes, it is reused instead of writing a duplicate. Raises
+    OSError (before the manifest is touched) if the backup cannot be made."""
+    data = out.read_bytes()
+    newest_gen, newest = _newest_backup(out.parent)
+    if newest is not None and _same_bytes(newest, data):
+        backup = newest
+        print(f"The previous manifest is already saved in {backup}")
+    else:
+        name = BACKUP_FILENAME if newest_gen == 0 else f"{BACKUP_FILENAME}.{newest_gen + 1}"
+        backup = out.with_name(name)
+        _write_new_file(backup, data)
+        print(f"Saved the previous manifest to {backup}")
     try:
         old = load_manifest(out).manifest
     except ManifestLoadError:
-        return
+        return backup
     lost, renamed = _lost_on_regenerate(old, new)
     if lost:
         print(f"  WARNING: the new manifest does not contain its {', '.join(lost)}; copy them back from the backup.")
     if renamed:
         examples = ", ".join(f"{a!r} is now {b!r}" for a, b in renamed[:3])
         print(f"  NOTE: {_count(len(renamed), 'artifact')} got a new ID ({examples}); update references when copying back.")
+    return backup
+
+
+def _newest_backup(folder: Path) -> tuple[int, Optional[Path]]:
+    """Highest backup generation present in ``folder`` (0 if none) and its path."""
+    best, path = 0, None
+    for name in os.listdir(folder):
+        gen = backup_generation(name)
+        if gen is not None and gen > best:
+            best, path = gen, folder / name
+    return best, path
+
+
+def _same_bytes(path: Path, data: bytes) -> bool:
+    try:
+        return path.is_file() and path.read_bytes() == data
+    except OSError:
+        return False
+
+
+def _write_new_file(path: Path, data: bytes) -> None:
+    """Create ``path`` with ``data``, refusing to replace anything already
+    there (even a file created since its name was chosen). A partly written
+    file is removed, and the result is read back before it is trusted."""
+    with open(path, "xb") as fh:
+        try:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        except BaseException:
+            fh.close()
+            path.unlink(missing_ok=True)
+            raise
+    if path.read_bytes() != data:
+        raise OSError(f"backup {path} does not match the manifest it should copy")
 
 
 def _count(n: int, word: str) -> str:

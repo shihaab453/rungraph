@@ -15,7 +15,7 @@ from typing import Optional
 from ..findings import Code, Finding, Severity
 from ..hashing import sha256_file
 from ..manifest import LoadedManifest
-from ..models import BACKUP_FILENAME, MANIFEST_FILENAME, Artifact
+from ..models import Artifact, is_own_file
 
 # Folders never treated as experiment content when scanning for hints or
 # untracked files.
@@ -118,7 +118,7 @@ class _TreeIndex:
     @property
     def files(self) -> list[str]:
         if self._files is None:
-            self._files = [p for p in iter_files(self.root) if p not in (MANIFEST_FILENAME, BACKUP_FILENAME)]
+            self._files = [p for p in iter_files(self.root) if not is_own_file(p)]
         return self._files
 
     def same_content(self, rel: str, art: Artifact) -> bool:

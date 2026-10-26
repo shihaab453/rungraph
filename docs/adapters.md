@@ -224,8 +224,11 @@ Limits and edge cases:
 - This supports on-disk file stores only, with no tracking server, database,
   API calls or network access. `artifact_uri` and `artifact_location` are
   neither followed nor copied. External artifacts must be copied inside the
-  selected root to be tracked. All symlinks are skipped, including links
-  whose targets are inside the root.
+  selected root to be tracked. All symlinks and Windows directory junctions
+  are skipped, including links whose targets are inside the root. Each
+  physical folder is also entered at most once per scan, so a link loop
+  cannot make discovery repeat files under ever longer paths. A root that is
+  itself reached through a link or junction is read normally.
 - Machine-specific metadata such as user IDs, source paths and arbitrary
   tags is not copied into the manifest. Params remain the values you logged,
   so check them before sharing a manifest if they contain private paths.

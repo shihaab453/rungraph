@@ -256,7 +256,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](docs/dogfood-mlp-sw
 | --- | --- |
 | `runevidence validate PATH` | Run every check, print only problems. |
 | `runevidence inspect PATH` | Summarize the manifest, then run every check, also listing files the manifest does not track. |
-| `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`, `--volatile GLOB`). With `--force`, the old manifest is kept as `runevidence.json.bak`, because a fresh scan does not carry over hand-written results and claims. |
+| `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`, `--volatile GLOB`). With `--force`, the old manifest is kept as a backup, because a fresh scan does not carry over hand-written results and claims. See [Backups from `init --force`](#backups-from-init---force). |
 | `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read result values from changed files (`--volatile`, `--no-volatile`, `--dry-run`). |
 | `runevidence add PATH FILE...` | Track new files or folders without re-running `init` (`--id`, `--kind`, `--run`, `--no-run`, `--volatile`, `--dry-run`). |
 | `runevidence schema [-o FILE]` | Print the manifest JSON Schema (also committed at `schema/runevidence.schema.json`). |
@@ -274,11 +274,29 @@ know whether something passed without reading the text.
 | --- | --- |
 | `0` | No errors. Warnings may exist unless `--strict`. |
 | `1` | The evidence has problems: errors, or warnings under `--strict`. |
-| `2` | Could not check at all: manifest missing, not valid JSON, or does not match the schema; bad arguments; `init` refused to overwrite; `rehash` or `add` could not make the change (nothing was written). |
+| `2` | Could not check at all: manifest missing, not valid JSON, or does not match the schema; bad arguments; `init` refused to overwrite, or could not write its backup or the new manifest (the old manifest is left as it was); `rehash` or `add` could not make the change (nothing was written). |
 
 `validate`, `inspect` and `adapters` never write anything. `schema -o FILE`
 writes the schema to that file. `init`, `rehash` and `add` write the manifest;
-`init --force` also keeps the previous manifest as `runevidence.json.bak`.
+`init --force` also keeps the previous manifest as a backup.
+
+### Backups from `init --force`
+
+Every forced `init` keeps the manifest it is about to replace as a new
+backup generation next to it: `runevidence.json.bak` first, then
+`runevidence.json.bak.2`, `runevidence.json.bak.3`, and so on. The highest
+number is the newest. An existing backup is never overwritten, and
+RunEvidence never deletes backups, so repeated runs cannot destroy the only
+copy of a hand-edited manifest. Delete old generations yourself when you no
+longer need them. If the manifest is byte-for-byte identical to the newest
+backup, that backup is reused instead of writing a duplicate.
+
+The backup is written and read back before the manifest is touched, and the
+new manifest is staged beside the old one before replacing it. If either
+step fails, `init` exits 2 and the existing manifest is left as it was; a
+partly written backup is removed. Backups at the experiment root are never
+tracked as artifacts or reported as untracked files. To restore one, copy
+it over `runevidence.json`.
 
 ## The manifest
 

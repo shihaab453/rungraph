@@ -14,7 +14,7 @@ from pathlib import Path, PurePosixPath
 
 from ..checks.files import _within, iter_files
 from ..hashing import sha256_file
-from ..models import BACKUP_FILENAME, MANIFEST_FILENAME, Artifact, Manifest, Project, Run
+from ..models import Artifact, Manifest, Project, Run, is_own_file
 from .base import Adapter, AdapterError, Discovery
 
 RUNS_DIR = "runs"
@@ -46,7 +46,7 @@ class GenericAdapter(Adapter):
     description = "Any folder: hash every file, treat runs/<name>/ subfolders as runs."
 
     def discover(self, root: Path) -> Discovery:
-        files = [p for p in iter_files(root) if p not in (MANIFEST_FILENAME, BACKUP_FILENAME)]
+        files = [p for p in iter_files(root) if not is_own_file(p)]
         runs = sorted({PurePosixPath(p).parts[1] for p in files if _run_of(p)})
         return Discovery(root=root, files=files, details={"runs": runs})
 

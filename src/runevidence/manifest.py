@@ -107,7 +107,29 @@ def dump_raw(data: dict) -> str:
 
 
 def save_manifest(manifest: Manifest, path: Path) -> None:
-    _write(path, dump_manifest(manifest))
+    """Write a whole manifest. An existing file is replaced only after the
+    complete new text is staged beside it, so a failed write leaves the old
+    manifest intact instead of truncated."""
+    text = dump_manifest(manifest)
+    if not path.exists():
+        _write(path, text)
+        return
+    staged = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="\n", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as fh:
+            staged = Path(fh.name)
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if os.name != "nt":
+            os.chmod(staged, stat.S_IMODE(path.stat().st_mode))
+        os.replace(staged, path)
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
 
 
 def load_raw(loaded: LoadedManifest) -> dict:

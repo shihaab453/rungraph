@@ -108,8 +108,10 @@ partial log when one row is bad.
 - File stores only. There is no server, REST API, SQL store, tracking URI
   resolution, or network access.
 - No URI following. `artifact_uri` and `artifact_location` are metadata only.
-- Symlinks are skipped, including links that stay inside the folder, so a scan
-  can never wander outside the requested root.
+- Symlinks and Windows directory junctions are skipped, including links that
+  stay inside the folder, so a scan can never wander outside the requested
+  root. Each physical folder is entered at most once per scan, so a link loop
+  cannot repeat files under ever longer paths.
 - Broken, unsafe, or wrong-shape experiment/run `meta.yaml` is a hard error:
   `init` prints an `AdapterError` message and exits 2 without writing. YAML is
   read with `yaml.safe_load`, so tags such as `!!python/object` are refused.

@@ -16,6 +16,7 @@ free-form ``metadata`` / ``params`` dictionaries.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal, Optional, Union
@@ -25,6 +26,25 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 SCHEMA_VERSION = "0.1"
 MANIFEST_FILENAME = "runevidence.json"
 BACKUP_FILENAME = MANIFEST_FILENAME + ".bak"  # written by `init --force`
+# `init --force` never overwrites an earlier backup. The first one is
+# runevidence.json.bak (generation 1); later ones are runevidence.json.bak.2,
+# runevidence.json.bak.3, and so on. Nothing is ever deleted automatically.
+_BACKUP_RE = re.compile(r"^" + re.escape(BACKUP_FILENAME) + r"(?:\.([1-9][0-9]*))?$")
+
+
+def backup_generation(name: str) -> Optional[int]:
+    """The generation number of an ``init --force`` backup file name, else None."""
+    match = _BACKUP_RE.match(name)
+    if match is None:
+        return None
+    return int(match.group(1)) if match.group(1) else 1
+
+
+def is_own_file(rel: str) -> bool:
+    """True for RunEvidence's own files at the experiment root: the manifest
+    and every backup generation. They are never tracked as artifacts. A file
+    with the same name in a subfolder is ordinary content."""
+    return rel == MANIFEST_FILENAME or backup_generation(rel) is not None
 
 # IDs are short, path-safe tokens so they can appear in CLI output and URLs.
 ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"

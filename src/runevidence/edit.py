@@ -26,7 +26,7 @@ from .checks.results import _MISSING, MAX_JSON_BYTES, resolve_pointer, values_ma
 from .findings import Code
 from .hashing import sha256_file
 from .manifest import LoadedManifest, artifact_to_dict
-from .models import BACKUP_FILENAME, MANIFEST_FILENAME, Artifact, Manifest
+from .models import Artifact, Manifest, is_own_file
 
 GLOB_CHARS = set("*?[")
 
@@ -358,7 +358,7 @@ def plan_add(
             raise EditError(f"{str(given)!r} is outside the experiment folder {root}")
         if full.is_dir():
             for rel in iter_files(root, full):
-                if rel in (MANIFEST_FILENAME, BACKUP_FILENAME):
+                if is_own_file(rel):
                     continue
                 if _key(root / rel) in tracked:
                     plan.skipped.append(rel)
@@ -366,7 +366,7 @@ def plan_add(
                     rels.append(rel)
             continue
         rel = full.relative_to(root).as_posix()
-        if rel in (MANIFEST_FILENAME, BACKUP_FILENAME):
+        if is_own_file(rel):
             raise EditError(f"{rel} is RunEvidence's own file and cannot be tracked")
         if _key(full) in tracked:
             raise EditError(
