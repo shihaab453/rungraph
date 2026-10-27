@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,14 @@ from ..models import Manifest
 
 MAX_JSON_BYTES = 50 * 1024 * 1024
 _MISSING = object()
+_INDEX = re.compile(r"0|[1-9][0-9]*")
+
+
+def _is_index(token: str, size: int) -> bool:
+    """RFC 6901 array index: ASCII digits, no leading zero, inside the list.
+    Compared as text, so a huge token never reaches int()."""
+    bound = str(size)
+    return _INDEX.fullmatch(token) is not None and (len(token), token) < (len(bound), bound)
 
 
 def resolve_pointer(doc: Any, pointer: str) -> Any:
@@ -29,7 +38,7 @@ def resolve_pointer(doc: Any, pointer: str) -> Any:
         token = token.replace("~1", "/").replace("~0", "~")
         if isinstance(current, dict) and token in current:
             current = current[token]
-        elif isinstance(current, list) and token.isdigit() and int(token) < len(current):
+        elif isinstance(current, list) and _is_index(token, len(current)):
             current = current[int(token)]
         else:
             return _MISSING

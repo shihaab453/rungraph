@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from runevidence.checks import run_checks
 from runevidence.checks.results import _MISSING, resolve_pointer, values_match
+from runevidence.cli import main
 from runevidence.findings import Code, Severity
 from runevidence.manifest import load_manifest
 
@@ -83,6 +87,36 @@ def test_resolve_pointer_handles_list_indices_and_missing_entries():
     assert resolve_pointer(doc, "/nested/missing") is _MISSING
 
 
+def test_resolve_pointer_accepts_multi_digit_and_nested_list_indices():
+    doc = {"items": list(range(12)), "runs": [{"scores": [0.1, 0.2]}]}
+
+    assert resolve_pointer(doc, "/items/10") == 10
+    assert resolve_pointer(doc, "/items/11") == 11
+    assert resolve_pointer(doc, "/items/12") is _MISSING
+    assert resolve_pointer(doc, "/runs/0/scores/1") == 0.2
+
+
+def test_resolve_pointer_rejects_non_canonical_list_indices_without_raising():
+    doc = {"items": ["a", "b"], "empty": []}
+
+    # Superscript two passes str.isdigit() but int() rejects it; 5000 digits exceeds
+    # Python's integer-string conversion limit. Both used to raise.
+    for token in ["", "-", "-1", "+1", "01", "00", " 1", "1 ", "\u00b2", "\u0661", "9" * 5000]:
+        assert resolve_pointer(doc, "/items/" + token) is _MISSING, repr(token[:10])
+    assert resolve_pointer(doc, "/empty/0") is _MISSING
+
+
+def test_resolve_pointer_keeps_object_keys_that_look_like_bad_indices():
+    doc = {"\u00b2": "yes", "01": "value", "": "empty", "a/b": "slash", "a~b": "tilde", "9" * 5000: "long"}
+
+    assert resolve_pointer(doc, "/\u00b2") == "yes"
+    assert resolve_pointer(doc, "/01") == "value"
+    assert resolve_pointer(doc, "/") == "empty"
+    assert resolve_pointer(doc, "/a~1b") == "slash"
+    assert resolve_pointer(doc, "/a~0b") == "tilde"
+    assert resolve_pointer(doc, "/" + "9" * 5000) == "long"
+
+
 def test_resolve_pointer_accepts_empty_and_rejects_bad_syntax():
     doc = {"value": 7}
 
@@ -102,6 +136,54 @@ def test_unresolvable_locator_is_unverifiable(experiment):
     assert finding.severity is Severity.warning
     assert finding.subject == "tuned-accuracy"
     assert "not found" in finding.message
+
+
+BAD_INDEX_LOCATORS = ["/eval/scores/\u00b2", "/eval/scores/01", "/eval/scores/" + "9" * 5000]
+BAD_INDEX_IDS = ["superscript-two", "zero-padded", "5000-digits"]
+
+
+def use_metrics_with_a_list(root: Path, locator: str) -> None:
+    """Record a tuned metrics file holding a list, and point the result at it."""
+    data = json.dumps({"eval": {"scores": [1.0, 0.5]}}).encode()
+    (root / "runs" / "tuned" / "metrics.json").write_bytes(data)
+    doc = read_doc(root)
+    art = next(a for a in doc["artifacts"] if a["id"] == "tuned-metrics")
+    art["sha256"] = hashlib.sha256(data).hexdigest()
+    art["size_bytes"] = len(data)
+    doc["results"][1]["locator"] = locator
+    write_doc(root, doc)
+
+
+def test_list_locator_resolves_in_a_recorded_metrics_file(experiment):
+    use_metrics_with_a_list(experiment, "/eval/scores/0")
+
+    assert codes(check(experiment)) == []
+
+
+@pytest.mark.parametrize("locator", BAD_INDEX_LOCATORS, ids=BAD_INDEX_IDS)
+def test_malformed_list_index_locator_is_unverifiable(experiment, locator):
+    use_metrics_with_a_list(experiment, locator)
+
+    report = check(experiment)
+    finding = only(report, Code.result_unverifiable)
+
+    assert codes(report) == ["result-unverifiable"]
+    assert finding.severity is Severity.warning
+    assert finding.subject == "tuned-accuracy"
+    assert "not found" in finding.message
+
+
+@pytest.mark.parametrize("locator", BAD_INDEX_LOCATORS, ids=BAD_INDEX_IDS)
+def test_malformed_list_index_locator_keeps_validate_json_parseable(experiment, locator, capsys):
+    use_metrics_with_a_list(experiment, locator)
+
+    assert main(["validate", str(experiment), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert [f["code"] for f in data["findings"]] == ["result-unverifiable"]
+    assert data["counts"]["warning"] == 1
+
+    assert main(["validate", str(experiment), "--json", "--strict"]) == 1
+    assert json.loads(capsys.readouterr().out)["exit_code"] == 1
 
 
 def test_locator_without_artifact_id_is_unverifiable(experiment):

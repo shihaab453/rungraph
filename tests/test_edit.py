@@ -322,6 +322,27 @@ def test_rehash_leaves_a_value_alone_when_the_locator_is_gone(experiment, capsys
     assert "result-unverifiable" in codes(experiment)
 
 
+@pytest.mark.parametrize(
+    "token", ["\u00b2", "01", "9" * 5000], ids=["superscript-two", "zero-padded", "5000-digits"]
+)
+def test_rehash_leaves_a_value_alone_when_a_list_index_is_malformed(experiment, capsys, token):
+    locator = "/eval/scores/" + token
+    doc = read_doc(experiment)
+    doc["results"][1]["locator"] = locator
+    write_doc(experiment, doc)
+    new_metrics = b'{"eval": {"scores": [0.25, 0.5]}}\n'
+    (experiment / "runs" / "tuned" / "metrics.json").write_bytes(new_metrics)
+
+    assert main(["rehash", str(experiment), "tuned-metrics"]) == 0
+    out = capsys.readouterr().out
+
+    assert f"NOTE tuned-accuracy: {locator} is not in runs/tuned/metrics.json any more; value left as is" in out
+    after = read_doc(experiment)
+    assert after["results"][1]["value"] == 1.0
+    assert artifact(after, "tuned-metrics")["size_bytes"] == len(new_metrics)
+    assert codes(experiment) == ["result-unverifiable"]
+
+
 def test_hash_mismatch_hint_names_the_rehash_command(experiment):
     retrain_tuned(experiment)
     report = run_checks(load_manifest(experiment))
