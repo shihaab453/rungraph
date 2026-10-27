@@ -1,0 +1,237 @@
+{
+  "schema_version": "0.1",
+  "project": {
+    "id": "breast-cancer-classifier-comparison",
+    "name": "Breast cancer classifier comparison",
+    "description": "Logistic regression vs random forest on scikit-learn's Wisconsin breast-cancer data.",
+    "tags": [],
+    "metadata": {}
+  },
+  "runs": [
+    {
+      "id": "run-forest",
+      "name": "forest",
+      "started_at": null,
+      "params": {},
+      "metadata": {}
+    },
+    {
+      "id": "run-logreg",
+      "name": "logreg",
+      "started_at": null,
+      "params": {},
+      "metadata": {}
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "train.py",
+      "path": "train.py",
+      "sha256": "2689168ac2eb26ee98ffded0623fe1260e1c1b991d0801a4558a3ea504a63f27",
+      "size_bytes": 4616,
+      "kind": null,
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "data-breast_cancer.csv",
+      "path": "data/breast_cancer.csv",
+      "sha256": "7dd8e4f78b55cb5fa3cba00b0e61fa6046cbadcdaaa60ca5e48827b536723906",
+      "size_bytes": 120381,
+      "kind": null,
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "data-split.json",
+      "path": "data/split.json",
+      "sha256": "983da5ec6c79f6e6b7202a5595be1381b37e538f0e185d8b22ebd7428d814571",
+      "size_bytes": 2769,
+      "kind": null,
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "runs-forest-config.json",
+      "path": "runs/forest/config.json",
+      "sha256": "2d66ea5f6999465aed1ce4eddff9d6e1c023607fcc3647bafc00d418ff4a3b4f",
+      "size_bytes": 85,
+      "kind": null,
+      "run_id": "run-forest",
+      "metadata": {}
+    },
+    {
+      "id": "runs-forest-metrics.json",
+      "path": "runs/forest/metrics.json",
+      "sha256": "a792aa8cc0127841ebf0e62919b666b1214707be42f1dc93e575dfa80e445ed9",
+      "size_bytes": 122,
+      "kind": null,
+      "run_id": "run-forest",
+      "metadata": {}
+    },
+    {
+      "id": "runs-forest-model.pkl",
+      "path": "runs/forest/model.pkl",
+      "sha256": "e5e56733ceec5a2c61d4e8d0db109e8bdc2af894f8222aa4cceb7fbae3c684f2",
+      "size_bytes": 100892,
+      "kind": null,
+      "run_id": "run-forest",
+      "metadata": {}
+    },
+    {
+      "id": "runs-forest-predictions.csv",
+      "path": "runs/forest/predictions.csv",
+      "sha256": "ca63b4cec5c292b50da57b8bbf51f2350eb371ccac015c05103f97ce0edc91e7",
+      "size_bytes": 2136,
+      "kind": null,
+      "run_id": "run-forest",
+      "metadata": {}
+    },
+    {
+      "id": "runs-forest-train.log",
+      "path": "runs/forest/train.log",
+      "sha256": "0dd57c82caa5dd969eee8b3f3c1e667337a3e9c4e6c4624aa7bd1f54346cb308",
+      "size_bytes": 133,
+      "kind": null,
+      "run_id": "run-forest",
+      "metadata": {}
+    },
+    {
+      "id": "runs-logreg-config.json",
+      "path": "runs/logreg/config.json",
+      "sha256": "8aceb26c82c1979ea536a0701ab06b9078cbc07c2973f0899454c9f743774943",
+      "size_bytes": 83,
+      "kind": null,
+      "run_id": "run-logreg",
+      "metadata": {}
+    },
+    {
+      "id": "runs-logreg-metrics.json",
+      "path": "runs/logreg/metrics.json",
+      "sha256": "441e280401b9bf863cbd78a41665e413674c39df3c489b206ce2c7f98ca63c48",
+      "size_bytes": 123,
+      "kind": null,
+      "run_id": "run-logreg",
+      "metadata": {}
+    },
+    {
+      "id": "runs-logreg-model.pkl",
+      "path": "runs/logreg/model.pkl",
+      "sha256": "6f430eee831e0f7e11f9dec0e612920c513c3cb8345fc973abdc4c7751b8d910",
+      "size_bytes": 2025,
+      "kind": null,
+      "run_id": "run-logreg",
+      "metadata": {}
+    },
+    {
+      "id": "runs-logreg-predictions.csv",
+      "path": "runs/logreg/predictions.csv",
+      "sha256": "ac84f82d73dc9f79c646421bf9fb4e667a3e6841905411ab68e1db76880244f9",
+      "size_bytes": 2136,
+      "kind": null,
+      "run_id": "run-logreg",
+      "metadata": {}
+    },
+    {
+      "id": "runs-logreg-train.log",
+      "path": "runs/logreg/train.log",
+      "sha256": "b7310b5ec581035fc9b3073eca71b521db0e50e95c8debfc991a00eaf2971cb2",
+      "size_bytes": 134,
+      "kind": null,
+      "run_id": "run-logreg",
+      "metadata": {}
+    },
+    {
+      "id": "report",
+      "path": "REPORT.md",
+      "sha256": "51963FC69CA2CDD7B960BF2519B3D35C6B4A5467AE158E77233E6A787895492B",
+      "size_bytes": 704
+    }
+  ],
+  "results": [
+    {
+      "id": "logreg-accuracy",
+      "run_id": "run-logreg",
+      "name": "test_accuracy",
+      "value": 0.986,
+      "artifact_id": "runs-logreg-metrics.json",
+      "locator": "/test/accuracy"
+    },
+    {
+      "id": "forest-accuracy",
+      "run_id": "run-forest",
+      "name": "test_accuracy",
+      "value": 0.958,
+      "artifact_id": "runs-forest-metrics.json",
+      "locator": "/test/accuracy"
+    },
+    {
+      "id": "logreg-auc",
+      "run_id": "run-logreg",
+      "name": "test_roc_auc",
+      "value": 0.9977,
+      "artifact_id": "runs-logreg-metrics.json",
+      "locator": "/test/roc_auc"
+    },
+    {
+      "id": "forest-auc",
+      "run_id": "run-forest",
+      "name": "test_roc_auc",
+      "value": 0.9948,
+      "artifact_id": "runs-forest-metrics.json",
+      "locator": "/test/roc_auc"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "C1",
+      "claim": "Logistic regression beats the random forest on test accuracy.",
+      "supports": [
+        "logreg-accuracy",
+        "forest-accuracy"
+      ],
+      "source": "REPORT.md#C1"
+    },
+    {
+      "id": "C2",
+      "claim": "Both models exceed 0.99 test ROC AUC.",
+      "supports": [
+        "logreg-auc",
+        "forest-auc"
+      ],
+      "source": "REPORT.md#C2"
+    }
+  ],
+  "relationships": [
+    {
+      "source": "data-breast_cancer.csv",
+      "target": "run-logreg",
+      "type": "input_to"
+    },
+    {
+      "source": "data-breast_cancer.csv",
+      "target": "run-forest",
+      "type": "input_to"
+    },
+    {
+      "source": "data-split.json",
+      "target": "run-logreg",
+      "type": "input_to"
+    },
+    {
+      "source": "data-split.json",
+      "target": "run-forest",
+      "type": "input_to"
+    },
+    {
+      "source": "train.py",
+      "target": "run-logreg",
+      "type": "input_to"
+    },
+    {
+      "source": "train.py",
+      "target": "run-forest",
+      "type": "input_to"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+name: momentum
+lr: 0.05
+momentum: 0.9

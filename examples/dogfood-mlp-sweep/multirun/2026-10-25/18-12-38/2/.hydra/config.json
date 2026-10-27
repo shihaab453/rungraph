@@ -1,0 +1,12 @@
+{
+  "model": "mlp_regressor",
+  "hidden_layer_sizes": [
+    32
+  ],
+  "solver": "sgd",
+  "momentum": 0.9,
+  "epochs": 40,
+  "checkpoint_every": 10,
+  "seed": 7,
+  "learning_rate_init": 0.01
+}

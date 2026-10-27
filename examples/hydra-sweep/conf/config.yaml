@@ -1,0 +1,8 @@
+defaults:
+  - optimizer: sgd
+  - _self_
+
+data:
+  path: data/points.csv
+epochs: 40
+seed: 0

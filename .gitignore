@@ -1,0 +1,13 @@
+.venv/
+.venv-dogfood/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Private working notes (owner rule: never commit or publish)
+handoff.md

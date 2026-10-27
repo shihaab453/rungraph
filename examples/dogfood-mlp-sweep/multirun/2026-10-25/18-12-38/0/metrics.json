@@ -1,0 +1,12 @@
+{
+  "status": "completed",
+  "best_epoch": 24,
+  "val": {
+    "rmse": 44.856
+  },
+  "test": {
+    "rmse": 51.1836,
+    "n": 88
+  },
+  "final_train_loss": 1401.2554
+}

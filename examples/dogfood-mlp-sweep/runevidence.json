@@ -1,0 +1,531 @@
+{
+  "schema_version": "0.1",
+  "project": {
+    "id": "diabetes-mlp-learning-rate-sweep",
+    "name": "Diabetes MLP learning-rate sweep",
+    "description": "Two-stage pipeline (preprocess, then a 3-job SGD learning-rate sweep) on the scikit-learn diabetes data.",
+    "tags": [],
+    "metadata": {}
+  },
+  "runs": [
+    {
+      "id": "preprocess",
+      "name": "Standardize and split"
+    },
+    {
+      "id": "sweep",
+      "name": "Learning-rate sweep driver",
+      "params": {
+        "learning_rate_init": [
+          0.0003,
+          0.001,
+          0.01
+        ]
+      }
+    },
+    {
+      "id": "job0",
+      "name": "Sweep job 0",
+      "params": {
+        "learning_rate_init": 0.0003
+      }
+    },
+    {
+      "id": "job1",
+      "name": "Sweep job 1",
+      "params": {
+        "learning_rate_init": 0.001
+      }
+    },
+    {
+      "id": "job2",
+      "name": "Sweep job 2",
+      "params": {
+        "learning_rate_init": 0.01
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "REPORT.md",
+      "path": "REPORT.md",
+      "sha256": "97dc63aeee100f2f9931c4cfd111500ff29a47e523b38348c98d0d087dab1af2",
+      "size_bytes": 835,
+      "kind": null,
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "pipeline.py",
+      "path": "pipeline.py",
+      "sha256": "2078ede5263dcefc58df19cb5ef49f7044e2b04cbde794e5b853fea74269cda0",
+      "size_bytes": 7605,
+      "kind": null,
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "data-processed-scaler.json",
+      "path": "data/processed/scaler.json",
+      "sha256": "1ed20e1aa5309fb51d22f29910b0c7cf1a8c9abc3383c8987c62b387cf0bbba0",
+      "size_bytes": 491,
+      "kind": "dataset",
+      "run_id": "preprocess",
+      "metadata": {}
+    },
+    {
+      "id": "data-processed-test.csv",
+      "path": "data/processed/test.csv",
+      "sha256": "2a882b6d17262947692eb507539d5cb9aa8b3535bfd86e35dc7bb347261c508d",
+      "size_bytes": 10200,
+      "kind": "dataset",
+      "run_id": "preprocess",
+      "metadata": {}
+    },
+    {
+      "id": "data-processed-train.csv",
+      "path": "data/processed/train.csv",
+      "sha256": "cf0ebd1a6789385ef2d9f13b6d599aeaf8d3938d2ee3220662baaeff3827561c",
+      "size_bytes": 35952,
+      "kind": "dataset",
+      "run_id": "preprocess",
+      "metadata": {}
+    },
+    {
+      "id": "data-processed-val.csv",
+      "path": "data/processed/val.csv",
+      "sha256": "a7b31b454b197cde11a29504892b481f99b5ba3ba8d395f8716b2db12ad809b4",
+      "size_bytes": 5110,
+      "kind": "dataset",
+      "run_id": "preprocess",
+      "metadata": {}
+    },
+    {
+      "id": "data-raw-diabetes.csv",
+      "path": "data/raw/diabetes.csv",
+      "sha256": "9193026b7622ff944f0a6855a10107b24caf50dad69787c46e6890e69c27faca",
+      "size_bytes": 18506,
+      "kind": "dataset",
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-multirun.json",
+      "path": "multirun/2026-10-25/18-12-38/multirun.json",
+      "sha256": "c83066a0ceeb550dada3534b2aa359ff6dcfc993ab96fa6874a86ad410e484d4",
+      "size_bytes": 918,
+      "kind": "metrics",
+      "run_id": "sweep",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-0-history.jsonl",
+      "path": "multirun/2026-10-25/18-12-38/0/history.jsonl",
+      "sha256": "efc51dd764700a71e5e3e36f57377ed6fbbd5325d2d3f22e6f956aeba1677f97",
+      "size_bytes": 2552,
+      "kind": "log",
+      "run_id": "job0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-0-metrics.json",
+      "path": "multirun/2026-10-25/18-12-38/0/metrics.json",
+      "sha256": "fefec510350e4bdef7d52e2ae66b6c615d26937c5aafbada3f55dd7b785cd99d",
+      "size_bytes": 166,
+      "kind": "metrics",
+      "run_id": "job0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-0-train.log",
+      "path": "multirun/2026-10-25/18-12-38/0/train.log",
+      "sha256": "be518d424a48d798330805ef5069bcec7d749d6113273f8476ce86d73ce33baa",
+      "size_bytes": 236,
+      "kind": "log",
+      "run_id": "job0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-0-.hydra-config.json",
+      "path": "multirun/2026-10-25/18-12-38/0/.hydra/config.json",
+      "sha256": "0ebb95da84011d0d308286b573c0e72e57253112c99f1517859706c3588cdd74",
+      "size_bytes": 194,
+      "kind": "config",
+      "run_id": "job0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-0-.hydra-overrides.json",
+      "path": "multirun/2026-10-25/18-12-38/0/.hydra/overrides.json",
+      "sha256": "283f1af11f7b3ad6bbc8d1c88045a1ae732ce2fb6262c5dc794b7e3f85c4f876",
+      "size_bytes": 30,
+      "kind": "config",
+      "run_id": "job0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-0-checkpoints-best.pkl",
+      "path": "multirun/2026-10-25/18-12-38/0/checkpoints/best.pkl",
+      "sha256": "756c38aaba2ec6c6c3c3b5e4db1701c3e34f0a4987503200d9f2aa8dc885bbee",
+      "size_bytes": 16495,
+      "kind": "checkpoint",
+      "run_id": "job0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-0-checkpoints-epoch_010.pkl",
+      "path": "multirun/2026-10-25/18-12-38/0/checkpoints/epoch_010.pkl",
+      "sha256": "04f086b1c75e319e8eec951665afa0511091af8baeb5e8a25bafb6d9e859f725",
+      "size_bytes": 16229,
+      "kind": "checkpoint",
+      "run_id": "job0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-0-checkpoints-epoch_020.pkl",
+      "path": "multirun/2026-10-25/18-12-38/0/checkpoints/epoch_020.pkl",
+      "sha256": "1eb7577fc07fa64e91cf497206b392086cde2736efba3146df35f2a852a05426",
+      "size_bytes": 16419,
+      "kind": "checkpoint",
+      "run_id": "job0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-0-checkpoints-epoch_030.pkl",
+      "path": "multirun/2026-10-25/18-12-38/0/checkpoints/epoch_030.pkl",
+      "sha256": "6052f8376e2abfaef51428d2abf570551bb130ca9c5531c014ff221f14a70c21",
+      "size_bytes": 16609,
+      "kind": "checkpoint",
+      "run_id": "job0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-0-checkpoints-epoch_040.pkl",
+      "path": "multirun/2026-10-25/18-12-38/0/checkpoints/epoch_040.pkl",
+      "sha256": "3015ca2e43a3b6089b3789797a5b206fc33b19ba57dd34b5262e163f0353179d",
+      "size_bytes": 16805,
+      "kind": "checkpoint",
+      "run_id": "job0",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-1-history.jsonl",
+      "path": "multirun/2026-10-25/18-12-38/1/history.jsonl",
+      "sha256": "16f9e67f57c2458c4280f236a73f309b56156a32575ae768863d79352a8b4fde",
+      "size_bytes": 2549,
+      "kind": "log",
+      "run_id": "job1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-1-metrics.json",
+      "path": "multirun/2026-10-25/18-12-38/1/metrics.json",
+      "sha256": "559d359279bc3bfc0b7e564e502fef14561dd787a21ef7d3c8eb303c399c01ea",
+      "size_bytes": 165,
+      "kind": "metrics",
+      "run_id": "job1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-1-train.log",
+      "path": "multirun/2026-10-25/18-12-38/1/train.log",
+      "sha256": "d9aa7c0530b975f5dc2d2baa3169d653d70fd10453dc62d9701e2de9d74de2dd",
+      "size_bytes": 235,
+      "kind": "log",
+      "run_id": "job1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-1-.hydra-config.json",
+      "path": "multirun/2026-10-25/18-12-38/1/.hydra/config.json",
+      "sha256": "8f2bcaa3134446adf68156dd3d763a339d223cef12f48af690d2951912c5a719",
+      "size_bytes": 193,
+      "kind": "config",
+      "run_id": "job1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-1-.hydra-overrides.json",
+      "path": "multirun/2026-10-25/18-12-38/1/.hydra/overrides.json",
+      "sha256": "4844c03997b86b81afe52a4d93a0d3031754786267c41f972918f971d5409d9b",
+      "size_bytes": 29,
+      "kind": "config",
+      "run_id": "job1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-1-checkpoints-best.pkl",
+      "path": "multirun/2026-10-25/18-12-38/1/checkpoints/best.pkl",
+      "sha256": "8949fdecf411a29e6a03e80fe6bb6e29e6524fbf1a89a3c124afb327fd1ded4a",
+      "size_bytes": 16805,
+      "kind": "checkpoint",
+      "run_id": "job1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-1-checkpoints-epoch_010.pkl",
+      "path": "multirun/2026-10-25/18-12-38/1/checkpoints/epoch_010.pkl",
+      "sha256": "60b21835e1e3a7d9e85e2282b7e262cf9c153fdb40bc5ad635891b940dfac5fe",
+      "size_bytes": 16229,
+      "kind": "checkpoint",
+      "run_id": "job1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-1-checkpoints-epoch_020.pkl",
+      "path": "multirun/2026-10-25/18-12-38/1/checkpoints/epoch_020.pkl",
+      "sha256": "87dd9c4b0e18fa529abaea912149fec042bc9beaeabec77db6b76559b435e4c0",
+      "size_bytes": 16419,
+      "kind": "checkpoint",
+      "run_id": "job1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-1-checkpoints-epoch_030.pkl",
+      "path": "multirun/2026-10-25/18-12-38/1/checkpoints/epoch_030.pkl",
+      "sha256": "c81217b12bd5b05506086ca63e7ce41f0161a70376078271299b3e9acc19dbc1",
+      "size_bytes": 16609,
+      "kind": "checkpoint",
+      "run_id": "job1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-1-checkpoints-epoch_040.pkl",
+      "path": "multirun/2026-10-25/18-12-38/1/checkpoints/epoch_040.pkl",
+      "sha256": "8949fdecf411a29e6a03e80fe6bb6e29e6524fbf1a89a3c124afb327fd1ded4a",
+      "size_bytes": 16805,
+      "kind": "checkpoint",
+      "run_id": "job1",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-2-history.jsonl",
+      "path": "multirun/2026-10-25/18-12-38/2/history.jsonl",
+      "sha256": "9ad7ea57440970f087540af3cf473833ca97a08b267e825f58ea1c5a556aecc0",
+      "size_bytes": 330,
+      "kind": "log",
+      "run_id": "job2",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-2-metrics.json",
+      "path": "multirun/2026-10-25/18-12-38/2/metrics.json",
+      "sha256": "f9e8e8fdd14dec81e69e35c0106a43b835607e169560dab0f7237a3bbdea99ee",
+      "size_bytes": 161,
+      "kind": "metrics",
+      "run_id": "job2",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-2-train.log",
+      "path": "multirun/2026-10-25/18-12-38/2/train.log",
+      "sha256": "1089b43127f58a88a2a4b755a66583cd812931e0075eef2e46af9b445e222e3a",
+      "size_bytes": 203,
+      "kind": "log",
+      "run_id": "job2",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-2-.hydra-config.json",
+      "path": "multirun/2026-10-25/18-12-38/2/.hydra/config.json",
+      "sha256": "b854095b4e1884e602361e7ef9fa119a1eec659bbd2eb4ebf6765899bd01715b",
+      "size_bytes": 192,
+      "kind": "config",
+      "run_id": "job2",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-2-.hydra-overrides.json",
+      "path": "multirun/2026-10-25/18-12-38/2/.hydra/overrides.json",
+      "sha256": "54f00e15360af01a72dd51436f17314aef95c617ba18d3935a53f34dea58efad",
+      "size_bytes": 28,
+      "kind": "config",
+      "run_id": "job2",
+      "metadata": {}
+    },
+    {
+      "id": "multirun-2026-10-25-18-12-38-2-checkpoints-best.pkl",
+      "path": "multirun/2026-10-25/18-12-38/2/checkpoints/best.pkl",
+      "sha256": "f40bb2983f1ac58fd10ef687ff3a81eef692fb7201125e6a2653d0776b78d43c",
+      "size_bytes": 16057,
+      "kind": "checkpoint",
+      "run_id": "job2",
+      "metadata": {}
+    }
+  ],
+  "results": [
+    {
+      "id": "job0-val-rmse",
+      "run_id": "job0",
+      "name": "val_rmse",
+      "value": 44.856,
+      "artifact_id": "multirun-2026-10-25-18-12-38-0-metrics.json",
+      "locator": "/val/rmse"
+    },
+    {
+      "id": "job1-val-rmse",
+      "run_id": "job1",
+      "name": "val_rmse",
+      "value": 44.62,
+      "artifact_id": "multirun-2026-10-25-18-12-38-1-metrics.json",
+      "locator": "/val/rmse"
+    },
+    {
+      "id": "job1-test-rmse",
+      "run_id": "job1",
+      "name": "test_rmse",
+      "value": 50.9965,
+      "artifact_id": "multirun-2026-10-25-18-12-38-1-metrics.json",
+      "locator": "/test/rmse"
+    },
+    {
+      "id": "job2-status",
+      "run_id": "job2",
+      "name": "status",
+      "value": "diverged",
+      "artifact_id": "multirun-2026-10-25-18-12-38-2-metrics.json",
+      "locator": "/status"
+    },
+    {
+      "id": "job2-final-loss",
+      "run_id": "job2",
+      "name": "final_train_loss",
+      "value": NaN,
+      "artifact_id": "multirun-2026-10-25-18-12-38-2-metrics.json",
+      "locator": "/final_train_loss"
+    },
+    {
+      "id": "sweep-best-job",
+      "run_id": "sweep",
+      "name": "best_job",
+      "value": 1,
+      "artifact_id": "multirun-2026-10-25-18-12-38-multirun.json",
+      "locator": "/best_job"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "claim-best-lr",
+      "claim": "lr=0.001 is the best setting in the sweep: lowest validation RMSE (44.62), test RMSE 51.00 on 88 held-out patients.",
+      "supports": [
+        "job1-val-rmse",
+        "job1-test-rmse",
+        "job0-val-rmse",
+        "sweep-best-job"
+      ],
+      "source": "REPORT.md#claims"
+    },
+    {
+      "id": "claim-lr-diverges",
+      "claim": "lr=0.01 diverges: training loss reaches infinity by epoch 4 and NaN by epoch 5.",
+      "supports": [
+        "job2-status",
+        "job2-final-loss",
+        "multirun-2026-10-25-18-12-38-2-history.jsonl"
+      ],
+      "source": "REPORT.md#claims"
+    }
+  ],
+  "relationships": [
+    {
+      "source": "data-raw-diabetes.csv",
+      "target": "preprocess",
+      "type": "input_to"
+    },
+    {
+      "source": "pipeline.py",
+      "target": "preprocess",
+      "type": "input_to"
+    },
+    {
+      "source": "data-processed-train.csv",
+      "target": "data-raw-diabetes.csv",
+      "type": "derived_from"
+    },
+    {
+      "source": "data-processed-val.csv",
+      "target": "data-raw-diabetes.csv",
+      "type": "derived_from"
+    },
+    {
+      "source": "data-processed-test.csv",
+      "target": "data-raw-diabetes.csv",
+      "type": "derived_from"
+    },
+    {
+      "source": "data-processed-train.csv",
+      "target": "job0",
+      "type": "input_to"
+    },
+    {
+      "source": "data-processed-val.csv",
+      "target": "job0",
+      "type": "input_to"
+    },
+    {
+      "source": "data-processed-test.csv",
+      "target": "job0",
+      "type": "input_to"
+    },
+    {
+      "source": "pipeline.py",
+      "target": "job0",
+      "type": "input_to"
+    },
+    {
+      "source": "multirun-2026-10-25-18-12-38-0-metrics.json",
+      "target": "sweep",
+      "type": "input_to"
+    },
+    {
+      "source": "data-processed-train.csv",
+      "target": "job1",
+      "type": "input_to"
+    },
+    {
+      "source": "data-processed-val.csv",
+      "target": "job1",
+      "type": "input_to"
+    },
+    {
+      "source": "data-processed-test.csv",
+      "target": "job1",
+      "type": "input_to"
+    },
+    {
+      "source": "pipeline.py",
+      "target": "job1",
+      "type": "input_to"
+    },
+    {
+      "source": "multirun-2026-10-25-18-12-38-1-metrics.json",
+      "target": "sweep",
+      "type": "input_to"
+    },
+    {
+      "source": "data-processed-train.csv",
+      "target": "job2",
+      "type": "input_to"
+    },
+    {
+      "source": "data-processed-val.csv",
+      "target": "job2",
+      "type": "input_to"
+    },
+    {
+      "source": "data-processed-test.csv",
+      "target": "job2",
+      "type": "input_to"
+    },
+    {
+      "source": "pipeline.py",
+      "target": "job2",
+      "type": "input_to"
+    },
+    {
+      "source": "multirun-2026-10-25-18-12-38-2-metrics.json",
+      "target": "sweep",
+      "type": "input_to"
+    }
+  ]
+}

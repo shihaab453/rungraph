@@ -1,0 +1,12 @@
+{
+  "status": "diverged",
+  "best_epoch": 1,
+  "val": {
+    "rmse": 243.9775
+  },
+  "test": {
+    "rmse": 213.8094,
+    "n": 88
+  },
+  "final_train_loss": NaN
+}

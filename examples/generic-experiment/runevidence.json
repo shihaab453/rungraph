@@ -1,0 +1,154 @@
+{
+  "schema_version": "0.1",
+  "project": {
+    "id": "tiny-sentiment",
+    "name": "Tiny sentiment classifier",
+    "description": "Fake two-run experiment used to demonstrate RunEvidence. No real model.",
+    "tags": ["example", "text-classification"],
+    "metadata": {}
+  },
+  "runs": [
+    {
+      "id": "run-baseline",
+      "name": "baseline",
+      "started_at": "2026-10-24T09:00:00Z",
+      "params": {"learning_rate": 0.1, "epochs": 5, "seed": 0},
+      "metadata": {}
+    },
+    {
+      "id": "run-tuned",
+      "name": "tuned",
+      "started_at": "2026-10-24T10:00:00Z",
+      "params": {"learning_rate": 0.03, "epochs": 20, "seed": 0},
+      "metadata": {}
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "train-data",
+      "path": "data/train.csv",
+      "sha256": "4241a317add187981167709cede7e7cad5c4f96e7357e3f4d70739c009401110",
+      "size_bytes": 87,
+      "kind": "dataset",
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "test-data",
+      "path": "data/test.csv",
+      "sha256": "21faf2973e9e0a8bf32f0c4acf231c2322cbd64b887e228ca24ef69a1c07f87a",
+      "size_bytes": 38,
+      "kind": "dataset",
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "baseline-config",
+      "path": "runs/baseline/config.json",
+      "sha256": "859870ec7740b28657f6df2acaa53ab53ccdc71ca01cf4e82d1e2bc349dfe726",
+      "size_bytes": 89,
+      "kind": "config",
+      "run_id": "run-baseline",
+      "metadata": {}
+    },
+    {
+      "id": "baseline-model",
+      "path": "runs/baseline/model.bin",
+      "sha256": "b5602ef8511c89b96f9a388f6c61d5e793ab5f4ab28b4bcc91c3b6bf91c7ab72",
+      "size_bytes": 59,
+      "kind": "checkpoint",
+      "run_id": "run-baseline",
+      "metadata": {}
+    },
+    {
+      "id": "baseline-metrics",
+      "path": "runs/baseline/metrics.json",
+      "sha256": "40939c89b9f7d5d7fb987433af9d0875ff4e17c066a49bcc80d0372dec284cf3",
+      "size_bytes": 78,
+      "kind": "metrics",
+      "run_id": "run-baseline",
+      "metadata": {}
+    },
+    {
+      "id": "tuned-config",
+      "path": "runs/tuned/config.json",
+      "sha256": "79eefbe652749524fceb4721a5b0b117c4dd767939d562170a1bad105351368b",
+      "size_bytes": 91,
+      "kind": "config",
+      "run_id": "run-tuned",
+      "metadata": {}
+    },
+    {
+      "id": "tuned-model",
+      "path": "runs/tuned/model.bin",
+      "sha256": "df6bbe306cfcd4af0ef8b07d56c4fa4f157b20835241a04d9847b63c386a83c3",
+      "size_bytes": 56,
+      "kind": "checkpoint",
+      "run_id": "run-tuned",
+      "metadata": {}
+    },
+    {
+      "id": "tuned-metrics",
+      "path": "runs/tuned/metrics.json",
+      "sha256": "33fa63b7a5ac6e2d84c12d5f70c8bd9175d046346334e400575e4bf7241950e8",
+      "size_bytes": 76,
+      "kind": "metrics",
+      "run_id": "run-tuned",
+      "metadata": {}
+    },
+    {
+      "id": "report",
+      "path": "REPORT.md",
+      "sha256": "f5cacda9eb2ebff8b0486a1f68b7dde80f34d699f39d08c322d0a6a01c73de68",
+      "size_bytes": 270,
+      "kind": "write-up",
+      "run_id": null,
+      "metadata": {}
+    }
+  ],
+  "results": [
+    {
+      "id": "baseline-accuracy",
+      "run_id": "run-baseline",
+      "name": "test_accuracy",
+      "value": 0.5,
+      "artifact_id": "baseline-metrics",
+      "locator": "/eval/accuracy",
+      "metadata": {}
+    },
+    {
+      "id": "tuned-accuracy",
+      "run_id": "run-tuned",
+      "name": "test_accuracy",
+      "value": 1.0,
+      "artifact_id": "tuned-metrics",
+      "locator": "/eval/accuracy",
+      "metadata": {}
+    }
+  ],
+  "evidence": [
+    {
+      "id": "claim-tuned-perfect",
+      "claim": "The tuned run reaches 100% test accuracy.",
+      "supports": ["tuned-accuracy"],
+      "contradicts": [],
+      "source": "REPORT.md#C1",
+      "metadata": {}
+    },
+    {
+      "id": "claim-tuning-helps",
+      "claim": "Tuning improves accuracy over the baseline.",
+      "supports": ["tuned-accuracy", "baseline-accuracy"],
+      "contradicts": [],
+      "source": "REPORT.md#C2",
+      "metadata": {}
+    }
+  ],
+  "relationships": [
+    {"source": "train-data", "target": "run-baseline", "type": "input_to", "note": null},
+    {"source": "train-data", "target": "run-tuned", "type": "input_to", "note": null},
+    {"source": "test-data", "target": "run-baseline", "type": "input_to", "note": "evaluation split"},
+    {"source": "test-data", "target": "run-tuned", "type": "input_to", "note": "evaluation split"},
+    {"source": "run-tuned", "target": "run-baseline", "type": "derived_from", "note": "same setup, lower learning rate"}
+  ]
+}

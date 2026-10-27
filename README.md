@@ -1,5 +1,469 @@
 <img src="assets/icon.svg" width="64" height="64" alt="">
 
-# rungraph
+# RunEvidence
 
-Created in [T3 Code](https://t3.codes).
+[![CI](https://github.com/shihaab453/rungraph/actions/workflows/ci.yml/badge.svg?branch=feat/runevidence-mvp)](https://github.com/shihaab453/rungraph/actions/workflows/ci.yml?query=branch%3Afeat%2Frunevidence-mvp)
+
+**Does the evidence in your experiment folder still hold?**
+
+RunEvidence checks an ML experiment folder against a small manifest
+(`runevidence.json`) and tells you, offline:
+
+- which recorded files are **missing**,
+- which files **changed** since you recorded them (sha256), and lets you accept the changes you meant (`rehash`),
+- which references **break when the folder is moved** (absolute paths, wrong case, paths outside the folder),
+- which **claims** ("tuning improves accuracy") rest on results that are missing, changed, contradictory or not cited at all,
+- which recorded metric values with JSON locators **no longer match** their source file.
+
+It never trains, never launches jobs, never phones home, and never loads model
+weights: files are hashed as raw bytes. Core checks metric values in JSON;
+optional adapters also read plain configuration and metric logs. It works
+with any ML stack because it only looks at files.
+
+RunEvidence is V1 of the **RunGraph** project, which will add lineage and
+comparability checks across runs. See [Roadmap](#roadmap).
+
+---
+
+## 10-minute walkthrough
+
+You need Python 3.10 or newer and a terminal. Commands are shown for
+PowerShell (Windows) and bash (macOS/Linux) where they differ.
+
+### 1. Install (2 minutes)
+
+```bash
+git clone https://github.com/shihaab453/rungraph.git rungraph
+cd rungraph
+python -m venv .venv
+```
+
+Activate the virtual environment (a private folder of packages for this project, so nothing leaks into your system Python):
+
+```powershell
+.venv\Scripts\Activate.ps1        # PowerShell
+```
+```bash
+source .venv/bin/activate         # bash
+```
+
+Then install RunEvidence and check it works:
+
+```bash
+pip install -e .
+runevidence --version
+```
+
+`-e` ("editable") means the installed command runs the code in this folder, so edits take effect without reinstalling.
+
+If you only want the command, install it straight from GitHub without cloning:
+
+```bash
+pip install "git+https://github.com/shihaab453/rungraph.git"
+```
+
+RunEvidence is licensed under [Apache-2.0](LICENSE). The optional Hydra and
+MLflow file-store adapters are separate packages. From the repository root,
+install core and an adapter together, for example
+`pip install -e . -e ./packages/runevidence-mlflow`;
+see [Adapters](#adapters) for both packages and usage.
+
+### 2. Inspect the example experiment (1 minute)
+
+`examples/generic-experiment/` is a tiny fake experiment: a dataset, two runs
+(`baseline`, `tuned`) each with a config, a placeholder model file and a
+metrics file, and a short write-up making two claims.
+
+```bash
+runevidence inspect examples/generic-experiment
+```
+
+You get a summary of runs, artifacts, results and claims, ending with:
+
+```
+Findings:
+OK: 0 errors, 0 warnings (exit 0)
+```
+
+Open `examples/generic-experiment/runevidence.json` alongside it. That file is
+the whole idea: every artifact has a relative `path` and a `sha256`, every
+result says which run produced it and where its value lives
+(`"locator": "/eval/accuracy"` is a JSON Pointer into the metrics file), and
+every claim lists the IDs that support it.
+
+### 3. Break it on purpose (3 minutes)
+
+Work on a copy so the example stays clean.
+
+```powershell
+# PowerShell
+Copy-Item -Recurse examples\generic-experiment $env:TEMP\exp
+Remove-Item $env:TEMP\exp\data\test.csv
+(Get-Content $env:TEMP\exp\runs\tuned\metrics.json) -replace '1.0,', '0.75,' | Set-Content $env:TEMP\exp\runs\tuned\metrics.json
+runevidence validate $env:TEMP\exp
+```
+```bash
+# bash
+cp -r examples/generic-experiment /tmp/exp
+rm /tmp/exp/data/test.csv
+sed -i.bak 's/"accuracy": 1.0/"accuracy": 0.75/' /tmp/exp/runs/tuned/metrics.json && rm /tmp/exp/runs/tuned/metrics.json.bak
+runevidence validate /tmp/exp
+```
+
+Output (abridged):
+
+```
+ERROR missing-file [test-data]: Artifact 'test-data' is missing: 'data/test.csv' does not exist
+ERROR hash-mismatch [tuned-metrics]: Artifact 'tuned-metrics' changed since it was recorded: sha256 33fa63b7a5ac... recorded, ... on disk.
+ERROR result-value-mismatch [tuned-accuracy]: Result 'tuned-accuracy' (test_accuracy) records 1.0 but runs/tuned/metrics.json at /eval/accuracy contains 0.75
+ERROR claim-at-risk [claim-tuned-perfect]: Claim 'claim-tuned-perfect' rests on evidence that is missing or changed: test-data, tuned-accuracy, tuned-metrics
+      hint: Claim: 'The tuned run reaches 100% test accuracy.'
+ERROR claim-at-risk [claim-tuning-helps]: ...
+FAIL: 5 errors, 0 warnings (exit 1)
+```
+
+Read it top to bottom: root causes first (a file is gone, a file changed,
+and the number you reported is no longer the number in the file), then their
+consequences (which claims you can no longer back up). The missing test set
+puts both claims at risk because both runs were evaluated on it.
+
+### 4. Move the folder (1 minute)
+
+Paths in the manifest are relative to the manifest's folder, so a moved,
+zipped or emailed experiment still validates:
+
+```bash
+runevidence validate examples/generic-experiment     # from the repo root
+cd examples && runevidence validate generic-experiment && cd ..   # from anywhere else
+```
+
+If someone writes an absolute path such as `C:/Users/me/exp/data/train.csv`,
+RunEvidence warns (`absolute-path`), and once the folder moves it reports the
+file as missing **and** points at where it is now:
+`hint: A file matching it exists at 'data/train.csv'; update the path to that.`
+
+### 5. Use it on your own folder (3 minutes)
+
+```bash
+runevidence init path/to/my-experiment --name "My experiment"
+```
+
+The built-in `generic` adapter hashes every file and turns each
+`runs/<name>/` subfolder into a run (for Hydra's `outputs/` and `multirun/`
+folders, use the [Hydra adapter](#adapters) instead). It does not guess which numbers or claims
+matter. Add those yourself to the generated `runevidence.json`:
+
+```json
+"results": [
+  {"id": "acc", "run_id": "run-a", "name": "accuracy", "value": 0.91,
+   "artifact_id": "runs-a-metrics.json", "locator": "/accuracy"}
+],
+"evidence": [
+  {"id": "claim-1", "claim": "Model A beats 0.9 accuracy.", "supports": ["acc"]}
+]
+```
+
+Then `runevidence validate path/to/my-experiment`. Commit the manifest next to
+your results; re-run validate before you publish anything.
+
+### 6. When you change things on purpose
+
+A failing check is not always a mistake. You retrained a model, wrote a new
+report, or your training log carries a timestamp. Three commands record that
+the change was intended, so you never hand-edit digests:
+
+```bash
+cd path/to/my-experiment
+
+# You reran the "tuned" run: accept its new files (all files the run produced).
+runevidence rehash . run-tuned --dry-run   # preview first
+runevidence rehash . run-tuned
+
+# Logs change on every run: check only that they exist, not their bytes.
+runevidence rehash . "runs/*/train.log" --volatile
+
+# A new file appeared: track it without re-running init.
+runevidence add . REPORT.md --kind report
+```
+
+`rehash` targets can be artifact IDs, run IDs (every file that run produced),
+file or folder paths, or globs over manifest paths (quote them; `*` also
+crosses folders). It needs targets or `--all`, so nothing is accepted by
+accident. It refuses (and writes nothing) if a target file is missing.
+
+Each target must select the same artifacts under every interpretation that
+matches. For example, if `report` is an artifact ID and also a folder holding
+other tracked files, the command refuses it with an ambiguity error (exit 2).
+Choose explicitly with `id:report`, `run:run-tuned`, `path:REPORT.md`,
+`folder:report/` or `glob:runs/*/train.log`. Quote globs to keep the shell from
+expanding them. `path:` selects exact file paths; `folder:` selects files
+inside a folder. Paths and folders can be relative to the manifest or the
+current folder. If those locations match different artifact sets, use an
+absolute path. Multiple targets combine their selected sets, but each target
+must be unambiguous on its own. Existing unambiguous targets keep working;
+an ID starting with a reserved prefix needs `id:`, for example
+`id:path:report` selects the artifact whose ID is `path:report`.
+
+When a re-recorded file is the source of a result with a supported,
+resolvable scalar JSON locator (`artifact_id` + `locator`) and that file's
+digest changed, `rehash` also updates the recorded value from the file and
+prints `old -> new`. This includes recording a digest again with
+`--no-volatile` for a source that was volatile. Only JSON locators that
+resolve to a single scalar are refreshed; other result metadata is not.
+Results without a locator never refresh, whatever the file's bytes. It then
+lists every claim that rests on what changed: **re-read those claims**, because
+a claim like "tuned beats baseline" may no longer be true even though every
+check now passes. Refresh requires the current digest to differ from the
+recorded digest (or no digest to have been kept while volatile). A wrong
+value next to an unchanged, hash-checked file stays an error.
+
+**RE-10: MLflow metric summaries can stay stale.** For MLflow text metric
+results, `rehash` accepts the current source bytes and digest, but the recorded
+summary **value, step and timestamp may stay old**. A later `validate --strict`
+can then exit 0 after that acceptance. Changed bytes do not always mean the
+summary is stale, and validation makes no scientific truth or general
+freshness claim. See [Refreshing MLflow results
+safely](docs/adapters.md#refreshing-mlflow-results-safely-re-10) and the
+[draft alpha release notes](docs/alpha-release-notes-draft.md).
+
+A **volatile** artifact (`"volatile": true`) is checked for existence only. No
+digest is kept for it, so `validate` never reports its bytes as changed.
+Result locators into volatile JSON files are still checked against their
+recorded values and can put claims at risk. Deleting it is still an error. Mark files
+volatile when you run `init` (`--volatile "*.log"`), when you `add` them, or
+afterwards with `rehash --volatile`. Undo with `rehash --no-volatile`.
+When a volatile source has a result with a locator, `rehash` leaves that
+result value as it is and prints a note; results without a locator never
+refresh. Use `--no-volatile` to record the current digest and, for supported
+scalar JSON-located results, the current value.
+
+`add` takes files or folders (a folder adds every file inside that is not
+tracked yet). Paths are relative to where you run the command. If the
+neighbouring files all belong to one run, the new file joins that run. Use
+`--run RUN_ID` or `--no-run` to choose yourself.
+
+`rehash` and `add` rewrite only the values they change in `runevidence.json`.
+Other results, claims, links and field order are preserved. Indentation is normalized.
+Both commands plan from one validated manifest snapshot and compare its exact
+bytes with the on-disk manifest after staging a complete replacement. If the
+manifest changed, they refuse the save (exit 2) and leave the competing edit
+intact. Review the current manifest and retry. This is a stale-write check,
+not multi-process serialization: another writer can still race between the
+final comparison and replacement. Avoid concurrent writers, including
+`init --force`; the check does not lock out other processes.
+Commit before you run them if you want an easy undo.
+
+For a worked example on a real training run (scikit-learn, two models, real
+metrics), see `examples/dogfood-sklearn/` and its write-up in
+[docs/dogfood-sklearn-20261025.md](docs/dogfood-sklearn-20261025.md). Its
+`model.pkl` files are pickles: RunEvidence only hashes them, and you should
+never unpickle files you did not create yourself.
+
+A second worked example, `examples/dogfood-mlp-sweep/`, uses a different
+layout: a preprocessing stage feeding a Hydra-style learning-rate sweep
+(`multirun/<date>/<time>/<job>/`) with per-epoch checkpoints and one
+diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](docs/dogfood-mlp-sweep-20261025.md).
+
+---
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `runevidence validate PATH` | Run every check, print only problems. |
+| `runevidence inspect PATH` | Summarize the manifest, then run every check, also listing files the manifest does not track. |
+| `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`, `--volatile GLOB`). With `--force`, the old manifest is kept as a backup, because a fresh scan does not carry over hand-written results and claims. See [Backups from `init --force`](#backups-from-init---force). |
+| `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read values only for supported, resolvable scalar JSON-located results in changed files (`--volatile`, `--no-volatile`, `--dry-run`). |
+| `runevidence add PATH FILE...` | Track new files or folders without re-running `init` (`--id`, `--kind`, `--run`, `--no-run`, `--volatile`, `--dry-run`). |
+| `runevidence schema [-o FILE]` | Print the manifest JSON Schema (also committed at `schema/runevidence.schema.json`). |
+| `runevidence adapters` | List installed adapters. |
+
+`PATH` can be the experiment folder or the manifest file. `validate` and
+`inspect` accept `--json` (machine-readable) and `--strict` (warnings fail too).
+
+### Exit codes
+
+Exit codes are how scripts and CI (automated checks that run on every push)
+know whether something passed without reading the text.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | No errors. Warnings may exist unless `--strict`. |
+| `1` | The evidence has problems: errors, or warnings under `--strict`. |
+| `2` | Could not check at all: manifest missing, not valid JSON, or does not match the schema; bad arguments; `init` refused to overwrite, or could not write its backup or the new manifest (the old manifest is left as it was); `rehash` or `add` could not make the change (nothing was written). |
+
+`validate`, `inspect` and `adapters` never write anything. `schema -o FILE`
+writes the schema to that file. `init`, `rehash` and `add` write the manifest;
+`init --force` also keeps the previous manifest as a backup.
+
+### Backups from `init --force`
+
+Every forced `init` keeps the manifest it is about to replace as a new
+backup generation next to it: `runevidence.json.bak` first, then
+`runevidence.json.bak.2`, `runevidence.json.bak.3`, and so on. The highest
+number is the newest. An existing backup is never overwritten, and
+RunEvidence never deletes backups, so repeated runs cannot destroy the only
+copy of a hand-edited manifest. Delete old generations yourself when you no
+longer need them. If the manifest is byte-for-byte identical to the newest
+backup, that backup is reused instead of writing a duplicate.
+
+The backup is written and read back before the manifest is touched, and the
+new manifest is staged beside the old one before replacing it. If either
+step fails, `init` exits 2 and the existing manifest is left as it was; a
+partly written backup is removed. Backups at the experiment root are never
+tracked as artifacts or reported as untracked files. To restore one, copy
+it over `runevidence.json`.
+
+## The manifest
+
+| Section | Holds | Key fields |
+| --- | --- | --- |
+| `project` | What the folder is about | `id`, `name`, `description`, `tags` |
+| `runs` | Executions of any kind | `id`, `name`, `started_at`, `params` |
+| `artifacts` | Files on disk | `id`, `path` (relative, forward slashes), `sha256`, `size_bytes`, `volatile` (existence only), `kind`, `run_id` (producer) |
+| `results` | Named values a run produced | `id`, `run_id`, `name`, `value`, `artifact_id`, `locator` (JSON Pointer) |
+| `evidence` | Claims in plain words | `id`, `claim`, `supports`, `contradicts`, `source` |
+| `relationships` | Extra typed edges | `source`, `target`, `type`: `produced_by`, `input_to`, `result_of`, `reported_in`, `derived_from`, `supports`, `contradicts` |
+
+All IDs share one namespace. Unknown fields are rejected (so a typo like
+`sha265` is caught); put anything custom in `metadata` (every entity) or
+`params` (runs). The full contract is `schema/runevidence.schema.json`.
+
+## What it checks
+
+| Code | Severity | Meaning |
+| --- | --- | --- |
+| `missing-file` | error | Artifact path does not exist (with a hint if the file seems to have moved). |
+| `not-a-file` | error | Path is a folder, not a file. |
+| `hash-mismatch` | error | File bytes differ from the recorded sha256. |
+| `size-mismatch` | error | No digest recorded, but the size changed. |
+| `path-escapes-root` | error | Path leaves the experiment folder (`../`). |
+| `absolute-path` | warning | Path will break when the folder moves. |
+| `non-posix-path` | warning | Backslashes; use `/` so it works on every OS. |
+| `path-case-mismatch` | warning | Only resolves because this filesystem ignores case. |
+| `no-digest` | warning | No sha256 recorded, so changes cannot be detected. Record one with `rehash`, or mark the file `volatile` if that is intended. |
+| `untracked-file` | info | In the folder but not in the manifest (`inspect` only). |
+| `duplicate-id` | error | Same ID used twice. |
+| `dangling-reference` | error | A link points at an ID that does not exist. |
+| `invalid-relationship` | error | A link joins the wrong kinds (e.g. a run "produced by" an artifact). |
+| `conflicting-provenance` | error / warning | One file or result attributed to two runs; or a result read from another run's file. |
+| `conflicting-evidence` | error | A claim both supports and contradicts the same thing; or one run reports two values for one metric. |
+| `derivation-cycle` | error | `derived_from` loops. The search is iterative, so long valid chains (tested with 5,000 steps) are checked instead of crashing. |
+| `unsupported-claim` | warning / error | A claim cites nothing; or none of its citations are valid. |
+| `claim-at-risk` | error | A claim depends on a result, file or run input that is missing or changed. Lineage is followed upstream (`derived_from`, `input_to`, producing runs), so raw data two steps back counts; indirect causes are shown as `id (via ...)`. |
+| `result-value-mismatch` | error | Recorded value differs from the value at its locator in the file. `NaN` matches `NaN`, so a diverged run can be recorded faithfully. |
+| `result-unverifiable` | warning | A locator cannot be checked (not JSON, not found, no artifact). |
+
+## Adapters
+
+An adapter reads a folder written by some tool and produces a manifest, in two
+read-only steps: `discover(root)` then `extract(root, discovery)`. The
+`generic` adapter is built in. Tool adapters are separate packages, so core
+stays free of tool dependencies:
+
+- **`hydra`** ([packages/runevidence-hydra](packages/runevidence-hydra)):
+  every folder holding a `.hydra/` subfolder becomes a run, at any depth, with
+  the job's composed config as `params` and its overrides in `metadata`.
+  Hydra itself is not needed.
+
+  ```bash
+  # From the repository root, install both local packages together.
+  pip install -e . -e ./packages/runevidence-hydra
+  runevidence init --adapter hydra path/to/project
+  ```
+
+- **`mlflow`** ([packages/runevidence-mlflow](packages/runevidence-mlflow)):
+  reads local `mlruns/` file stores into experiments, runs, string params,
+  hashed artifacts and metric results. MLflow itself is not needed.
+
+  ```bash
+  # From the repository root, install both local packages together.
+  pip install -e . -e ./packages/runevidence-mlflow
+  runevidence init --adapter mlflow path/to/mlruns
+  runevidence validate path/to/mlruns
+  ```
+
+  File-store only: no tracking server, database or remote artifacts. Metric
+  text files are hash-checked; JSON value locators do not apply to them.
+
+See [docs/adapters.md](docs/adapters.md) for format details, limits and how to
+write an adapter for your tool.
+
+## Limits and guarantees
+
+Read these before relying on a green `validate` for anything important.
+
+- **Consistency, not truth.** A clean result means the folder still matches
+  what the manifest recorded: the files exist with the same bytes, recorded
+  JSON values match their files, and every claim cites valid evidence. It
+  does not mean the experiment was right, the metric is meaningful, the
+  comparison is fair or the claim is scientifically true. RunEvidence checks
+  that your evidence trail is intact, not what it proves.
+- **One writer at a time.** `rehash` and `add` refuse to save if the manifest
+  changed since they read it, but this is a stale-write check, not a lock:
+  another process can still change the file between the final check and the
+  replacement. `init --force` does not lock either. Run one writing command
+  at a time per folder.
+- **MLflow metric summaries can go stale (RE-10).** MLflow metric logs are
+  plain text, so their results have no JSON locator. `validate` detects a
+  changed metric file through its hash, but `rehash` accepts the new bytes
+  without re-reading the summary value, step or timestamp, so the recorded
+  result can keep old values. `validate --strict` can still exit 0 after that
+  acceptance. Changed bytes do not always mean the summary is stale. To
+  refresh, follow [Refreshing MLflow results
+  safely](docs/adapters.md#refreshing-mlflow-results-safely-re-10): run
+  `init PATH --adapter mlflow --force`, compare the backup with the
+  regenerated manifest, keep the newly extracted summaries, and manually
+  restore only reviewed claims, relationships, annotations, volatile flags and
+  project settings after verifying IDs. Do not copy old metric results back.
+  Version control and a separate backup are strongly recommended.
+- **Bounded input.** Folder scans never follow symbolic links or Windows
+  junctions out of the folder, and the MLflow adapter enters each physical
+  folder once, so link loops cannot make a scan repeat itself. Hydra
+  `.hydra/` files are converted under fixed limits after YAML aliases are
+  expanded (100,000 values, 2,000,000 characters, 64 levels); a file past a
+  limit or with a self-referencing alias is recorded as unreadable instead of
+  producing a huge manifest. Long `derived_from` chains (tested with 5,000
+  steps) are checked without recursion.
+- **Deeply nested JSON is not yet guarded.** A JSON file nested tens of
+  thousands of levels deep (a manifest, or a metrics file read through a
+  locator) can still stop `validate`, `inspect` or `rehash` with a Python
+  `RecursionError` traceback instead of a finding. Hydra's `config.json` and
+  `overrides.json` are already guarded as described above.
+- **Supported versions.** Python 3.10 or newer. CI has six jobs: Ubuntu and
+  Windows, each on Python 3.10 with the newest dependencies, Python 3.14 with
+  the newest dependencies, and Python 3.10 with the lowest declared versions
+  (`pydantic` 2.6.0, `PyYAML` 6.0). Python 3.14 with the pinned minimum
+  dependencies is not directly verified. Python 3.11 to 3.13 and macOS are not
+  directly verified either; they are not declared unsupported. `runevidence
+  schema` output is spelled slightly differently before Pydantic 2.11 (it
+  omits `"additionalProperties": true` on free-form fields and `"type":
+  "string"` beside the version constant). Both spellings accept exactly the
+  same manifests; the committed `schema/runevidence.schema.json` uses the
+  2.11+ spelling.
+
+## Non-goals (V1)
+
+No experiment tracker, dashboard, web UI or server. No training, job
+launching or GPU use. No network access. No loading of model weights.
+
+## Roadmap
+
+RunEvidence is the first layer of **RunGraph**. Planned next, roughly in order:
+directory artifacts, YAML manifests, more tool adapters (TensorBoard logs,
+plain CSV logs), then RunGraph proper: lineage across runs
+and comparability checks (did both runs use the same data, split and code?).
+
+## Development
+
+```bash
+pip install -e ".[dev]" -e ./packages/runevidence-hydra -e ./packages/runevidence-mlflow
+python -m pytest
+```
+
+Tests run offline in a few seconds. Contributions are welcome: see
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE) for the full text.

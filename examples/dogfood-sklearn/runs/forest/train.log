@@ -1,0 +1,2 @@
+2026-10-25T18:03:39 fit forest in 0.044s
+metrics {"split": "test", "n_test": 143, "accuracy": 0.958, "f1": 0.967, "roc_auc": 0.9948}

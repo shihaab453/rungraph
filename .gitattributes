@@ -1,0 +1,4 @@
+# Example fixtures are hashed byte-for-byte. Never let git rewrite their
+# line endings on checkout (core.autocrlf), or every recorded sha256 breaks.
+examples/** -text
+tests/data/** -text

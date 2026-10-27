@@ -1,0 +1,83 @@
+# Continuous integration: run the test suite on every push and pull request.
+#
+# Matrix: the oldest Python we promise in pyproject.toml (requires-python
+# ">=3.10") and the newest we develop on, on both Linux and Windows. Windows
+# matters because the owner develops there and fixture hashes depend on
+# line endings (see .gitattributes). Two extra jobs install the lowest
+# declared dependency versions (.github/constraints-minimum.txt) on the
+# oldest Python, so the version floors in pyproject.toml are tested too.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# The workflow only reads the repository. It never pushes, publishes or
+# comments, so it gets no write access.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the run that is still going.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (${{ matrix.os }}, Python ${{ matrix.python-version }}, ${{ matrix.deps }} deps)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      # Let every combination finish, so one failure does not hide another.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.14"]
+        deps: [latest]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+            deps: minimum
+          - os: windows-latest
+            python-version: "3.10"
+            deps: minimum
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # A regular (not editable) install, so the tests run against the
+      # package as a user would get it, and a file missing from the wheel
+      # fails here instead of after publishing.
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]" ${{ matrix.deps == 'minimum' && '-c .github/constraints-minimum.txt' || '' }}
+
+      # Adapter packages live in packages/. Installed after core, so pip
+      # uses this checkout's runevidence instead of looking for one online.
+      - name: Install adapter packages
+        run: python -m pip install ./packages/runevidence-hydra ./packages/runevidence-mlflow ${{ matrix.deps == 'minimum' && '-c .github/constraints-minimum.txt' || '' }}
+
+      - name: Show dependency versions
+        run: python -c "import pydantic, yaml; print('pydantic', pydantic.VERSION, 'PyYAML', yaml.__version__)"
+
+      # Fail if a minimum job did not actually get the pinned versions.
+      - name: Check minimum versions are installed
+        if: matrix.deps == 'minimum'
+        run: python -c "import pydantic, yaml; assert pydantic.VERSION == '2.6.0', pydantic.VERSION; assert yaml.__version__ == '6.0', yaml.__version__"
+
+      # The adapter's tests skip themselves when it is not installed. Fail
+      # here instead, so a broken install cannot hide behind a green run.
+      - name: Check adapters are registered
+        run: python -c "from runevidence.adapters import get_adapter; get_adapter('hydra'); get_adapter('mlflow')"
+
+      - name: Run tests
+        run: python -m pytest

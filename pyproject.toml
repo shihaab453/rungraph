@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "runevidence"
+version = "0.1.1"
+description = "Offline evidence checker for ML experiment folders: missing files, changed artifacts, and broken claim-to-result links."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Shihaab Alam" }]
+keywords = ["machine-learning", "reproducibility", "provenance", "experiments", "evidence"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = ["pydantic>=2.6,<3"]
+
+[project.urls]
+Homepage = "https://github.com/shihaab453/rungraph"
+Repository = "https://github.com/shihaab453/rungraph"
+Issues = "https://github.com/shihaab453/rungraph/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+runevidence = "runevidence.cli:main"
+
+# Third-party adapters register here, e.g. in their own pyproject.toml:
+# [project.entry-points."runevidence.adapters"]
+# mytool = "runevidence_mytool:MyToolAdapter"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/runevidence"]
+
+[tool.pytest.ini_options]
+# Adapter packages keep their tests next to them; they skip themselves
+# unless that package is installed.
+testpaths = ["tests", "packages/runevidence-hydra/tests", "packages/runevidence-mlflow/tests"]
+addopts = "-ra"

@@ -1,0 +1,2 @@
+2026-10-25T18:03:38 fit logreg in 0.007s
+metrics {"split": "test", "n_test": 143, "accuracy": 0.986, "f1": 0.9889, "roc_auc": 0.9977}

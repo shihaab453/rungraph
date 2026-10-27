@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use RunEvidence or rungraph in your work, please cite it as below."
+title: "RunEvidence / rungraph"
+authors:
+  - given-names: Shihaab
+    family-names: Alam
+license: Apache-2.0
+repository-code: "https://github.com/shihaab453/rungraph"
+url: "https://github.com/shihaab453/rungraph"

@@ -1,0 +1,5 @@
+# The lowest versions the packages declare (runevidence: pydantic>=2.6,
+# adapters: PyYAML>=6). CI installs with these pins in the "minimum" jobs to
+# prove the declared floors really work. Keep in sync with pyproject.toml.
+pydantic==2.6.0
+PyYAML==6.0

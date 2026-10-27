@@ -1,0 +1,2 @@
+2026-10-25T18:12:38 start learning_rate_init=0.01
+2026-10-25T18:12:38 epoch 5 diverged: Solver produced non-finite parameter weights. The input data may contain large values and need to be preprocessed.

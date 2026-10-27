@@ -1,0 +1,6 @@
+{
+  "model": "bag-of-words-logreg",
+  "learning_rate": 0.03,
+  "epochs": 20,
+  "seed": 0
+}
