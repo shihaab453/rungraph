@@ -2,7 +2,7 @@
 
 # RunEvidence
 
-[![CI](https://github.com/shihaab453/rungraph/actions/workflows/ci.yml/badge.svg?branch=feat/runevidence-mvp)](https://github.com/shihaab453/rungraph/actions/workflows/ci.yml?query=branch%3Afeat%2Frunevidence-mvp)
+[![CI](https://github.com/shihaab453/rungraph/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shihaab453/rungraph/actions/workflows/ci.yml?query=branch%3Amain)
 
 **Does the evidence in your experiment folder still hold?**
 
