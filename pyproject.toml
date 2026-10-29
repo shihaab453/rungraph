@@ -43,6 +43,14 @@ runevidence = "runevidence.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/runevidence"]
 
+[tool.hatch.build.targets.sdist]
+only-include = [
+  "src/runevidence",
+  "README.md",
+  "LICENSE",
+  "CITATION.cff",
+]
+
 [tool.pytest.ini_options]
 # Adapter packages keep their tests next to them; they skip themselves
 # unless that package is installed.
