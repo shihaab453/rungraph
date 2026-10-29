@@ -277,6 +277,17 @@ def test_adapters_lists_the_builtin_generic_adapter(capsys):
     assert "generic" in out
 
 
+def test_help_says_a_clean_result_is_consistency_not_truth(capsys):
+    assert main(["--help"]) == 0
+    out = " ".join(capsys.readouterr().out.split())  # undo argparse line wrapping
+
+    assert (
+        "Exit codes: 0 ok, 1 evidence problems found, 2 could not check (bad manifest or arguments). "
+        "A clean result means the folder matches its manifest; it does not show that results "
+        "are scientifically true, valid or fresh."
+    ) in out
+
+
 def test_unknown_subcommand_exits_two(capsys):
     assert main(["bogus"]) == 2
     capsys.readouterr()

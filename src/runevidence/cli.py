@@ -407,7 +407,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Check that the evidence in an experiment folder still holds. Offline. "
             "init, rehash and add write the manifest; schema -o exports a schema."
         ),
-        epilog="Exit codes: 0 ok, 1 evidence problems found, 2 could not check (bad manifest or arguments).",
+        epilog=(
+            "Exit codes: 0 ok, 1 evidence problems found, 2 could not check (bad manifest or arguments). "
+            "A clean result means the folder matches its manifest; it does not show that results "
+            "are scientifically true, valid or fresh."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")

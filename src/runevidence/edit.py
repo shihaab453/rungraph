@@ -247,6 +247,31 @@ def plan_rehash(
                 f"{res.id}: source is volatile, so its value was left as is; "
                 "use --no-volatile to record its current digest and result value"
             )
+    # An MLflow metric summary has no locator, so nothing below re-reads it
+    # (RE-10). Re-recording its file must not look like re-vouching for it.
+    selected = {f.id: f for f in plan.files}
+    artifacts = {a.id: a for a in manifest.artifacts}
+    runs = {r.id: r for r in manifest.runs}
+    noted: set[str] = set()
+    for res in manifest.results:
+        if res.locator is not None or res.artifact_id not in selected or res.id in noted:
+            continue
+        fc, art, run = selected[res.artifact_id], artifacts[res.artifact_id], runs.get(res.run_id)
+        if (
+            run is not None
+            and isinstance(run.metadata.get("mlflow"), dict)
+            and "step" in res.metadata
+            and "timestamp_ms" in res.metadata
+            and art.kind == "metrics"
+            and art.run_id == res.run_id
+            and _norm(art.path).endswith("/metrics/" + res.name)
+            and (fc.id in new_bytes or fc.was_volatile or fc.volatile)
+        ):
+            noted.add(res.id)
+            plan.notes.append(
+                f"{res.id}: MLflow metric summary (value, step, timestamp) was not re-read from {art.path}; "
+                "follow the RE-10 safe refresh procedure"
+            )
     _reread_values(loaded, raw, new_bytes, plan)
     accepted = {f.id for f in plan.changed_files} | {v.result_id for v in plan.values}
     if accepted:
