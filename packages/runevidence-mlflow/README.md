@@ -1,6 +1,6 @@
 # runevidence-mlflow
 
-A [RunEvidence](../../README.md) adapter for local MLflow **file stores**. It
+A [RunEvidence](https://github.com/shihaab453/rungraph/blob/main/README.md) adapter for local MLflow **file stores**. It
 turns an `mlruns/` directory into a starter `runevidence.json`: one Run per
 MLflow run folder, the run's params, experiment metadata, hashes for every
 file, and one Result per readable metric history.
@@ -100,7 +100,7 @@ not always mean the summary is stale, and validation makes no scientific truth
 or general freshness claim.
 
 To refresh summaries, run `init --adapter mlflow --force` and follow the
-[central safe refresh procedure](../../docs/adapters.md#refreshing-mlflow-results-safely-re-10).
+[central safe refresh procedure](https://github.com/shihaab453/rungraph/blob/main/docs/adapters.md#refreshing-mlflow-results-safely-re-10).
 The previous manifest is kept as a new backup generation
 (`runevidence.json.bak`, `.bak.2`, ...; never overwritten). Forced
 regeneration does not merge hand-written claims, relationships, annotations,
@@ -135,6 +135,8 @@ partial log when one row is bad.
   supported. Point at the store or the project folder containing `mlruns/`.
 - No Results are invented for missing metrics, and no evidence claims are
   inferred.
+- Each metric history file is read completely into memory, with no size cap,
+  so a very large metric log can use a lot of memory during `init`.
 
 ## Development
 
