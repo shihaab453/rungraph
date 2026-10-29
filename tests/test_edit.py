@@ -8,10 +8,12 @@ import stat
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from runevidence.checks import run_checks
 from runevidence.cli import main
 from runevidence.manifest import load_manifest
+from runevidence.models import Result
 
 MANIFEST = "runevidence.json"
 
@@ -248,6 +250,54 @@ def test_rehash_does_not_overwrite_a_wrong_value_when_the_file_did_not_change(ex
 
     assert read_doc(experiment)["results"][0]["value"] == 0.55
     assert "result-value-mismatch" in codes(experiment)
+
+
+HUGE = 10**400  # far beyond float range
+
+
+def huge_values_are_valid() -> bool:
+    """Whether the installed Pydantic keeps an int beyond float range as a
+    result value. Supported versions need not agree, so the rehash tests
+    below accept either answer but insist on a controlled outcome."""
+    try:
+        Result.model_validate({"id": "r", "run_id": "run", "name": "n", "value": HUGE})
+    except ValidationError:
+        return False
+    return True
+
+
+def test_rehash_dry_run_with_a_huge_metrics_value_writes_nothing(experiment, capsys):
+    retrain_tuned(experiment, accuracy=HUGE)
+    before = (experiment / MANIFEST).read_bytes()
+
+    exit_code = main(["rehash", str(experiment), "run-tuned", "--dry-run"])
+    out = capsys.readouterr().out
+
+    assert (experiment / MANIFEST).read_bytes() == before
+    if huge_values_are_valid():
+        assert exit_code == 0
+        assert f"result tuned-accuracy (test_accuracy): 1.0 -> {HUGE}" in out
+        assert "Dry run: nothing was written." in out
+    else:
+        assert exit_code == 2
+        assert "Nothing was written." in out
+
+
+def test_rehash_with_a_huge_metrics_value_records_it_or_refuses_cleanly(experiment, capsys):
+    retrain_tuned(experiment, accuracy=HUGE)
+    before = (experiment / MANIFEST).read_bytes()
+
+    exit_code = main(["rehash", str(experiment), "run-tuned"])
+    out = capsys.readouterr().out
+
+    if huge_values_are_valid():
+        assert exit_code == 0
+        assert read_doc(experiment)["results"][1]["value"] == HUGE
+        assert main(["validate", str(experiment), "--strict"]) == 0
+    else:
+        assert exit_code == 2
+        assert "Nothing was written." in out
+        assert (experiment / MANIFEST).read_bytes() == before
 
 
 def test_rehash_dry_run_writes_nothing(experiment, capsys):

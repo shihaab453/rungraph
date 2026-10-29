@@ -69,6 +69,75 @@ def test_bools_are_never_equal_to_numbers():
     assert values_match(1, 1) is True
 
 
+HUGE = 10**400  # far beyond float range, so math.isclose cannot convert it
+
+
+def test_ints_beyond_float_range_compare_exactly():
+    assert values_match(HUGE, HUGE) is True
+    assert values_match(HUGE, HUGE + 1) is False
+    assert values_match(-HUGE, -HUGE) is True
+    assert values_match(HUGE, -HUGE) is False
+
+
+def test_ints_beyond_float_range_never_match_floats():
+    inf, nan = float("inf"), float("nan")
+    for other in (1.0, inf, -inf, nan):
+        assert values_match(HUGE, other) is False
+        assert values_match(other, HUGE) is False
+    assert values_match(-HUGE, -inf) is False
+
+
+def test_nan_and_infinity_keep_their_meaning():
+    inf, nan = float("inf"), float("nan")
+    assert values_match(nan, nan) is True
+    assert values_match(nan, 1.0) is False
+    assert values_match(1, nan) is False
+    assert values_match(inf, inf) is True
+    assert values_match(-inf, -inf) is True
+    assert values_match(inf, -inf) is False
+
+
+def test_ints_within_float_range_keep_the_tolerance():
+    assert values_match(10**15, 10**15 + 1) is True
+    assert values_match(2**53, float(2**53)) is True
+    assert values_match(10**15, 10**15 + 10**7) is False
+
+
+def record_metrics(root: Path, data: bytes) -> None:
+    """Replace the tuned metrics file and record its new digest, so the
+    only thing left to report is the value the result reads from it."""
+    (root / "runs" / "tuned" / "metrics.json").write_bytes(data)
+    doc = read_doc(root)
+    art = next(a for a in doc["artifacts"] if a["id"] == "tuned-metrics")
+    art["sha256"] = hashlib.sha256(data).hexdigest()
+    art["size_bytes"] = len(data)
+    write_doc(root, doc)
+
+
+def test_huge_int_in_a_metrics_file_is_a_mismatch_not_a_crash(experiment):
+    record_metrics(experiment, b'{"eval": {"accuracy": ' + str(HUGE).encode() + b"}}\n")
+
+    report = check(experiment)
+    finding = only(report, Code.result_value_mismatch)
+
+    assert set(codes(report)) == {"result-value-mismatch", "claim-at-risk"}
+    assert finding.subject == "tuned-accuracy"
+    assert "records 1.0" in finding.message
+
+
+@pytest.mark.parametrize("command", ["validate", "inspect"])
+def test_huge_int_in_a_metrics_file_keeps_cli_output_parseable(experiment, capsys, command):
+    record_metrics(experiment, b'{"eval": {"accuracy": ' + str(HUGE).encode() + b"}}\n")
+
+    assert main([command, str(experiment)]) == 1
+    assert "result-value-mismatch" in capsys.readouterr().out
+
+    assert main([command, str(experiment), "--json"]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["exit_code"] == 1
+    assert "result-value-mismatch" in [f["code"] for f in data["findings"]]
+
+
 def test_resolve_pointer_handles_escaped_tokens():
     doc = {"a/b": 1, "a~b": 2, "nested": {"x/y": {"z": 3}}}
 
