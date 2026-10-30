@@ -81,3 +81,297 @@ jobs:
 
       - name: Run tests
         run: python -m pytest
+
+  # Advisory packaging verification. This is NOT a required ruleset context.
+  packaging-advisory:
+    name: packaging (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - name: Install packaging inspection tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install "build==1.6.1" "twine==7.0.0" "tomli==2.2.1"
+          python -m pip show build twine tomli
+      - name: Validate and rebuild distributions, then check metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64
+          import csv
+          import hashlib
+          import io
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import sys
+          import tarfile
+          import zipfile
+          from email import policy
+          from email.parser import BytesParser
+          from packaging.requirements import Requirement
+          from packaging.utils import canonicalize_name
+          import tomli
+
+          ROOT = Path.cwd().resolve()
+          OUT = Path(os.environ["RUNNER_TEMP"]).resolve() / "rg-dist"
+          SPECS = {
+              "core": (".", "runevidence", "runevidence"),
+              "hydra": ("packages/runevidence-hydra", "runevidence-hydra", "runevidence_hydra"),
+              "mlflow": ("packages/runevidence-mlflow", "runevidence-mlflow", "runevidence_mlflow"),
+          }
+          ENTRY = {
+              "core": ("console_scripts", "runevidence", "runevidence.cli:main"),
+              "hydra": ("runevidence.adapters", "hydra", "runevidence_hydra:HydraAdapter"),
+              "mlflow": ("runevidence.adapters", "mlflow", "runevidence_mlflow:MlflowAdapter"),
+          }
+          BAD_DIR = {".git", ".github", ".pytest_cache", "examples", "dist", "build", "multirun", "outputs", "runs", "checkpoints", "mlruns", ".hydra", "__pycache__"}
+          BAD_SUFFIX = (".pkl", ".pickle", ".joblib", ".csv", ".bin", ".pt", ".pth", ".ckpt", ".npy", ".npz", ".parquet", ".feather", ".arrow", ".tfrecord", ".msgpack", ".h5", ".onnx", ".safetensors", ".zip", ".whl", ".tar", ".gz", ".pyc", ".pyo", ".pem", ".key")
+          BAD_BASENAME = {"handoff.md", ".pypirc", ".netrc", "id_rsa", "id_ed25519"}
+          MAX_MEMBERS = 500
+          MAX_FILE = 16 * 1024 * 1024
+          MAX_TOTAL = 64 * 1024 * 1024
+
+
+          def ensure(ok, message):
+              if not ok:
+                  raise AssertionError(message)
+
+
+          def run(*args, cwd=ROOT):
+              cmd = [str(x) for x in args]
+              print("RUN", " ".join(cmd), flush=True)
+              subprocess.run(cmd, cwd=cwd, check=True)
+
+
+          def tracked(src, sub):
+              path = (sub if src == "." else src + "/" + sub)
+              result = subprocess.run(["git", "ls-files", "-z", "--", path], cwd=ROOT, check=True, capture_output=True).stdout
+              paths = [p.decode("utf-8") for p in result.split(b"\0") if p]
+              prefix = "" if src == "." else src + "/"
+              return {p[len(prefix):] for p in paths}
+
+
+          def safe_name(name):
+              ensure(isinstance(name, str) and bool(name), "empty archive name")
+              ensure(not name.startswith("/") and "\\" not in name and "\0" not in name, f"unsafe absolute or separator: {name!r}")
+              parts = name.rstrip("/").split("/")
+              ensure(all(p not in ("", ".", "..") for p in parts), f"unsafe path components: {name!r}")
+              ensure(":" not in parts[0], f"drive-like path: {name!r}")
+              lower = [p.lower() for p in parts]
+              ensure(not any(p in BAD_DIR or p.startswith(".venv") for p in lower), f"forbidden directory: {name!r}")
+              base = lower[-1]
+              ensure(base not in BAD_BASENAME and not base.startswith(".env") and not base.startswith("id_rsa") and not base.startswith("id_ed25519") and not base.startswith("credentials") and not base.startswith("secret"), f"sensitive filename: {name!r}")
+              ensure(not base.endswith(BAD_SUFFIX), f"forbidden file type: {name!r}")
+
+
+          def one(path, pattern):
+              matches = sorted(path.glob(pattern))
+              ensure(len(matches) == 1, f"expected exactly one {pattern} under {path}, found {len(matches)}")
+              return matches[0]
+
+
+          def sha(data):
+              return hashlib.sha256(data).hexdigest()
+
+
+          def inspect_sdist(key, archive, src, module):
+              files = {}
+              total = 0
+              stem = archive.name[:-7]
+              with tarfile.open(archive, "r:gz") as tf:
+                  members = tf.getmembers()
+                  ensure(0 < len(members) <= MAX_MEMBERS, f"{key} sdist member-count limit")
+                  seen = set()
+                  for m in members:
+                      safe_name(m.name)
+                      ensure(m.name not in seen, f"{key} duplicate tar member {m.name}")
+                      seen.add(m.name)
+                      ensure(m.isfile() or m.isdir(), f"{key} unsupported tar member type {m.name}")
+                      ensure(0 <= m.size <= MAX_FILE, f"{key} oversized or negative member {m.name}")
+                      total += m.size
+                      ensure(total <= MAX_TOTAL, f"{key} oversized tar aggregate")
+                      parts = m.name.rstrip("/").split("/")
+                      ensure(parts[0] == stem and (len(parts) > 1 or m.isdir()), f"{key} wrong top-level directory: {m.name}")
+                      if m.isfile():
+                          stream = tf.extractfile(m)
+                          ensure(stream is not None, f"unreadable sdist member: {m.name}")
+                          content = stream.read(MAX_FILE + 1)
+                          ensure(len(content) == m.size, f"size mismatch: {m.name}")
+                          files["/".join(parts[1:])] = content
+              required = {"PKG-INFO", "pyproject.toml", "README.md", "LICENSE"} | tracked(src, "src/" + module)
+              if key == "core":
+                  required.add("CITATION.cff")
+                  # A3 observed .gitignore as a Hatchling-added implicit on 1.27.0 and 1.32.4.
+                  required.add(".gitignore")
+                  ensure(set(files) == required, f"core sdist missing={sorted(required-set(files))}; extra={sorted(set(files)-required)}")
+              else:
+                  ensure(required <= set(files), f"{key} missing required sdist members {sorted(required-set(files))}")
+                  expected_extras = tracked(src, "tests") | {".gitignore"}
+                  extra = set(files) - required - expected_extras
+                  if extra:
+                      print(f"::warning::{key} adapter sdist extra members, not an adapter allow-list: {sorted(extra)}")
+                  if not tracked(src, "tests") <= set(files):
+                      print(f"::warning::{key} adapter tests absent from sdist (historically included)")
+              # Prove all required non-generated bytes came from this exact checkout.
+              for member in required - {"PKG-INFO"}:
+                  ensure(files[member] == (ROOT / src / member).read_bytes(), f"{key} sdist source bytes differ: {member}")
+              print(f"SDIST {key} {archive.name} bytes={archive.stat().st_size} sha256={sha(archive.read_bytes())} members={len(files)} total_uncompressed={total}")
+              print("MEMBERS", key, "sdist", sorted(files))
+              return files
+
+
+          def inspect_wheel(key, archive, src, module):
+              files = {}
+              total = 0
+              with zipfile.ZipFile(archive) as zf:
+                  infos = zf.infolist()
+                  ensure(0 < len(infos) <= MAX_MEMBERS, f"{key} wheel member-count limit")
+                  ensure(len({x.filename for x in infos}) == len(infos), f"{key} duplicate wheel names")
+                  for item in infos:
+                      safe_name(item.filename)
+                      ensure(not item.is_dir(), f"{key} unexpected wheel directory entry")
+                      mode = (item.external_attr >> 16) & 0o170000
+                      ensure(mode in (0, 0o100000), f"{key} non-regular ZIP member {item.filename}")
+                      ensure(item.file_size <= MAX_FILE, f"{key} wheel oversized member {item.filename}")
+                      total += item.file_size
+                      ensure(total <= MAX_TOTAL, f"{key} wheel oversized aggregate")
+                      files[item.filename] = zf.read(item)
+              dirs = {p.split("/", 1)[0] for p in files}
+              distinfos = {p for p in dirs if p.endswith(".dist-info")}
+              ensure(len(distinfos) == 1 and dirs == {module} | distinfos, f"{key} unexpected wheel prefixes: {dirs}")
+              distinfo = next(iter(distinfos))
+              expected_module = {p.replace("src/", "", 1) for p in tracked(src, "src/" + module)}
+              actual_module = {p for p in files if p.startswith(module + "/")}
+              ensure(actual_module == expected_module, f"{key} wheel module mismatch missing={sorted(expected_module-actual_module)} extra={sorted(actual_module-expected_module)}")
+              for member in expected_module:
+                  ensure(files[member] == (ROOT / src / "src" / member).read_bytes(), f"{key} wheel source bytes differ: {member}")
+              required = {"METADATA", "WHEEL", "RECORD", "entry_points.txt", "licenses/LICENSE"}
+              ensure({distinfo + "/" + x for x in required} <= set(files), f"{key} missing wheel metadata")
+              ensure(files[distinfo + "/licenses/LICENSE"] == (ROOT / src / "LICENSE").read_bytes(), f"{key} wheel license mismatch")
+              wheel = BytesParser(policy=policy.default).parsebytes(files[distinfo + "/WHEEL"])
+              ensure(wheel.get("Root-Is-Purelib", "").lower() == "true", f"{key} wheel not purelib")
+              ensure("py3-none-any" in wheel.get_all("Tag", []), f"{key} wheel wrong tag")
+              ensure(archive.name.endswith("-py3-none-any.whl"), f"{key} wheel filename wrong tag")
+              print(f"GENERATOR {key}: {wheel.get('Generator')} ({archive.name})")
+              record = files[distinfo + "/RECORD"].decode("utf-8")
+              rows = list(csv.reader(io.StringIO(record)))
+              ensure(len(rows) == len(files), f"{key} RECORD length mismatch")
+              ensure(len({r[0] for r in rows}) == len(rows), f"{key} RECORD duplicate")
+              ensure({r[0] for r in rows} == set(files), f"{key} RECORD member-set mismatch")
+              for path, checksum, size in rows:
+                  if path == distinfo + "/RECORD":
+                      ensure(checksum == "" and size == "", f"{key} RECORD self-hash invalid")
+                      continue
+                  expected_hash = base64.urlsafe_b64encode(hashlib.sha256(files[path]).digest()).decode("ascii").rstrip("=")
+                  ensure(checksum == "sha256=" + expected_hash and size == str(len(files[path])), f"{key} RECORD checksum/size mismatch at {path}")
+              print(f"WHEEL {key} {archive.name} bytes={archive.stat().st_size} sha256={sha(archive.read_bytes())} members={len(files)}")
+              print("MEMBERS", key, "wheel", sorted(files))
+              return files, distinfo
+
+
+          def check_metadata(key, sdist, wheel, distinfo, source):
+              with (ROOT / source / "pyproject.toml").open("rb") as fp:
+                  project = tomli.load(fp)["project"]
+              pmeta = BytesParser(policy=policy.default).parsebytes(sdist["PKG-INFO"])
+              wmeta = BytesParser(policy=policy.default).parsebytes(wheel[distinfo + "/METADATA"])
+              for label, msg in (("sdist", pmeta), ("wheel", wmeta)):
+                  ensure(canonicalize_name(msg["Name"]) == canonicalize_name(project["name"]), f"{key} {label} metadata name")
+                  ensure(msg["Version"] == project["version"], f"{key} {label} metadata version")
+                  ensure(msg["Requires-Python"] == project["requires-python"], f"{key} {label} Requires-Python")
+                  ensure(msg["License-Expression"] == project["license"], f"{key} {label} license")
+                  ensure("LICENSE" in msg.get_all("License-File", []), f"{key} {label} license file")
+                  ensure(msg["Description-Content-Type"] == "text/markdown", f"{key} {label} description type")
+                  ensure(bool(msg.get_payload()), f"{key} {label} empty long description")
+                  reqs = [Requirement(s) for s in msg.get_all("Requires-Dist", [])]
+                  reqnames = {canonicalize_name(r.name) for r in reqs}
+                  needed = {"pydantic"} if key == "core" else {"runevidence", "pyyaml"}
+                  ensure(needed <= reqnames and "pytest" in reqnames, f"{key} {label} missing runtime or dev dependencies")
+                  if key != "core":
+                      with (ROOT / "pyproject.toml").open("rb") as fp:
+                          core_version = tomli.load(fp)["project"]["version"]
+                      assert any(r.name.lower() == "runevidence" and core_version in r.specifier for r in reqs), f"{key} core version outside adapter requirement"
+              import configparser
+              conf = configparser.ConfigParser()
+              conf.optionxform = str
+              conf.read_string(wheel[distinfo + "/entry_points.txt"].decode("utf-8"))
+              section, name, target = ENTRY[key]
+              ensure(conf.has_section(section) and conf.get(section, name, fallback=None) == target, f"{key} wrong entry point")
+              ensure(set(conf[section]) == {name}, f"{key} unexpected entries in {section}")
+              # Core has one console script. Adapters have only their respective named adapter entry.
+              print(f"METADATA {key}: name={project['name']} version={project['version']} required fields and entry point PASS")
+
+
+          def main():
+              # Validate the validator's critical negative predicates before consuming any archives.
+              for sample in ("../x", "/tmp/x", "x/../../y", "x\\y", "x//y", "examples/file.pkl", "runs/x", "checkpoints/x", ".venv-foo/y", "foo/.env.test", "foo/checkpoint.ckpt"):
+                  try:
+                      safe_name(sample)
+                  except AssertionError:
+                      continue
+                  raise AssertionError(f"negative control unexpectedly accepted {sample!r}")
+              print("NEGATIVE PATH CONTROLS: PASS")
+              OUT.mkdir(parents=True, exist_ok=True)
+              for key, (src, distribution, module) in SPECS.items():
+                  (OUT / "sdist" / key).mkdir(parents=True, exist_ok=True)
+                  (OUT / "wheel-tree" / key).mkdir(parents=True, exist_ok=True)
+                  run(sys.executable, "-m", "build", "--sdist", "--outdir", OUT / "sdist" / key, ROOT / src)
+                  run(sys.executable, "-m", "build", "--wheel", "--outdir", OUT / "wheel-tree" / key, ROOT / src)
+              # CRITICAL: Validate the sdists completely BEFORE extracting a byte from any of them.
+              sdist_data = {}
+              for key, (src, distribution, module) in SPECS.items():
+                  archive = one(OUT / "sdist" / key, "*.tar.gz")
+                  sdist_data[key] = inspect_sdist(key, archive, src, module)
+              for key in SPECS:
+                  archive = one(OUT / "sdist" / key, "*.tar.gz")
+                  extracted = OUT / "extract" / key
+                  extracted.mkdir(parents=True, exist_ok=True)
+                  with tarfile.open(archive, "r:gz") as tf:
+                      ensure(hasattr(tarfile, "data_filter"), "tarfile data_filter unavailable")
+                      tf.extractall(path=extracted, filter="data")
+                  directories = [p for p in extracted.iterdir() if p.is_dir()]
+                  ensure(len(directories) == 1, f"{key} unexpected extraction tree")
+                  (OUT / "wheel-sdist" / key).mkdir(parents=True, exist_ok=True)
+                  run(sys.executable, "-m", "build", "--wheel", "--outdir", OUT / "wheel-sdist" / key, directories[0])
+              for key, (src, distribution, module) in SPECS.items():
+                  a = one(OUT / "wheel-tree" / key, "*.whl")
+                  b = one(OUT / "wheel-sdist" / key, "*.whl")
+                  first, di1 = inspect_wheel(key, a, src, module)
+                  second, di2 = inspect_wheel(key, b, src, module)
+                  check_metadata(key, sdist_data[key], first, di1, src)
+                  check_metadata(key, sdist_data[key], second, di2, src)
+                  one_stable = {p: v for p, v in first.items() if not p.endswith(("/METADATA", "/WHEEL", "/RECORD"))}
+                  two_stable = {p: v for p, v in second.items() if not p.endswith(("/METADATA", "/WHEEL", "/RECORD"))}
+                  ensure(one_stable == two_stable, f"{key} tree-vs-sdist wheel payload/entry-point/license difference")
+                  print(f"SDIST-TO-WHEEL {key}: normalized package and stable metadata payload PASS")
+              paths = [one(OUT / kind / key, suffix) for kind, suffix in (("sdist", "*.tar.gz"), ("wheel-tree", "*.whl"), ("wheel-sdist", "*.whl")) for key in SPECS]
+              ensure(len(paths) == 9, "expected nine total archives")
+              run(sys.executable, "-m", "twine", "check", "--strict", *paths)
+              print("PACKAGING ADVISORY: ALL NINE ARCHIVES PASS")
+              summary = Path(os.environ.get("GITHUB_STEP_SUMMARY", str(OUT / "summary.md")))
+              with summary.open("a", encoding="utf-8") as f:
+                  f.write("### Packaging advisory: PASS\nNine archives built and checked, including three sdist-derived wheels. See job log for SHA-256, members, metadata, and validators. No artifacts uploaded.\n")
+
+
+          if __name__ == "__main__":
+              try:
+                  main()
+              except Exception as exc:
+                  print(f"::error::PACKAGING ADVISORY FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)
+                  if os.environ.get("GITHUB_STEP_SUMMARY"):
+                      with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+                          f.write(f"### Packaging advisory: FAIL\n{type(exc).__name__}: {exc}\nSee job log for details. No artifacts uploaded.\n")
+                  raise
+          PY
