@@ -143,6 +143,8 @@ jobs:
           MAX_MEMBERS = 500
           MAX_FILE = 16 * 1024 * 1024
           MAX_TOTAL = 64 * 1024 * 1024
+          # Extra .dist-info files may be metadata (notices, SBOMs), never code.
+          DISTINFO_CODE_SUFFIX = (".py", ".pyw", ".pth", ".so", ".pyd", ".dll", ".dylib", ".exe", ".sh", ".bat", ".cmd", ".ps1")
 
 
           def ensure(ok, message):
@@ -195,22 +197,37 @@ jobs:
                   members = tf.getmembers()
                   ensure(0 < len(members) <= MAX_MEMBERS, f"{key} sdist member-count limit")
                   seen = set()
+                  dirs = set()
                   for m in members:
                       safe_name(m.name)
-                      ensure(m.name not in seen, f"{key} duplicate tar member {m.name}")
-                      seen.add(m.name)
+                      # Normalized key: "dir" and "dir/" are the same path, and a file may not share a directory's path.
+                      norm = m.name.rstrip("/")
+                      ensure(norm not in seen, f"{key} duplicate tar member {m.name}")
+                      seen.add(norm)
                       ensure(m.isfile() or m.isdir(), f"{key} unsupported tar member type {m.name}")
                       ensure(0 <= m.size <= MAX_FILE, f"{key} oversized or negative member {m.name}")
+                      ensure(m.isdir() or not m.name.endswith("/"), f"{key} regular file with directory-style name {m.name}")
                       total += m.size
                       ensure(total <= MAX_TOTAL, f"{key} oversized tar aggregate")
-                      parts = m.name.rstrip("/").split("/")
+                      parts = norm.split("/")
                       ensure(parts[0] == stem and (len(parts) > 1 or m.isdir()), f"{key} wrong top-level directory: {m.name}")
-                      if m.isfile():
+                      if m.isdir():
+                          ensure(m.size == 0, f"{key} non-empty directory header {m.name}")
+                          dirs.add(norm)
+                      else:
                           stream = tf.extractfile(m)
                           ensure(stream is not None, f"unreadable sdist member: {m.name}")
                           content = stream.read(MAX_FILE + 1)
                           ensure(len(content) == m.size, f"size mismatch: {m.name}")
                           files["/".join(parts[1:])] = content
+              # Directory headers are allowed only as ancestors of included regular files (whole path components).
+              file_paths = {stem + "/" + p for p in files}
+              file_ancestors = {"/".join(p.split("/")[:i]) for p in file_paths for i in range(1, p.count("/") + 1)}
+              member_ancestors = file_ancestors | {"/".join(d.split("/")[:i]) for d in dirs for i in range(1, d.count("/") + 1)}
+              ensure(not file_paths & member_ancestors, f"{key} regular file used as a directory: {sorted(file_paths & member_ancestors)}")
+              ensure(files, f"{key} sdist has no regular files")
+              ensure(dirs <= file_ancestors, f"{key} empty or unused sdist directory headers: {sorted(dirs - file_ancestors)}")
+              print(f"SDIST-HEADERS {key} total_headers={len(members)} regular_files={len(files)} structural_dirs={len(dirs)}")
               required = {"PKG-INFO", "pyproject.toml", "README.md", "LICENSE"} | tracked(src, "src/" + module)
               if key == "core":
                   required.add("CITATION.cff")
@@ -260,6 +277,10 @@ jobs:
                   ensure(files[member] == (ROOT / src / "src" / member).read_bytes(), f"{key} wheel source bytes differ: {member}")
               required = {"METADATA", "WHEEL", "RECORD", "entry_points.txt", "licenses/LICENSE"}
               ensure({distinfo + "/" + x for x in required} <= set(files), f"{key} missing wheel metadata")
+              # Compatibility policy: extra .dist-info members are allowed if safe, non-code and RECORD-verified below.
+              distinfo_extra = sorted(p[len(distinfo) + 1:] for p in files if p.startswith(distinfo + "/") and p[len(distinfo) + 1:] not in required)
+              for rel in distinfo_extra:
+                  ensure(not rel.lower().endswith(DISTINFO_CODE_SUFFIX), f"{key} executable-like extra .dist-info member {rel}")
               ensure(files[distinfo + "/licenses/LICENSE"] == (ROOT / src / "LICENSE").read_bytes(), f"{key} wheel license mismatch")
               wheel = BytesParser(policy=policy.default).parsebytes(files[distinfo + "/WHEEL"])
               ensure(wheel.get("Root-Is-Purelib", "").lower() == "true", f"{key} wheel not purelib")
@@ -277,6 +298,9 @@ jobs:
                       continue
                   expected_hash = base64.urlsafe_b64encode(hashlib.sha256(files[path]).digest()).decode("ascii").rstrip("=")
                   ensure(checksum == "sha256=" + expected_hash and size == str(len(files[path])), f"{key} RECORD checksum/size mismatch at {path}")
+              if distinfo_extra:
+                  print(f"::notice::{key} wheel extra .dist-info members (allowed compatibility metadata, RECORD-verified, contents not validated): {distinfo_extra}")
+              print(f"DIST-INFO {key} {archive.name} required={len(required)} extra={len(distinfo_extra)}")
               print(f"WHEEL {key} {archive.name} bytes={archive.stat().st_size} sha256={sha(archive.read_bytes())} members={len(files)}")
               print("MEMBERS", key, "wheel", sorted(files))
               return files, distinfo
@@ -302,7 +326,8 @@ jobs:
                   if key != "core":
                       with (ROOT / "pyproject.toml").open("rb") as fp:
                           core_version = tomli.load(fp)["project"]["version"]
-                      assert any(r.name.lower() == "runevidence" and core_version in r.specifier for r in reqs), f"{key} core version outside adapter requirement"
+                      # ensure(), not assert: this check must also run under python -O.
+                      ensure(any(canonicalize_name(r.name) == "runevidence" and core_version in r.specifier for r in reqs), f"{key} core version outside adapter requirement")
               import configparser
               conf = configparser.ConfigParser()
               conf.optionxform = str
