@@ -1,4 +1,4 @@
-<img src="assets/icon.svg" width="64" height="64" alt="">
+<img src="https://raw.githubusercontent.com/shihaab453/rungraph/main/assets/icon.svg" width="64" height="64" alt="">
 
 # RunEvidence
 
@@ -223,8 +223,8 @@ summary **value, step and timestamp may stay old**. A later `validate --strict`
 can then exit 0 after that acceptance. Changed bytes do not always mean the
 summary is stale, and validation makes no scientific truth or general
 freshness claim. See [Refreshing MLflow results
-safely](docs/adapters.md#refreshing-mlflow-results-safely-re-10) and the
-[draft alpha release notes](docs/alpha-release-notes-draft.md).
+safely](https://github.com/shihaab453/rungraph/blob/main/docs/adapters.md#refreshing-mlflow-results-safely-re-10) and the
+[draft alpha release notes](https://github.com/shihaab453/rungraph/blob/main/docs/alpha-release-notes-draft.md).
 
 A **volatile** artifact (`"volatile": true`) is checked for existence only. No
 digest is kept for it, so `validate` never reports its bytes as changed.
@@ -255,14 +255,14 @@ Commit before you run them if you want an easy undo.
 
 For a worked example on a real training run (scikit-learn, two models, real
 metrics), see `examples/dogfood-sklearn/` and its write-up in
-[docs/dogfood-sklearn-20261025.md](docs/dogfood-sklearn-20261025.md). Its
+[docs/dogfood-sklearn-20261025.md](https://github.com/shihaab453/rungraph/blob/main/docs/dogfood-sklearn-20261025.md). Its
 `model.pkl` files are pickles: RunEvidence only hashes them, and you should
 never unpickle files you did not create yourself.
 
 A second worked example, `examples/dogfood-mlp-sweep/`, uses a different
 layout: a preprocessing stage feeding a Hydra-style learning-rate sweep
 (`multirun/<date>/<time>/<job>/`) with per-epoch checkpoints and one
-diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](docs/dogfood-mlp-sweep-20261025.md).
+diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/shihaab453/rungraph/blob/main/docs/dogfood-mlp-sweep-20261025.md).
 
 ---
 
@@ -351,8 +351,8 @@ All IDs share one namespace. Unknown fields are rejected (so a typo like
 | `derivation-cycle` | error | `derived_from` loops. The search is iterative, so long valid chains (tested with 5,000 steps) are checked instead of crashing. |
 | `unsupported-claim` | warning / error | A claim cites nothing; or none of its citations are valid. |
 | `claim-at-risk` | error | A claim depends on a result, file or run input that is missing or changed. Lineage is followed upstream (`derived_from`, `input_to`, producing runs), so raw data two steps back counts; indirect causes are shown as `id (via ...)`. |
-| `result-value-mismatch` | error | Recorded value differs from the value at its locator in the file. `NaN` matches `NaN`, so a diverged run can be recorded faithfully. |
-| `result-unverifiable` | warning | A locator cannot be checked (not JSON, not found, no artifact). |
+| `result-value-mismatch` | error | Recorded value differs from the value at its locator in the file. Numbers match within a small tolerance (relative 1e-9); an integer too large to convert to a float is compared exactly instead. `NaN` matches `NaN`, so a diverged run can be recorded faithfully. |
+| `result-unverifiable` | warning | A locator cannot be checked (not JSON, cannot be parsed, not found, no artifact). |
 
 ## Adapters
 
@@ -361,7 +361,7 @@ read-only steps: `discover(root)` then `extract(root, discovery)`. The
 `generic` adapter is built in. Tool adapters are separate packages, so core
 stays free of tool dependencies:
 
-- **`hydra`** ([packages/runevidence-hydra](packages/runevidence-hydra)):
+- **`hydra`** ([packages/runevidence-hydra](https://github.com/shihaab453/rungraph/tree/main/packages/runevidence-hydra)):
   every folder holding a `.hydra/` subfolder becomes a run, at any depth, with
   the job's composed config as `params` and its overrides in `metadata`.
   Hydra itself is not needed.
@@ -372,7 +372,7 @@ stays free of tool dependencies:
   runevidence init --adapter hydra path/to/project
   ```
 
-- **`mlflow`** ([packages/runevidence-mlflow](packages/runevidence-mlflow)):
+- **`mlflow`** ([packages/runevidence-mlflow](https://github.com/shihaab453/rungraph/tree/main/packages/runevidence-mlflow)):
   reads local `mlruns/` file stores into experiments, runs, string params,
   hashed artifacts and metric results. MLflow itself is not needed.
 
@@ -386,7 +386,7 @@ stays free of tool dependencies:
   File-store only: no tracking server, database or remote artifacts. Metric
   text files are hash-checked; JSON value locators do not apply to them.
 
-See [docs/adapters.md](docs/adapters.md) for format details, limits and how to
+See [docs/adapters.md](https://github.com/shihaab453/rungraph/blob/main/docs/adapters.md) for format details, limits and how to
 write an adapter for your tool.
 
 ## Limits and guarantees
@@ -396,9 +396,10 @@ Read these before relying on a green `validate` for anything important.
 - **Consistency, not truth.** A clean result means the folder still matches
   what the manifest recorded: the files exist with the same bytes, recorded
   JSON values match their files, and every claim cites valid evidence. It
-  does not mean the experiment was right, the metric is meaningful, the
-  comparison is fair or the claim is scientifically true. RunEvidence checks
-  that your evidence trail is intact, not what it proves.
+  does not mean the experiment was right, the metric is meaningful or fresh,
+  the comparison is fair or the claim is scientifically true. RunEvidence
+  checks that your evidence trail is intact, not what it proves.
+  `runevidence --help` says the same next to the exit codes.
 - **One writer at a time.** `rehash` and `add` refuse to save if the manifest
   changed since they read it, but this is a stale-write check, not a lock:
   another process can still change the file between the final check and the
@@ -409,14 +410,29 @@ Read these before relying on a green `validate` for anything important.
   changed metric file through its hash, but `rehash` accepts the new bytes
   without re-reading the summary value, step or timestamp, so the recorded
   result can keep old values. `validate --strict` can still exit 0 after that
-  acceptance. Changed bytes do not always mean the summary is stale. To
-  refresh, follow [Refreshing MLflow results
-  safely](docs/adapters.md#refreshing-mlflow-results-safely-re-10): run
+  acceptance. Changed bytes do not always mean the summary is stale.
+  `rehash` prints a `NOTE` for each such summary whose file it re-records,
+  or whose file is volatile; the NOTE says the summary was not re-read, not
+  that it is stale. To refresh, follow [Refreshing MLflow results
+  safely](https://github.com/shihaab453/rungraph/blob/main/docs/adapters.md#refreshing-mlflow-results-safely-re-10): run
   `init PATH --adapter mlflow --force`, compare the backup with the
   regenerated manifest, keep the newly extracted summaries, and manually
   restore only reviewed claims, relationships, annotations, volatile flags and
   project settings after verifying IDs. Do not copy old metric results back.
   Version control and a separate backup are strongly recommended.
+- **MLflow metric files are read whole.** When the MLflow adapter builds a
+  manifest (`init --adapter mlflow`), it reads each metric history file
+  completely into memory, with no size cap, so a very large metric log can
+  use a lot of memory.
+- **Very long integers.** Python limits how many digits it will turn into an
+  integer (see `sys.set_int_max_str_digits`; the limit is configurable and
+  can be disabled). A manifest containing a longer number is reported as
+  `manifest-unreadable` (exit 2). A longer number in a JSON file read through
+  a locator makes that result `result-unverifiable`, a warning (exit 1 only
+  with `--strict`). Integers within that limit but too large for a float are
+  compared exactly. Whether the manifest schema accepts such very large
+  integers as result values on every supported Pydantic version has not been
+  separately verified.
 - **Bounded input.** Folder scans never follow symbolic links or Windows
   junctions out of the folder, and the MLflow adapter enters each physical
   folder once, so link loops cannot make a scan repeat itself. Hydra
@@ -462,7 +478,7 @@ python -m pytest
 ```
 
 Tests run offline in a few seconds. Contributions are welcome: see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](https://github.com/shihaab453/rungraph/blob/main/CONTRIBUTING.md).
 
 ## License
 

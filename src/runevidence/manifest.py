@@ -59,7 +59,7 @@ def load_manifest(target: Path) -> LoadedManifest:
     try:
         source_bytes = path.read_bytes()
         raw = json.loads(source_bytes.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         raise ManifestLoadError(
             [
                 Finding(

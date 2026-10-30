@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from runevidence.adapters import BUILTIN
 from runevidence.adapters.base import Adapter, Discovery
@@ -113,6 +116,54 @@ def test_inspect_missing_manifest_exits_two_in_text_and_json(tmp_path, capsys):
     assert main(["inspect", str(empty), "--json"]) == 2
     data = json.loads(capsys.readouterr().out)
     assert data["exit_code"] == 2
+
+
+def oversized_int_token() -> str:
+    """One digit more than this Python will turn into an int, built as text:
+    json.dumps refuses to write such a number at all."""
+    limit = getattr(sys, "get_int_max_str_digits", lambda: 0)()
+    if not limit:
+        pytest.skip("this Python has no integer string conversion limit")
+    return "9" * (limit + 1)
+
+
+def test_manifest_number_beyond_the_int_digit_limit_is_unreadable(experiment, capsys):
+    doc = read_doc(experiment)
+    doc["results"][1]["value"] = "__oversized__"
+    text = json.dumps(doc, indent=2).replace('"__oversized__"', oversized_int_token())
+    (experiment / MANIFEST).write_text(text + "\n", encoding="utf-8", newline="\n")
+
+    for command in ("validate", "inspect"):
+        assert main([command, str(experiment)]) == 2
+        out = capsys.readouterr().out
+        assert "manifest-unreadable" in out
+        assert "INVALID" in out
+
+        assert main([command, str(experiment), "--json"]) == 2
+        data = json.loads(capsys.readouterr().out)
+        assert data["exit_code"] == 2
+        assert [f["code"] for f in data["findings"]] == ["manifest-unreadable"]
+
+
+def test_metrics_number_beyond_the_int_digit_limit_is_unverifiable(experiment, capsys):
+    metrics = ('{"eval": {"accuracy": ' + oversized_int_token() + "}}\n").encode()
+    (experiment / "runs" / "tuned" / "metrics.json").write_bytes(metrics)
+    doc = read_doc(experiment)
+    art = next(a for a in doc["artifacts"] if a["id"] == "tuned-metrics")
+    art["sha256"] = hashlib.sha256(metrics).hexdigest()
+    art["size_bytes"] = len(metrics)
+    write_doc(experiment, doc)
+
+    for command in ("validate", "inspect"):
+        assert main([command, str(experiment)]) == 0
+        assert "result-unverifiable" in capsys.readouterr().out
+
+        assert main([command, str(experiment), "--json"]) == 0
+        data = json.loads(capsys.readouterr().out)
+        assert [f["code"] for f in data["findings"]] == ["result-unverifiable"]
+
+        assert main([command, str(experiment), "--json", "--strict"]) == 1
+        assert json.loads(capsys.readouterr().out)["exit_code"] == 1
 
 
 def test_init_writes_a_manifest_that_validates(tmp_path, capsys):
@@ -224,6 +275,17 @@ def test_adapters_lists_the_builtin_generic_adapter(capsys):
 
     assert exit_code == 0
     assert "generic" in out
+
+
+def test_help_says_a_clean_result_is_consistency_not_truth(capsys):
+    assert main(["--help"]) == 0
+    out = " ".join(capsys.readouterr().out.split())  # undo argparse line wrapping
+
+    assert (
+        "Exit codes: 0 ok, 1 evidence problems found, 2 could not check (bad manifest or arguments). "
+        "A clean result means the folder matches its manifest; it does not show that results "
+        "are scientifically true, valid or fresh."
+    ) in out
 
 
 def test_unknown_subcommand_exits_two(capsys):

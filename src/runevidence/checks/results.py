@@ -52,9 +52,16 @@ def values_match(recorded: Any, actual: Any) -> bool:
     if isinstance(recorded, numeric) and isinstance(actual, numeric):
         # A diverged run legitimately records NaN, and NaN != NaN in IEEE
         # floats; recording it faithfully must not look like tampering.
-        if math.isnan(recorded) or math.isnan(actual):
-            return math.isnan(recorded) and math.isnan(actual)
-        return math.isclose(recorded, actual, rel_tol=1e-9, abs_tol=1e-12)
+        # Only floats can be NaN, and math.isnan raises on ints too big for one.
+        recorded_nan = isinstance(recorded, float) and math.isnan(recorded)
+        actual_nan = isinstance(actual, float) and math.isnan(actual)
+        if recorded_nan or actual_nan:
+            return recorded_nan and actual_nan
+        try:
+            return math.isclose(recorded, actual, rel_tol=1e-9, abs_tol=1e-12)
+        except OverflowError:
+            # An int beyond float range has no tolerance to apply: compare exactly.
+            return recorded == actual
     return recorded == actual
 
 

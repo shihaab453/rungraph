@@ -43,10 +43,34 @@ manifest, retain newly extracted summaries, and manually restore only reviewed
 annotations and settings after verifying IDs and claims. Do not copy stale
 metric results back. Version control and separate backups are recommended.
 
+## Fixed in this draft (unreleased)
+
+- **R5-01:** comparing a recorded value with an integer too large to convert
+  to a float no longer stops with an `OverflowError`; such integers are
+  compared exactly. Other numbers keep the existing tolerance.
+- **Manifest parsing:** a manifest number longer than Python's integer digit
+  limit is reported as `manifest-unreadable` (exit 2) instead of a traceback.
+- **CLI wording:** `rehash` prints a `NOTE` for each locator-less MLflow
+  summary whose file it re-records or whose file is volatile, and `--help` states
+  that a clean result shows consistency with the manifest, not truth, validity
+  or freshness.
+
+These are on the development branch only; nothing here is released.
+
 ## Known limitations
 
 - **RE-10:** locator-less MLflow metric summaries are not refreshed by
-  `rehash`, and strict validation does not check their freshness.
+  `rehash`, and strict validation does not check their freshness. The
+  `rehash` NOTE says a summary was not re-read; it does not show that the
+  summary is stale.
+- **ML-1, MLflow metric memory:** the MLflow adapter reads each metric history
+  file completely into memory, with no size cap, so a very large metric log
+  can use a lot of memory during `init`.
+- **Integer digit limit:** Python's configurable integer digit limit applies
+  to JSON numbers. A longer number makes a manifest `manifest-unreadable`, and
+  makes a locator-backed result `result-unverifiable` (a warning). Whether the
+  schema accepts very large integers as result values on every supported
+  Pydantic version has not been separately verified.
 - **One writer at a time:** the final manifest compare/replace is a
   stale-write check, not a lock. Another writer can race between the final
   comparison and replacement. `init --force` has no such stale-write check
