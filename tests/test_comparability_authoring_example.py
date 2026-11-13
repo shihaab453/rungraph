@@ -13,10 +13,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[1]
 DOC = REPO / "docs" / "comparability-authoring-example.md"
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX-only evidence: the documented authoring example is a bash script",
+)
 def test_authoring_example_runs(tmp_path):
     text = DOC.read_text(encoding="utf-8")
     blocks = re.findall(r"```bash\n(.*?)```", text, re.S)

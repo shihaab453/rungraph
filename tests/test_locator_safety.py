@@ -25,6 +25,15 @@ from runevidence import locator_profiles as profiles
 from runevidence.manifest import dump_manifest, load_manifest
 from runevidence.models import Manifest
 
+# These are POSIX-only evidence: the protected snapshot's containment proof
+# relies on directory descriptors, O_NOFOLLOW, symlinks, mode bits and FIFOs.
+# The project does not claim Windows parity for that safety boundary, so the
+# whole module is skipped there rather than asserting POSIX semantics.
+pytestmark = pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX-only evidence: protected snapshot containment uses POSIX path semantics",
+)
+
 DATA = b'{"val": 0.9}\n'
 POSIX_NONROOT = os.name == "posix" and os.geteuid() != 0
 

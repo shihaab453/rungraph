@@ -561,6 +561,15 @@ def _dangling_junction(lock: Path):
     if not make_dir_link(lock, target):
         pytest.skip("cannot create a directory link here")
     target.rmdir()
+    if os.name == "nt":
+        # A dangling junction is a reparse point whose target no longer exists.
+        # pathlib's rglob raises in scandir for it before Python 3.13, so the
+        # no-write snapshot helper cannot enumerate this folder on 3.10/3.12.
+        # The "junction" case still covers the refusal on Windows.
+        try:
+            snapshot(lock.parent)
+        except OSError:
+            pytest.skip("dangling junction cannot be enumerated by pathlib on this Python")
     return "invalid-lock-target"
 
 

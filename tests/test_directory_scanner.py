@@ -2078,6 +2078,10 @@ def _matrix_payload_hash(data: dict) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="POSIX-only evidence: the filesystem matrix records an ext4 Linux checkout",
+)
 def test_filesystem_matrix_evidence_shape_and_hashes():
     data = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))
 

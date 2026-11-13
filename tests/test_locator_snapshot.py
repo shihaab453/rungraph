@@ -53,6 +53,10 @@ def _codes(report):
     return [finding.code.value for finding in report.findings]
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX-only evidence: the shared protected open is the dir_fd walk",
+)
 def test_two_locators_share_one_protected_open(tmp_path, monkeypatch):
     root = tmp_path / "once"
     target = _manifest(
@@ -109,6 +113,10 @@ def test_descriptor_identity_change_is_artifact_changed(tmp_path, monkeypatch):
     assert "artifact-changed" in _codes(report)
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "mkfifo"),
+    reason="POSIX-only evidence: FIFOs require os.mkfifo",
+)
 def test_fifo_never_blocks_and_is_not_a_regular_snapshot(tmp_path):
     root = tmp_path / "fifo"
     _manifest(root, data=b"")
@@ -142,6 +150,10 @@ def test_symlink_inside_root_is_permitted(tmp_path):
     assert report.findings == []
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX-only evidence: the shared protected open is the dir_fd walk",
+)
 def test_over_cap_still_hashes_and_each_locator_is_unreadable(tmp_path, monkeypatch):
     root = tmp_path / "over"
     data = b"x" * (60 * 1024 * 1024)

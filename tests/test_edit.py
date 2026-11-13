@@ -361,6 +361,10 @@ def _drive_shaped_manifest(root: Path, data: bytes) -> None:
     )
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX-only evidence: 'C:/x.bin' is a literal relative path only on POSIX",
+)
 def test_rehash_reads_a_drive_shaped_artifact_from_any_cwd(
     tmp_path, monkeypatch, capsys
 ):
@@ -381,6 +385,10 @@ def test_rehash_reads_a_drive_shaped_artifact_from_any_cwd(
     assert entry["size_bytes"] == len(b"new bytes\n")
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX-only evidence: 'C:/x.bin' is a literal relative path only on POSIX",
+)
 def test_add_sees_a_tracked_drive_shaped_artifact_from_any_cwd(tmp_path, monkeypatch):
     """The tracked-file key is root-joined, so the same file is not added twice."""
     root = tmp_path / "root"

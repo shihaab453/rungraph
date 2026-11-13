@@ -503,7 +503,13 @@ def _create_backup_file(path: Path, data: bytes, mode: int) -> None:
     """Exclusively create one backup generation and verify it before trust."""
     # O_EXCL also covers a name created concurrently. A collision raises
     # before anything is ours to delete, so another writer's file is intact.
-    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, mode)
+    # O_BINARY keeps the copied bytes exact on Windows; without it the CRT
+    # translates LF to CRLF and the backup no longer matches the source.
+    fd = os.open(
+        path,
+        os.O_CREAT | os.O_EXCL | os.O_RDWR | getattr(os, "O_BINARY", 0),
+        mode,
+    )
 
     try:
         _write_all(fd, data)

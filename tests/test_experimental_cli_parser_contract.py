@@ -158,7 +158,13 @@ def source(path, *, source_kind):
                   | {HISTORICAL_SEVEN_ROUTE_CLI_HASH, *HISTORICAL_READER_HASHES})
     assert accepted.isdisjoint(historical), "historical digest offered as a current pin"
     data = (ROOT / path).read_bytes()
-    assert hashlib.sha256(data).hexdigest() in accepted
+    digests = {hashlib.sha256(data).hexdigest()}
+    if b"\r\n" in data:
+        # Git may check the reviewed LF source out as CRLF on Windows. The pin
+        # still names the reviewed LF bytes, so accept that canonical form of
+        # the same checkout and nothing else.
+        digests.add(hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest())
+    assert digests & accepted
     return ast.parse(data)
 
 

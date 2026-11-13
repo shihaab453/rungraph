@@ -17,7 +17,7 @@
   "hashes": {
     "rfc_sha256": "1920b272849279c8ce132145d6206ef44d5c333b2f54a2071fd11fcb399463b2",
     "scanner_sha256": "db86c9a5e9edb138f8064a49292de215494ee54143e143ad1cb5e9d1f003d512",
-    "tests_sha256": "f1cc07a39689bec5a558b0c80bc3c40028fcd7add434252a27e8cae63538de1f",
+    "tests_sha256": "04ec0c555aac2028d789897b51a3ace3a7839faf654a586bda73e21053167705",
     "vectors_sha256": "cbdaf1e07db967f1083c8fa94cf1e293911a31f0a301e8e488ac874626b932f1"
   },
   "kernel": "6.8.0-117-generic",
@@ -28,7 +28,7 @@
     "No public CLI flag or route is added by S3a; default validate/inspect still report a directory record as not-a-file (S3b HOLD).",
     "No cross-platform byte-identical directory digest claim."
   ],
-  "matrix_payload_sha256": "cc00c0b25247659acaa801e36042423ded758d07f215cc5a19fbcc06fa0110be",
+  "matrix_payload_sha256": "3716819d6afcd07eec49e5cdba04c0523822037c041f888a70c788554b843bff",
   "milestone": "M41-SCANNER-S3A",
   "mount": {
     "fstype": "ext4",

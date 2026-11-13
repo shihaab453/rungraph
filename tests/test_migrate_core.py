@@ -190,6 +190,18 @@ def _hardlink_or_skip(link: Path, target: Path) -> None:
         pytest.skip(f"hard links unavailable: {exc.__class__.__name__}")
 
 
+def _link_text(link: Path) -> str:
+    """The link target without Windows' extended-length path prefix.
+
+    Windows reports a link target as ``\\\\?\\C:\\...``; the prefix is a
+    kernel spelling, not part of the relative name the test created.
+    """
+    target = os.readlink(link)
+    if os.name == "nt" and target.startswith("\\\\?\\"):
+        return target[4:]
+    return target
+
+
 def _modes_supported() -> bool:
     return os.name != "nt"
 
@@ -805,7 +817,7 @@ def test_backup_named_symlink_to_manifest_is_allowed_but_not_reused(tmp_path):
     assert result.backup == "created"
     assert result.backup_path == path.resolve().with_name(f"{MANIFEST}.bak.2")
     assert os.path.islink(backup_link)
-    assert os.readlink(backup_link) == str(path)
+    assert _link_text(backup_link) == str(path)
     assert _disk_bytes(folder / f"{MANIFEST}.bak.2") == original
     assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == "0.2"
 

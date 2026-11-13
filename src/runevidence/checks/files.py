@@ -145,6 +145,7 @@ _DIR_FLAGS = (
     | getattr(os, "O_DIRECTORY", 0)
     | getattr(os, "O_NOFOLLOW", 0)
     | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_BINARY", 0)
 )
 _LEAF_FLAGS = (
     os.O_RDONLY
@@ -152,6 +153,9 @@ _LEAF_FLAGS = (
     | getattr(os, "O_CLOEXEC", 0)
     | getattr(os, "O_NONBLOCK", 0)
     | getattr(os, "O_NOCTTY", 0)
+    # Without O_BINARY Windows reads a CRLF file through the text-mode CRT and
+    # the hashed bytes no longer match the recorded LF/CRLF bytes on disk.
+    | getattr(os, "O_BINARY", 0)
 )
 _MAX_SYMLINK_DEPTH = 40
 _READ_CHUNK = 1024 * 1024

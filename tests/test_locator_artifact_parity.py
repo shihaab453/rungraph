@@ -467,6 +467,10 @@ def _record_loop_layout(root: Path, outside: Path, layout: str) -> str:
     return "self.jsonl"
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX-only evidence: symlink loops and containment follow POSIX path semantics",
+)
 @pytest.mark.parametrize("case", _ESCAPE_LOOP_CASES, ids=lambda case: "-".join(case))
 def test_physically_escaping_loop_keeps_path_escapes_root(tmp_path, case):
     """A loop spelled inside the folder but resolving outside is containment.
