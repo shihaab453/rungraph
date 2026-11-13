@@ -1,0 +1,98 @@
+{
+  "schema_version": "0.2",
+  "project": {
+    "id": "comparability-toy-0.2",
+    "name": "Comparability recorded conditions 0.2 toy example",
+    "description": "Four schema 0.2 manifests. Each run consumes train, validation and test dataset artifacts and explicitly selects the test artifact for comparison. Artifacts are not read by comparability.",
+    "tags": [],
+    "metadata": {}
+  },
+  "runs": [
+    {
+      "id": "target-insufficient-run",
+      "name": "target-insufficient run",
+      "started_at": null,
+      "params": {},
+      "metadata": {},
+      "conditions": {
+        "evaluation_protocol": {
+          "protocol_id": "holdout-v1",
+          "version": 1
+        },
+        "evaluation_dataset_artifact_id": "test-data",
+        "source_revision": "rev-1",
+        "environment": {
+          "python": "3.12"
+        }
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "train-data",
+      "path": "data/train.csv",
+      "sha256": "7b5ede3a606a26fc4eabf9be7295bbd88e85ff48a6b0da4f437d90c25a096844",
+      "size_bytes": 156,
+      "kind": "dataset",
+      "run_id": null,
+      "metadata": {},
+      "dataset_id": "toy-train-v1"
+    },
+    {
+      "id": "validation-data",
+      "path": "data/validation.csv",
+      "sha256": "3c6a8efef52ee554972ae89c1c5cc20aba792c7cd158815a630b1f77abfad3ce",
+      "size_bytes": 161,
+      "kind": "dataset",
+      "run_id": null,
+      "metadata": {},
+      "dataset_id": "toy-validation-v1"
+    },
+    {
+      "id": "test-data",
+      "path": "data/test.csv",
+      "sha256": "3eb73a5c61d49eaad7985939dd91b38e7a60f7d2e9f350fb6235f7a463f68873",
+      "size_bytes": 210,
+      "kind": "dataset",
+      "run_id": null,
+      "metadata": {},
+      "dataset_id": "toy-test-v1"
+    }
+  ],
+  "results": [
+    {
+      "id": "target-insufficient-run-result",
+      "run_id": "target-insufficient-run",
+      "name": "accuracy",
+      "value": 0.92,
+      "artifact_id": null,
+      "locator": null,
+      "metadata": {},
+      "metric_definition": {
+        "definition_id": "accuracy-top1",
+        "higher_is_better": true
+      }
+    }
+  ],
+  "evidence": [],
+  "relationships": [
+    {
+      "source": "train-data",
+      "target": "target-insufficient-run",
+      "type": "input_to",
+      "note": null
+    },
+    {
+      "source": "validation-data",
+      "target": "target-insufficient-run",
+      "type": "input_to",
+      "note": null
+    },
+    {
+      "source": "test-data",
+      "target": "target-insufficient-run",
+      "type": "input_to",
+      "note": null
+    }
+  ]
+}

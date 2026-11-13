@@ -35,9 +35,32 @@ class Code(str, Enum):
     path_escapes_root = "path-escapes-root"
     path_case_mismatch = "path-case-mismatch"
     untracked_file = "untracked-file"
+    # local directories (internal opt-in; no command reports these yet)
+    missing_directory = "missing-directory"
+    not_a_directory = "not-a-directory"
+    directory_hash_mismatch = "directory-hash-mismatch"
+    directory_size_mismatch = "directory-size-mismatch"
+    directory_no_digest = "directory-no-digest"
+    directory_unsafe = "directory-unsafe"
+    directory_unreadable = "directory-unreadable"
+    directory_unstable = "directory-unstable"
+    directory_limit_exceeded = "directory-limit-exceeded"
+    directory_path_collision = "directory-path-collision"
     # recorded values vs file contents
     result_value_mismatch = "result-value-mismatch"
     result_unverifiable = "result-unverifiable"
+    directory_locator_unsupported = "directory-locator-unsupported"
+    locator_verifier_unavailable = "locator-verifier-unavailable"
+    # verified value locators (schema 0.3)
+    locator_kind_mismatch = "locator-kind-mismatch"
+    locator_mismatch = "locator-mismatch"
+    locator_unreadable = "locator-unreadable"
+    locator_unsupported_value = "locator-unsupported-value"
+    artifact_changed = "artifact-changed"
+    locator_no_digest = "locator-no-digest"
+    locator_unverified = "locator-unverified"
+    result_unverified = "result-unverified"
+    claim_unverified = "claim-unverified"
     # references and relationships
     duplicate_id = "duplicate-id"
     dangling_reference = "dangling-reference"
@@ -47,6 +70,11 @@ class Code(str, Enum):
     derivation_cycle = "derivation-cycle"
     unsupported_claim = "unsupported-claim"
     claim_at_risk = "claim-at-risk"
+    # recorded run conditions (schema 0.2 selectors)
+    condition_reference_missing = "condition-reference-missing"
+    condition_reference_wrong_kind = "condition-reference-wrong-kind"
+    condition_reference_unsupported = "condition-reference-unsupported"
+    condition_reference_not_consumed = "condition-reference-not-consumed"
 
 
 class Finding(BaseModel):

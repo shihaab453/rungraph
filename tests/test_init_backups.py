@@ -11,6 +11,7 @@ from __future__ import annotations
 import errno
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,108 @@ from runevidence.manifest import load_manifest
 
 MANIFEST = "runevidence.json"
 BAK = MANIFEST + ".bak"
+
+WARNING_TEXT = (
+    "WARNING: the existing manifest declares schema 0.2. Regeneration writes schema 0.1\n"
+    "and does not carry over first-class conditions, dataset_id or metric_definition.\n"
+    "The backup keeps the previous manifest."
+)
+WARNING_PREFIX = "WARNING: the existing manifest declares schema 0.2."
+ZERO_TWO_CANARIES = (
+    "canary-project-id",
+    "CANARY-PROJECT-VALUE",
+    "CANARY-PROJECT-DESCRIPTION",
+    "CANARY-TAG",
+    "CANARY-METADATA-VALUE",
+    "canary-run-id",
+    "CANARY-RUN-NAME",
+    "CANARY-RUN-METADATA",
+    "CANARY-SPLIT",
+    "CANARY-REVISION",
+    "CANARY-ENV-VALUE",
+    "canary-artifact-id",
+    "canary-data.csv",
+    "ab" * 32,
+    "CANARY-DATASET-ID",
+    "CANARY-ARTIFACT-METADATA",
+    "canary-result-id",
+    "CANARY-METRIC-NAME",
+    "CANARY-DEFINITION-ID",
+    "CANARY-VERSION",
+    "canary-evidence-id",
+    "CANARY-CLAIM",
+)
+
+
+def write_schema_0_2(root: Path, *, empty: bool = False) -> bytes:
+    """Replace the generated manifest with a valid 0.2 document."""
+    if empty:
+        doc = {
+            "schema_version": "0.2",
+            "project": {"id": "canary-project-id", "name": "CANARY-PROJECT-VALUE"},
+        }
+    else:
+        doc = {
+            "schema_version": "0.2",
+            "project": {
+                "id": "canary-project-id",
+                "name": "CANARY-PROJECT-VALUE",
+                "description": "CANARY-PROJECT-DESCRIPTION",
+                "tags": ["CANARY-TAG"],
+                "metadata": {"canary": "CANARY-METADATA-VALUE"},
+            },
+            "runs": [
+                {
+                    "id": "canary-run-id",
+                    "name": "CANARY-RUN-NAME",
+                    "params": {"canary_param": 987654.321},
+                    "metadata": {"canary_run": "CANARY-RUN-METADATA"},
+                    "conditions": {
+                        "evaluation_split": "CANARY-SPLIT",
+                        "source_revision": "CANARY-REVISION",
+                        "environment": {"canary_env": "CANARY-ENV-VALUE"},
+                    },
+                }
+            ],
+            "artifacts": [
+                {
+                    "id": "canary-artifact-id",
+                    "path": "canary-data.csv",
+                    "sha256": "ab" * 32,
+                    "size_bytes": 424242,
+                    "dataset_id": "CANARY-DATASET-ID",
+                    "metadata": {"canary_art": "CANARY-ARTIFACT-METADATA"},
+                }
+            ],
+            "results": [
+                {
+                    "id": "canary-result-id",
+                    "run_id": "canary-run-id",
+                    "name": "CANARY-METRIC-NAME",
+                    "value": 987654.321,
+                    "metric_definition": {
+                        "definition_id": "CANARY-DEFINITION-ID",
+                        "higher_is_better": True,
+                        "version": "CANARY-VERSION",
+                    },
+                }
+            ],
+            "evidence": [{"id": "canary-evidence-id", "claim": "CANARY-CLAIM"}],
+        }
+    path = root / MANIFEST
+    path.write_text(
+        json.dumps(doc, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    return path.read_bytes()
+
+
+def warning_block(out: str) -> str:
+    start = out.index(WARNING_PREFIX)
+    end = out.index("The backup keeps the previous manifest.", start)
+    return out[start:end + len("The backup keeps the previous manifest.")]
+
 
 
 def make_folder(root: Path) -> Path:
@@ -187,6 +290,33 @@ def test_backup_generation_names(name, generation):
     assert is_own_file(name) == (generation is not None or name == MANIFEST)
 
 
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="the S4-2a admission lock is Linux-only (no Windows parity claim)",
+)
+def test_force_init_refuses_a_busy_lock_before_backup_or_save(tmp_path, capsys):
+    from runevidence import directory_publication as dp
+
+    root = make_folder(tmp_path / "proj")
+    current = hand_edit(root, "current")
+    capsys.readouterr()
+
+    with dp.builtin_writer_admission_lock(root):
+        assert main(["init", str(root), "--force"]) == 2
+
+    out = capsys.readouterr().out
+    assert out == (
+        "ERROR (BUSY): another RunEvidence writer is updating the manifest. "
+        "Nothing was written.\n"
+    )
+    assert (root / MANIFEST).read_bytes() == current
+    assert backups(root) == {}
+
+    # The same invocation succeeds once the cooperating writer releases it.
+    assert main(["init", str(root), "--force"]) == 0
+    assert backups(root) == {BAK: current}
+
+
 def test_a_failed_first_init_leaves_no_partial_manifest(tmp_path, capsys, monkeypatch):
     from runevidence import manifest as manifest_module
 
@@ -205,3 +335,257 @@ def test_a_failed_first_init_leaves_no_partial_manifest(tmp_path, capsys, monkey
     assert f"could not write {root / MANIFEST}" in capsys.readouterr().out
     assert not (root / MANIFEST).exists()
     assert backups(root) == {}
+
+
+def test_forced_init_over_0_2_refuses_and_writes_nothing(tmp_path, capsys):
+    root = make_folder(tmp_path / "proj")
+    old_0_2 = write_schema_0_2(root)
+
+    assert main(["init", str(root), "--force"]) == 2
+    out = capsys.readouterr().out
+
+    assert out.endswith(cli.INIT_0_2_REFUSAL + "\n")
+    assert (root / MANIFEST).read_bytes() == old_0_2
+    assert backups(root) == {}
+    for canary in ZERO_TWO_CANARIES:
+        assert canary not in out
+
+
+def test_forced_init_over_0_3_refuses_and_writes_nothing(tmp_path, capsys):
+    root = make_folder(tmp_path / "proj")
+    path = root / MANIFEST
+    doc = {
+        "schema_version": "0.3",
+        "project": {"id": "CANARY-PROJECT-ID", "name": "CANARY-PROJECT-NAME"},
+        "artifacts": [
+            {
+                "id": "canary-artifact-id",
+                "path": "canary-data.jsonl",
+                "sha256": "ab" * 32,
+                "size_bytes": 424242,
+            }
+        ],
+        "results": [
+            {
+                "id": "canary-result-id",
+                "run_id": "canary-run-id",
+                "name": "CANARY-METRIC-NAME",
+                "artifact_id": "canary-artifact-id",
+                "locator": {"kind": "jsonl", "line": 7, "pointer": "/CANARY-POINTER"},
+            }
+        ],
+    }
+    path.write_text(
+        json.dumps(doc, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    old_0_3 = path.read_bytes()
+
+    assert main(["init", str(root), "--force"]) == 2
+    out = capsys.readouterr().out
+
+    assert out.endswith(cli.INIT_0_3_REFUSAL + "\n")
+    assert path.read_bytes() == old_0_3
+    assert backups(root) == {}
+    for canary in ("CANARY-PROJECT-ID", "CANARY-POINTER", "CANARY-METRIC-NAME"):
+        assert canary not in out
+
+
+def test_forced_init_over_empty_0_2_refuses_the_downgrade(tmp_path, capsys):
+    root = make_folder(tmp_path / "proj")
+    old_0_2 = write_schema_0_2(root, empty=True)
+
+    assert main(["init", str(root), "--force"]) == 2
+    out = capsys.readouterr().out
+
+    assert out.endswith(cli.INIT_0_2_REFUSAL + "\n")
+    assert (root / MANIFEST).read_bytes() == old_0_2
+    assert backups(root) == {}
+
+
+def test_forced_init_refuses_an_invalid_0_2_declaration(tmp_path, capsys):
+    root = make_folder(tmp_path / "proj")
+    invalid = b'{"schema_version": "0.2", "project": {}}\n'
+    (root / MANIFEST).write_bytes(invalid)
+
+    assert main(["init", str(root), "--force"]) == 2
+    out = capsys.readouterr().out
+
+    assert out.endswith(cli.INIT_0_2_REFUSAL + "\n")
+    assert (root / MANIFEST).read_bytes() == invalid
+    assert backups(root) == {}
+
+
+def test_0_2_refusal_happens_before_backup(tmp_path, capsys, monkeypatch):
+    root = make_folder(tmp_path / "proj")
+    old_0_2 = write_schema_0_2(root)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("backup must not run for a declared 0.2 refusal")
+
+    monkeypatch.setattr(cli, "_backup_existing", forbidden)
+    assert main(["init", str(root), "--force"]) == 2
+    assert (root / MANIFEST).read_bytes() == old_0_2
+    assert backups(root) == {}
+
+
+def test_forced_init_over_0_1_prints_no_0_2_warning(tmp_path, capsys):
+    root = make_folder(tmp_path / "proj")
+    hand_edit(root, "hand edit")
+
+    assert main(["init", str(root), "--force"]) == 0
+    out = capsys.readouterr().out
+
+    assert "declares schema 0.2" not in out
+    assert WARNING_PREFIX not in out
+    assert json.loads((root / MANIFEST).read_text(encoding="utf-8"))["schema_version"] == "0.1"
+
+
+def test_unparseable_old_manifest_is_backed_up_and_regenerated(tmp_path, capsys):
+    root = make_folder(tmp_path / "proj")
+    unreadable = b"{not a manifest\n"
+    (root / MANIFEST).write_bytes(unreadable)
+
+    assert main(["init", str(root), "--force"]) == 0
+    out = capsys.readouterr().out
+
+    assert backups(root) == {BAK: unreadable}
+    assert WARNING_PREFIX not in out
+    assert json.loads((root / MANIFEST).read_text(encoding="utf-8"))["schema_version"] == "0.1"
+
+
+def test_backup_failure_over_0_1_keeps_manifest(tmp_path, capsys, monkeypatch):
+    root = make_folder(tmp_path / "proj")
+    current = hand_edit(root, "hand edit")
+
+    def disk_full(fd):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(os, "fsync", disk_full)
+    assert main(["init", str(root), "--force"]) == 2
+    out = capsys.readouterr().out
+
+    assert "could not back up the existing manifest" in out
+    assert (root / MANIFEST).read_bytes() == current
+    assert backups(root) == {}
+
+
+def symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symbolic links unavailable: {exc.__class__.__name__}")
+
+
+def hardlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        os.link(target, link)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"hard links unavailable: {exc.__class__.__name__}")
+
+
+def test_symlinked_backup_is_not_reused_and_old_bytes_survive(tmp_path, capsys):
+    root = make_folder(tmp_path / "proj")
+    old = hand_edit(root, "hand edit")
+    symlink_or_skip(root / BAK, Path(MANIFEST))
+    assert (root / BAK).is_symlink()
+
+    assert main(["init", str(root), "--force"]) == 0
+    out = capsys.readouterr().out
+
+    assert (root / BAK).is_symlink()
+    assert os.readlink(root / BAK) == MANIFEST
+    assert (root / (BAK + ".2")).read_bytes() == old
+    assert backups(root)[BAK + ".2"] == old
+    assert WARNING_PREFIX not in out
+
+
+def test_hardlinked_backup_alias_is_not_reused_and_old_bytes_survive(
+    tmp_path, capsys
+):
+    root = make_folder(tmp_path / "proj")
+    old = hand_edit(root, "hand edit")
+    hardlink_or_skip(root / BAK, root / MANIFEST)
+    assert os.path.samefile(root / BAK, root / MANIFEST)
+
+    assert main(["init", str(root), "--force"]) == 0
+    out = capsys.readouterr().out
+
+    assert (root / (BAK + ".2")).read_bytes() == old
+    assert backups(root)[BAK + ".2"] == old
+    assert WARNING_PREFIX not in out
+
+
+def test_directory_backup_name_falls_through_to_the_next_generation(tmp_path, capsys):
+    root = make_folder(tmp_path / "proj")
+    old = hand_edit(root, "hand edit")
+    (root / BAK).mkdir()
+
+    assert main(["init", str(root), "--force"]) == 0
+    out = capsys.readouterr().out
+
+    assert (root / BAK).is_dir()
+    assert (root / (BAK + ".2")).read_bytes() == old
+    assert WARNING_PREFIX not in out
+
+
+def test_regular_byte_identical_backup_is_still_reused(tmp_path, capsys):
+    root = make_folder(tmp_path / "proj")
+    old = hand_edit(root, "hand edit")
+    (root / BAK).write_bytes(old)
+
+    assert main(["init", str(root), "--force"]) == 0
+    out = capsys.readouterr().out
+
+    assert f"The previous manifest is already saved in {root / BAK}" in out
+    assert backups(root) == {BAK: old}
+    assert not (root / (BAK + ".2")).exists()
+
+
+def test_regular_backup_with_different_bytes_creates_the_next_generation(
+    tmp_path, capsys
+):
+    root = make_folder(tmp_path / "proj")
+    old = hand_edit(root, "hand edit")
+    (root / BAK).write_bytes(b"an older, different backup\n")
+
+    assert main(["init", str(root), "--force"]) == 0
+    out = capsys.readouterr().out
+
+    assert (root / BAK).read_bytes() == b"an older, different backup\n"
+    assert (root / (BAK + ".2")).read_bytes() == old
+    assert backups(root)[BAK + ".2"] == old
+
+
+def test_symlinked_backup_to_identical_other_file_is_not_reused(tmp_path, capsys):
+    root = make_folder(tmp_path / "proj")
+    old = hand_edit(root, "hand edit")
+    other = root / "identical-copy.json"
+    other.write_bytes(old)
+    symlink_or_skip(root / BAK, Path(other.name))
+    assert (root / BAK).is_symlink()
+
+    assert main(["init", str(root), "--force"]) == 0
+    out = capsys.readouterr().out
+
+    assert (root / BAK).is_symlink()
+    assert os.readlink(root / BAK) == other.name
+    assert other.read_bytes() == old
+    assert (root / (BAK + ".2")).read_bytes() == old
+    assert backups(root)[BAK + ".2"] == old
+
+
+def test_identity_unavailable_never_reuses_a_backup(tmp_path, capsys, monkeypatch):
+    root = make_folder(tmp_path / "proj")
+    old = hand_edit(root, "hand edit")
+    (root / BAK).write_bytes(old)
+    monkeypatch.setattr(cli, "_same_file", lambda *args, **kwargs: None)
+
+    assert main(["init", str(root), "--force"]) == 0
+    out = capsys.readouterr().out
+
+    assert "already saved in" not in out
+    assert (root / BAK).read_bytes() == old
+    assert (root / (BAK + ".2")).read_bytes() == old
+    assert backups(root) == {BAK: old, BAK + ".2": old}

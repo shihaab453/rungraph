@@ -2,6 +2,23 @@
   "$defs": {
     "Artifact": {
       "additionalProperties": false,
+      "else": {
+        "properties": {
+          "digest_format": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "artifact_type": {
+            "const": "directory"
+          }
+        },
+        "required": [
+          "artifact_type"
+        ]
+      },
       "properties": {
         "id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
@@ -13,6 +30,30 @@
           "minLength": 1,
           "title": "Path",
           "type": "string"
+        },
+        "artifact_type": {
+          "default": "file",
+          "description": "What the path names on disk. Omitted means file. 'directory' records a folder checked with --directory-artifacts and authored with add --directory or rehash --directory.",
+          "enum": [
+            "file",
+            "directory"
+          ],
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "digest_format": {
+          "anyOf": [
+            {
+              "const": "runevidence-directory-v1",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How sha256 was computed for a directory. Required for directories, absent for files.",
+          "title": "Digest Format"
         },
         "sha256": {
           "anyOf": [
@@ -82,6 +123,16 @@
         "id",
         "path"
       ],
+      "then": {
+        "properties": {
+          "digest_format": {
+            "const": "runevidence-directory-v1"
+          }
+        },
+        "required": [
+          "digest_format"
+        ]
+      },
       "title": "Artifact",
       "type": "object"
     },

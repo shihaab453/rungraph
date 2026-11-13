@@ -118,7 +118,9 @@ def _find_cycle(graph: dict[str, set[str]]) -> Optional[list[str]]:
     return None
 
 
-def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
+def check_graph(
+    manifest: Manifest, broken: set[str], *, unverified: set[str] | None = None
+) -> list[Finding]:
     """``broken`` holds ids of artifacts/results already known to be bad
     (missing, changed, value mismatch). Claims that rest on them are flagged."""
     kinds, findings = build_index(manifest)
@@ -383,6 +385,22 @@ def check_graph(manifest: Manifest, broken: set[str]) -> list[Finding]:
                         f"{', '.join(described)}"
                     ),
                     hint=f"Claim: {ev.claim!r}",
+                )
+            )
+        elif supports[ev.id] and unverified and all(
+            kinds.get(target) == RESULT and target in unverified
+            for target in supports[ev.id]
+        ):
+            add(
+                Finding(
+                    code=Code.claim_unverified,
+                    severity=Severity.warning,
+                    subject=ev.id,
+                    message=(
+                        f"Claim {ev.id!r} cites only results with no locator in schema 0.3; "
+                        "their recorded values were not checked"
+                    ),
+                    hint="Add locators to the supporting results or cite verified evidence.",
                 )
             )
     return findings

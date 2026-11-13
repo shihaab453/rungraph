@@ -1,0 +1,9 @@
+# Private staged validation facade
+
+`runevidence._experimental_staged_validation.validate_staged_readonly(receipt, *, strict=False)` is an explicit private call on an actual `StagingReceipt` from the synthetic staging API. It is not exported or wired into a command, adapter, directory review, or production workflow. JSON remains the production authority; P7 persistence safety hold remains in force.
+
+The function obtains the R7 staged read, passes its existing `LoadedManifest` to the ordinary scanner-free `run_checks` defaults, and uses the existing text findings, JSON findings, overview, and report exit-code functions. The source path and exact bytes remain those of the original JSON; the database path is not a manifest root. `StagedValidationResult` is frozen but its nested report, model and other objects can be mutable. Strict mode uses the existing report semantics. Reader refusals propagate without falling back to JSON.
+
+After checks and formatting the facade invokes the reader again and compares the two returned staged views. Failure or divergence refuses the result. This is a two-observation advisory check, not an atomic JSON/SQLite snapshot, a filesystem security boundary, or protection against changes after return. Checks can read artifact files, which can change during or after those reads; even matching staged observations do not establish an atomic artifact snapshot. No production compare-and-swap, cross-source transaction, adversarial filesystem protection, or persistence cutover is provided.
+
+A public integration would need a separately reviewed authority, concurrency, compatibility and rollback design. Historical limitations concerning the original 3,102 directory-size observations, Git object mtimes and hard-link alias, historic permission effects, and non-atomic parity remain unresolved.

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import errno
 import json
+import math
 import os
 import stat
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import get_args, get_origin, Union
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from .findings import Code, Finding, Severity
 from .models import MANIFEST_FILENAME, Artifact, Manifest
@@ -21,6 +24,74 @@ class ManifestLoadError(Exception):
     def __init__(self, findings: list[Finding]):
         self.findings = findings
         super().__init__("; ".join(f.message for f in findings))
+
+
+class _SchemaFinding(Finding):
+    """Additional diagnostics only for individual model validation errors."""
+
+    issue_category: str
+    issue_location: str | None
+
+
+_TYPE_ERRORS = frozenset({
+    "model_type", "model_attributes_type", "dict_type", "list_type",
+    "string_type", "int_type", "float_type", "bool_type", "datetime_type",
+})
+_VALUE_ERRORS = frozenset({
+    "extra_forbidden", "literal_error", "enum", "value_error", "string_pattern_mismatch",
+    "string_too_short", "string_too_long", "too_short", "too_long", "greater_than",
+    "greater_than_equal", "less_than", "less_than_equal", "int_parsing",
+    "float_parsing", "bool_parsing", "datetime_parsing", "datetime_from_date_parsing",
+    "finite_number", "int_from_float",
+})
+
+
+def _issue_category(error_type: str) -> str:
+    if error_type == "missing":
+        return "missing_required"
+    if error_type in _TYPE_ERRORS:
+        return "invalid_type"
+    if error_type in _VALUE_ERRORS:
+        return "invalid_value"
+    return "other_validation"
+
+
+def _issue_location(loc: tuple) -> str | None:
+    """Return a safe pointer, including the field ancestor of a scalar union error."""
+    annotation = Manifest
+    parts = []
+    for index, part in enumerate(loc):
+        # Optional fields have one non-None type. A multi-option union adds a
+        # branch label; accept only a label naming one of its own options.
+        if get_origin(annotation) is Union:
+            options = [a for a in get_args(annotation) if a is not type(None)]
+            if len(options) == 1:
+                annotation = options[0]
+            else:
+                if not isinstance(part, str):
+                    return None
+                match = next(
+                    (a for a in options if isinstance(a, type) and a.__name__ == part),
+                    None,
+                )
+                if match is None:
+                    return None
+                if (index == len(loc) - 1
+                        and all(a in (bool, int, float, str) for a in options)):
+                    return "".join("/" + component for component in parts)
+                annotation = match
+                continue
+        if get_origin(annotation) is list and type(part) is int and part >= 0:
+            annotation = get_args(annotation)[0]
+            parts.append(str(part))
+        elif get_origin(annotation) is None and isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            if not isinstance(part, str) or part not in annotation.model_fields:
+                return None
+            annotation = annotation.model_fields[part].annotation
+            parts.append(part.replace("~", "~0").replace("/", "~1"))
+        else:
+            return None
+    return "".join("/" + part for part in parts)
 
 
 @dataclass(frozen=True)
@@ -42,9 +113,118 @@ def resolve_manifest_path(target: Path) -> Path:
     return target
 
 
+def _unique_object(pairs: list[tuple[str, object]]) -> dict:
+    """Reject ambiguous object members before the decoder discards them."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Manifest JSON contains duplicate object keys")
+        result[key] = value
+    return result
+
+
+class _NonFiniteToken:
+    """Private marker for the three legacy JSON non-finite constants.
+
+    The decoder creates it, so submitted data cannot imitate the marker. The
+    text is resolved only after the whole document has been decoded.
+    """
+
+    __slots__ = ("text",)
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+_NONFINITE_FLOATS = {"NaN": math.nan, "Infinity": math.inf, "-Infinity": -math.inf}
+
+
+def _nonfinite_constant(value: str) -> _NonFiniteToken:
+    return _NonFiniteToken(value)
+
+
+def _resolve_nonfinite_tokens(raw: object) -> None:
+    """Resolve legacy tokens only at results[*].value; reject every other use."""
+    stack: list[tuple[object, tuple[object, ...]]] = [(raw, ())]
+    while stack:
+        node, path = stack.pop()
+        if isinstance(node, _NonFiniteToken):
+            raise ValueError("Manifest JSON contains an unsupported non-finite number")
+        if isinstance(node, dict):
+            for key, child in node.items():
+                if isinstance(child, _NonFiniteToken):
+                    permitted = (len(path) == 2 and path[0] == "results"
+                                 and type(path[1]) is int and key == "value")
+                    if not permitted:
+                        raise ValueError("Manifest JSON contains an unsupported non-finite number")
+                    node[key] = _NONFINITE_FLOATS[child.text]
+                elif isinstance(child, (dict, list)):
+                    stack.append((child, path + (key,)))
+        elif isinstance(node, list):
+            for index, child in enumerate(node):
+                if isinstance(child, _NonFiniteToken):
+                    raise ValueError("Manifest JSON contains an unsupported non-finite number")
+                if isinstance(child, (dict, list)):
+                    stack.append((child, path + (index,)))
+
+
+def _finite_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("Manifest JSON contains an unsupported non-finite number")
+    return number
+
+
+def _unreadable(path: Path, exc: Exception) -> ManifestLoadError:
+    return ManifestLoadError(
+        [
+            Finding(
+                code=Code.manifest_unreadable,
+                severity=Severity.error,
+                message=f"Could not read manifest as UTF-8 JSON: {exc}",
+                path=str(path),
+            )
+        ]
+    )
+
+
+_WINERROR_CANT_RESOLVE_FILENAME = 1921
+
+
+def _is_resolution_loop(exc: RuntimeError) -> bool:
+    """Recognize only the loop error that Path.resolve raises before 3.13.
+
+    CPython raises RuntimeError("Symlink loop from %r" % e.filename) while
+    handling an OSError with errno ELOOP or Windows error 1921, so that
+    OSError is the implicit context. Any other RuntimeError is not a loop.
+    """
+    context = exc.__context__
+    return (
+        type(exc) is RuntimeError
+        and exc.__cause__ is None
+        and not exc.__suppress_context__
+        and isinstance(context, OSError)
+        and (context.errno == errno.ELOOP
+             or getattr(context, "winerror", None) == _WINERROR_CANT_RESOLVE_FILENAME)
+        and exc.args == ("Symlink loop from %r" % (context.filename,),)
+    )
+
+
 def load_manifest(target: Path) -> LoadedManifest:
-    path = resolve_manifest_path(Path(target)).resolve()
-    if not path.is_file():
+    path = Path(target)
+    try:
+        # Path checks swallow "not found" errors, but e.g. access denial raises.
+        candidate = resolve_manifest_path(path)
+        try:
+            path = candidate.resolve()
+        except RuntimeError as exc:
+            if not _is_resolution_loop(exc):
+                raise
+            raise _unreadable(path, exc) from exc
+        is_file = path.is_file()
+    except OSError as exc:
+        raise _unreadable(path, exc) from exc
+    if not is_file:
         raise ManifestLoadError(
             [
                 Finding(
@@ -58,47 +238,94 @@ def load_manifest(target: Path) -> LoadedManifest:
         )
     try:
         source_bytes = path.read_bytes()
-        raw = json.loads(source_bytes.decode("utf-8"))
-    except (OSError, ValueError) as exc:
-        raise ManifestLoadError(
-            [
-                Finding(
-                    code=Code.manifest_unreadable,
-                    severity=Severity.error,
-                    message=f"Could not read manifest as UTF-8 JSON: {exc}",
-                    path=str(path),
-                )
-            ]
-        ) from exc
+    except OSError as exc:
+        raise _unreadable(path, exc) from exc
+    return parse_manifest_source(path, source_bytes)
+
+
+def parse_manifest_source(path: Path, source_bytes: bytes) -> LoadedManifest:
+    """Validate manifest bytes that a caller already read from ``path``.
+
+    Internal helper for descriptor-relative readers: the bytes stay the
+    authoritative snapshot, exactly as ``load_manifest`` treats a path read.
+    """
+    try:
+        raw = json.loads(
+            source_bytes.decode("utf-8"), object_pairs_hook=_unique_object,
+            parse_constant=_nonfinite_constant, parse_float=_finite_float,
+        )
+        _resolve_nonfinite_tokens(raw)
+    except (ValueError, RecursionError) as exc:
+        raise _unreadable(path, exc) from exc
     try:
         manifest = Manifest.model_validate(raw)
-    except ValidationError as exc:
+    except RecursionError as exc:
         raise ManifestLoadError(
             [
                 Finding(
                     code=Code.schema_invalid,
                     severity=Severity.error,
-                    message=f"{_loc(err['loc'], raw)}: {err['msg']}",
+                    message="Manifest exceeds the supported validation recursion depth",
                     path=str(path),
+                )
+            ]
+        ) from exc
+    except ValidationError as exc:
+        raise ManifestLoadError(
+            [
+                _SchemaFinding(
+                    code=Code.schema_invalid,
+                    severity=Severity.error,
+                    message=_schema_message(err['type'], err['loc']),
+                    path=str(path),
+                    issue_category=_issue_category(err['type']),
+                    issue_location=_issue_location(err['loc']),
                 )
                 for err in exc.errors()
             ]
-        ) from exc
+        ) from None
     return LoadedManifest(manifest=manifest, path=path, source_bytes=source_bytes)
 
 
-def artifact_to_dict(artifact: Artifact) -> dict:
+def _schema_message(error_type: str, loc: tuple) -> str:
+    """Describe a validation error using only controlled, safe information."""
+    category = _issue_category(error_type).replace("_", " ")
+    location = _issue_location(loc)
+    where = f" at {location}" if location else ""
+    return f"Manifest schema validation failed{where}: {category}"
+
+
+def artifact_to_dict(artifact: Artifact, schema_version: str = "0.1") -> dict:
+    """Serialize one artifact for a containing manifest of ``schema_version``.
+
+    0.1/0.2/0.3 keep the same historical writer spelling for established
+    defaults (``volatile: false``, file ``artifact_type`` and absent
+    ``digest_format`` are omitted). ``dataset_id`` is 0.2+ and is emitted only
+    when it was supplied; an omitted label stays omitted.
+    """
+    if schema_version not in ("0.1", "0.2", "0.3"):
+        raise ValueError(f"unsupported schema version {schema_version!r}")
     data = artifact.model_dump(mode="json", exclude_defaults=False)
     # Written only when set, so manifests from before the field existed
     # come out of a rewrite unchanged.
     if not data["volatile"]:
         del data["volatile"]
+    if data["artifact_type"] == "file":
+        del data["artifact_type"]
+    if data["digest_format"] is None:
+        del data["digest_format"]
+    if schema_version == "0.1" or "dataset_id" not in artifact.model_fields_set:
+        data.pop("dataset_id", None)
     return data
 
 
 def dump_manifest(manifest: Manifest) -> str:
     data = manifest.model_dump(mode="json", exclude_defaults=False)
-    data["artifacts"] = [artifact_to_dict(a) for a in manifest.artifacts]
+    if "artifacts" in data:
+        data["artifacts"] = [
+            artifact_to_dict(a, schema_version=manifest.schema_version)
+            for a in manifest.artifacts
+        ]
     return dump_raw(data)
 
 
@@ -152,6 +379,7 @@ def save_raw(data: dict, path: Path, *, expected_bytes: bytes) -> None:
     # failed write cannot truncate the user's existing evidence record.
     text = dump_raw(data)
     staged = None
+    replaced = False
     try:
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", newline="\n", dir=path.parent,
@@ -166,9 +394,16 @@ def save_raw(data: dict, path: Path, *, expected_bytes: bytes) -> None:
         if path.read_bytes() != expected_bytes:
             raise OSError("Manifest changed since it was loaded. Review the current manifest and retry.")
         os.replace(staged, path)
+        replaced = True
     finally:
         if staged is not None:
-            staged.unlink(missing_ok=True)
+            try:
+                staged.unlink(missing_ok=True)
+            except OSError:
+                # Once the replacement is committed, a temp-file cleanup error
+                # must not turn a successful write into a reported failure.
+                if not replaced:
+                    raise
 
 
 def _write(path: Path, text: str) -> None:

@@ -1,0 +1,69 @@
+{
+  "schema_version": "0.1",
+  "project": {
+    "id": "comparability-toy",
+    "name": "Comparability recorded conditions toy example",
+    "description": "Four manifests over the same small CSV so the experimental comparability command can be tried offline. Artifacts are not read by comparability.",
+    "tags": [],
+    "metadata": {}
+  },
+  "runs": [
+    {
+      "id": "target-comparable-run",
+      "name": "target-comparable run",
+      "started_at": null,
+      "params": {},
+      "metadata": {
+        "evaluation": {
+          "protocol": {
+            "protocol_id": "holdout-v1",
+            "version": 1
+          },
+          "split": "test"
+        },
+        "source_revision": "rev-1",
+        "environment": {
+          "python": "3.12"
+        }
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "toy-data",
+      "path": "data/toy.csv",
+      "sha256": "fc3123c5ba16009ce2a4e6be0a7a221e27f8201ae63b93a36cf419133e88f244",
+      "size_bytes": 259,
+      "kind": "dataset",
+      "run_id": null,
+      "metadata": {
+        "dataset_id": "toy-v1"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "target-comparable-result",
+      "run_id": "target-comparable-run",
+      "name": "accuracy",
+      "value": 0.92,
+      "artifact_id": null,
+      "locator": null,
+      "metadata": {
+        "metric_definition": {
+          "definition_id": "accuracy-top1",
+          "higher_is_better": true
+        }
+      }
+    }
+  ],
+  "evidence": [],
+  "relationships": [
+    {
+      "source": "toy-data",
+      "target": "target-comparable-run",
+      "type": "input_to",
+      "note": null
+    }
+  ]
+}

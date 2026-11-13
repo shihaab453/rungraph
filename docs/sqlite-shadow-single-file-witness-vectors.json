@@ -1,0 +1,27 @@
+{
+  "status": "static hypothetical specifications only; R20C proposals not executed; some scenarios assume deterministic injected errors",
+  "cases": [
+    {"case":"ordinary in-bound regular file", "status":"OBSERVED_UNATTESTED", "reason":null, "observation":"two equal complete digests and endpoint metadata; provenance opaque"},
+    {"case":"zero bound", "status":"REFUSE", "reason":"invalid_bound"},
+    {"case":"negative bound", "status":"REFUSE", "reason":"invalid_bound"},
+    {"case":"boolean bound", "status":"REFUSE", "reason":"invalid_bound"},
+    {"case":"size above bound", "status":"REFUSE", "reason":"size_limit", "observation":"initial and final metadata"},
+    {"case":"short read", "status":"REFUSE", "reason":"short_read", "observation":"no digest for incomplete pass"},
+    {"case":"seek failure", "status":"UNPROVEN", "reason":"io_or_seek_error:OSError", "observation":"final stat attempted"},
+    {"case":"unsupported descriptor or fake handle", "status":"REFUSE", "reason":"unsupported_handle"},
+    {"case":"nonregular file", "status":"REFUSE", "reason":"nonregular"},
+    {"case":"different endpoint metadata", "status":"REFUSE", "reason":"metadata_mismatch", "observation":"both snapshots retained"},
+    {"case":"extra byte beyond initial size", "status":"REFUSE", "reason":"byte_count_mismatch", "payload_byte_count":"initial.size", "first_probe_count":1, "total_bytes_returned":"initial.size + 1", "sha256":null},
+    {"case":"injected read exception", "status":"UNPROVEN", "reason":"io_or_seek_error:OSError", "observation":"completed payload read count before exception is retained; incomplete digest not asserted; final stat attempted"},
+    {"case":"missing stat fields", "status":"UNPROVEN", "reason":"missing_metadata_or_identity", "observation":"missing fields listed"},
+    {"case":"pathname replacement invisible to held handle","status":"OBSERVED_UNATTESTED","reason":null,"observation":"Held-handle sampled bytes may appear stable; this does not establish path identity or replacement absence","safety_conclusion":"UNPROVEN"},
+    {"case":"different complete pass bytes", "status":"REFUSE", "reason":"bytes_changed", "observation":"both digests retained, unless metadata mismatch adds a reason"},
+    {"case":"equal endpoints with unobserved ABA","status":"OBSERVED_UNATTESTED","reason":null,"observation":"Held-handle sampled bytes may appear stable; this does not establish continuous stability or absence of ABA","safety_conclusion":"UNPROVEN"},
+    {"case":"unknown handle provenance","status":"OBSERVED_UNATTESTED","reason":null,"observation":"Held-handle sampled bytes may appear stable; this does not establish trustworthiness of the supplied handle","safety_conclusion":"UNPROVEN"},
+    {"case":"first pass read exception after partial payload", "status":"UNPROVEN", "reason":"io_or_seek_error:OSError", "byte_count":65536, "sha256":null, "first_probe_count":0, "observation":"model assumes first 65536-byte read returned successfully, next os.read raises; no incomplete digest; final fstat attempted"},
+    {"case":"second pass read exception after partial payload", "status":"UNPROVEN", "reason":"io_or_seek_error:OSError", "byte_count":"initial.size", "sha256":"first complete pass retained", "second_byte_count":32768, "second_sha256":null, "second_probe_count":0, "observation":"model assumes first pass complete and second pass first read of 32768 returned, next os.read raises"},
+    {"case":"excess-byte probe raises after full payload", "status":"UNPROVEN", "reason":"io_or_seek_error:OSError", "byte_count":"initial.size", "sha256":null, "first_probe_count":0, "observation":"payload returned completely; end probe raised, so end verification and completed digest are unavailable"},
+    {"case":"final stat fails after earlier size-limit refusal", "status":"REFUSE", "reason":"size_limit", "final_stat_error":"final_stat_error:OSError", "observation":"primary refusal retained and final metadata absent; secondary exception separately recorded"},
+    {"case":"final stat fails after equal complete passes", "status":"UNPROVEN", "reason":"final_stat_error:OSError", "final_stat_error":"final_stat_error:OSError", "observation":"two complete pass counts/digests retained but final metadata absent"}
+  ]
+}

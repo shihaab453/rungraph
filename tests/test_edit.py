@@ -13,7 +13,8 @@ from pydantic import ValidationError
 
 from runevidence.checks import run_checks
 from runevidence.cli import main
-from runevidence.manifest import load_manifest
+from runevidence.edit import EditError, plan_add
+from runevidence.manifest import load_manifest, load_raw
 from runevidence.models import Result
 
 MANIFEST = "runevidence.json"
@@ -333,6 +334,64 @@ def test_rehash_refuses_missing_files_and_writes_nothing(experiment, capsys):
     assert "'test-data' (data/test.csv): does not exist" in out
     assert "Nothing was written." in out
     assert (experiment / MANIFEST).read_bytes() == before
+
+
+def _drive_shaped_manifest(root: Path, data: bytes) -> None:
+    """A manifest whose artifact path is the literal `C:/x.bin` inside root."""
+    (root / "C:").mkdir(parents=True)
+    (root / "C:" / "x.bin").write_bytes(data)
+    write_doc(
+        root,
+        {
+            "schema_version": "0.2",
+            "project": {"id": "p", "name": "P"},
+            "runs": [{"id": "run", "name": "Run"}],
+            "artifacts": [
+                {
+                    "id": "a",
+                    "path": "C:/x.bin",
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "size_bytes": len(data),
+                }
+            ],
+            "results": [],
+            "relationships": [],
+        },
+    )
+
+
+def test_rehash_reads_a_drive_shaped_artifact_from_any_cwd(
+    tmp_path, monkeypatch, capsys
+):
+    """`C:/x` is root-joined, not `Path("C:/x")` relative to the process cwd."""
+    root = tmp_path / "root"
+    root.mkdir()
+    _drive_shaped_manifest(root, b"old\n")
+    (root / "C:" / "x.bin").write_bytes(b"new bytes\n")
+    decoy = tmp_path / "decoy"
+    decoy.mkdir()
+    monkeypatch.chdir(decoy)
+
+    assert main(["rehash", str(root), "a"]) == 0
+    capsys.readouterr()
+
+    entry = artifact(read_doc(root), "a")
+    assert entry["sha256"] == hashlib.sha256(b"new bytes\n").hexdigest()
+    assert entry["size_bytes"] == len(b"new bytes\n")
+
+
+def test_add_sees_a_tracked_drive_shaped_artifact_from_any_cwd(tmp_path, monkeypatch):
+    """The tracked-file key is root-joined, so the same file is not added twice."""
+    root = tmp_path / "root"
+    root.mkdir()
+    _drive_shaped_manifest(root, b"old\n")
+    decoy = tmp_path / "decoy"
+    decoy.mkdir()
+    monkeypatch.chdir(decoy)
+
+    loaded = load_manifest(root)
+    with pytest.raises(EditError, match="already tracked"):
+        plan_add(loaded, load_raw(loaded), [root / "C:" / "x.bin"])
 
 
 def test_rehash_needs_targets_or_all_and_known_targets(experiment, capsys):
@@ -713,3 +772,73 @@ def test_add_generated_ids_do_not_collide(experiment, monkeypatch, capsys):
     ids = [a["id"] for a in read_doc(experiment)["artifacts"]]
     assert "report-2" in ids
     assert len(ids) == len(set(ids))
+
+
+def test_rehash_deeply_nested_metrics_does_not_crash(experiment, capsys):
+    """Re-reading a locator from deep JSON is a note, not RecursionError."""
+    deep = "[" * 20000 + "0" + "]" * 20000
+    (experiment / "runs" / "tuned" / "metrics.json").write_text(deep, encoding="utf-8")
+
+    code = main(["rehash", str(experiment), "runs/tuned/metrics.json"])
+    out = capsys.readouterr().out
+
+    assert code == 0, out
+    document = read_doc(experiment)
+    result = next(r for r in document["results"] if r["id"] == "tuned-accuracy")
+    assert result["value"] == 1.0
+    assert "could not parse" in out
+    assert "Traceback" not in out
+
+
+def test_add_on_a_0_2_manifest_preserves_first_class_fields(experiment, monkeypatch):
+    """Absorption at the CLI: a file add keeps conditions, definitions and labels."""
+    assert main(["migrate", str(experiment), "--to", "0.2"]) == 0
+    doc = read_doc(experiment)
+    doc["runs"][0]["conditions"] = {
+        "evaluation_split": "test",
+        "source_revision": "rev-1",
+    }
+    doc["results"][0]["metric_definition"] = {"definition_id": "accuracy"}
+    doc["artifacts"][0]["dataset_id"] = "dataset-x"
+    write_doc(experiment, doc)
+    (experiment / "NEW.md").write_text("new\n", encoding="utf-8", newline="\n")
+    monkeypatch.chdir(experiment)
+
+    assert main(["add", ".", "NEW.md", "--id", "new"]) == 0
+
+    after = read_doc(experiment)
+    assert artifact(after, "new")["path"] == "NEW.md"
+    assert after["schema_version"] == "0.2"
+    assert after["runs"][0]["conditions"] == {
+        "evaluation_split": "test",
+        "source_revision": "rev-1",
+    }
+    assert after["results"][0]["metric_definition"] == {"definition_id": "accuracy"}
+    assert artifact(after, doc["artifacts"][0]["id"])["dataset_id"] == "dataset-x"
+
+
+def test_rehash_on_a_0_2_manifest_preserves_first_class_fields(experiment, monkeypatch):
+    """Absorption at the CLI: a real rehash keeps conditions, definitions and labels."""
+    assert main(["migrate", str(experiment), "--to", "0.2"]) == 0
+    doc = read_doc(experiment)
+    doc["runs"][0]["conditions"] = {
+        "evaluation_split": "test",
+        "source_revision": "rev-1",
+    }
+    doc["results"][0]["metric_definition"] = {"definition_id": "accuracy"}
+    doc["artifacts"][0]["dataset_id"] = "dataset-x"
+    write_doc(experiment, doc)
+    retrain_tuned(experiment)
+    monkeypatch.chdir(experiment)
+
+    assert main(["rehash", ".", "runs/tuned/metrics.json"]) == 0
+
+    after = read_doc(experiment)
+    assert after["schema_version"] == "0.2"
+    assert next(r for r in after["results"] if r["id"] == "tuned-accuracy")["value"] == 0.75
+    assert after["runs"][0]["conditions"] == {
+        "evaluation_split": "test",
+        "source_revision": "rev-1",
+    }
+    assert after["results"][0]["metric_definition"] == {"definition_id": "accuracy"}
+    assert artifact(after, doc["artifacts"][0]["id"])["dataset_id"] == "dataset-x"

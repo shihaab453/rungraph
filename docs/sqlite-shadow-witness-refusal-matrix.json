@@ -1,0 +1,161 @@
+{
+    "schema_version":  "r19-static-refusal-v1",
+    "status":  "static rules only; no runtime evidence",
+    "rfc":  "sqlite-shadow-witness-acquisition-rfc.md",
+    "default":  "REFUSE or UNPROVEN; preserve evidence; no repair or silent fallback",
+    "rows":  [
+                 {
+                     "id":  "W01",
+                     "triggering_observation":  "Forged receipt or spoofed collector",
+                     "detection_stage":  "receipt verification",
+                     "outcome":  "UNPROVEN",
+                     "retained_evidence":  "receipt and provenance claim",
+                     "proof_or_authorization_needed":  "authenticated collector and independently protected trust anchor",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W02",
+                     "triggering_observation":  "Valid old receipt replayed in a new epoch",
+                     "detection_stage":  "freshness verification",
+                     "outcome":  "UNPROVEN",
+                     "retained_evidence":  "receipt and epoch claims",
+                     "proof_or_authorization_needed":  "trusted freshness anchor and replay policy",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W03",
+                     "triggering_observation":  "JSON same bytes but new file identity",
+                     "detection_stage":  "source recheck",
+                     "outcome":  "REFUSE",
+                     "retained_evidence":  "both identities and hashes",
+                     "proof_or_authorization_needed":  "investigation and new authorized capture",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W04",
+                     "triggering_observation":  "JSON replaced after check",
+                     "detection_stage":  "name recheck or later report",
+                     "outcome":  "REFUSE",
+                     "retained_evidence":  "handle and path identity observations",
+                     "proof_or_authorization_needed":  "coordination or immutable publication with separately proven semantics",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W05",
+                     "triggering_observation":  "Stage revision or generation diverges",
+                     "detection_stage":  "stage read",
+                     "outcome":  "REFUSE",
+                     "retained_evidence":  "receipt and stage state",
+                     "proof_or_authorization_needed":  "separate review of stage history",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W06",
+                     "triggering_observation":  "SQLite busy or unexpected sidecar",
+                     "detection_stage":  "stage admission",
+                     "outcome":  "REFUSE",
+                     "retained_evidence":  "error and directory observations",
+                     "proof_or_authorization_needed":  "native environment review and separately authorized procedure",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W07",
+                     "triggering_observation":  "Artifact A-B-A observed",
+                     "detection_stage":  "artifact recheck",
+                     "outcome":  "REFUSE",
+                     "retained_evidence":  "ordered observations",
+                     "proof_or_authorization_needed":  "new authorized capture and writer coordination",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W08",
+                     "triggering_observation":  "Artifact A-B-A may occur between equal observations",
+                     "detection_stage":  "interval assessment",
+                     "outcome":  "UNPROVEN",
+                     "retained_evidence":  "equal sampled observations and interval",
+                     "proof_or_authorization_needed":  "enforced immutability or complete verified coordination",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W09",
+                     "triggering_observation":  "Symlink or reparse substitution or unclear ancestry",
+                     "detection_stage":  "path admission or recheck",
+                     "outcome":  "REFUSE",
+                     "retained_evidence":  "path and handle observations",
+                     "proof_or_authorization_needed":  "reviewed handle-based containment proof",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W10",
+                     "triggering_observation":  "Hardlink alias or link count ambiguous",
+                     "detection_stage":  "identity admission",
+                     "outcome":  "REFUSE",
+                     "retained_evidence":  "identity and link observations",
+                     "proof_or_authorization_needed":  "alias inventory and separately reviewed policy",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W11",
+                     "triggering_observation":  "Noncooperative writer present or exclusion unproven",
+                     "detection_stage":  "coordination assessment",
+                     "outcome":  "UNPROVEN",
+                     "retained_evidence":  "participant evidence and uncertainty",
+                     "proof_or_authorization_needed":  "enforced complete participation or immutable inputs",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W12",
+                     "triggering_observation":  "Interruption or unknown durability",
+                     "detection_stage":  "capture or recovery",
+                     "outcome":  "UNPROVEN",
+                     "retained_evidence":  "partial records and failure details",
+                     "proof_or_authorization_needed":  "separate native durability and recovery authorization",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W13",
+                     "triggering_observation":  "Permission or owner ambiguity",
+                     "detection_stage":  "admission",
+                     "outcome":  "UNPROVEN",
+                     "retained_evidence":  "available access observations and error",
+                     "proof_or_authorization_needed":  "independent ACL and owner review",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W14",
+                     "triggering_observation":  "Capture API unavailable or identity unsupported",
+                     "detection_stage":  "capture",
+                     "outcome":  "UNPROVEN",
+                     "retained_evidence":  "error and supported-field record",
+                     "proof_or_authorization_needed":  "approved capable environment and reviewed API",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W15",
+                     "triggering_observation":  "CLI or edit route does not participate",
+                     "detection_stage":  "route assessment",
+                     "outcome":  "UNPROVEN",
+                     "retained_evidence":  "source route inventory",
+                     "proof_or_authorization_needed":  "separate route closure and coordination proof",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W16",
+                     "triggering_observation":  "Stage or source differs from bound bytes",
+                     "detection_stage":  "binding verification",
+                     "outcome":  "REFUSE",
+                     "retained_evidence":  "both digests and identities",
+                     "proof_or_authorization_needed":  "investigation and independently authorized new capture",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 },
+                 {
+                     "id":  "W17",
+                     "triggering_observation":  "Artifact replacement after last observation",
+                     "detection_stage":  "post-observation interval",
+                     "outcome":  "UNPROVEN",
+                     "retained_evidence":  "last observation and time boundary",
+                     "proof_or_authorization_needed":  "enforced immutability or verified full coordination",
+                     "evidence_kind":  "static rule; not observed in R19"
+                 }
+             ]
+}

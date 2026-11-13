@@ -9,6 +9,7 @@ import pytest
 
 from runevidence.checks import run_checks
 from runevidence.cli import main
+from runevidence.findings import Code, Severity
 from runevidence.manifest import ManifestLoadError, load_manifest
 
 from conftest import REPO
@@ -46,7 +47,11 @@ def test_uppercase_digest_from_get_filehash_is_accepted(dogfood):
     assert run_checks(loaded).findings == []
 
 
-def test_schema_error_names_the_entry_by_id(dogfood):
+def test_schema_error_identifies_the_entry_by_index(dogfood):
+    """The privacy-safe pointer supersedes the historical dogfood diagnostic
+    wording ("artifacts[2] (id 'data-split.json').sha256"). This is an
+    adjudicated test-contract change, not an unauthorized RG-IND5 edit.
+    """
     def bad(doc):
         doc["artifacts"][2]["sha256"] = "not-a-digest"
 
@@ -54,7 +59,13 @@ def test_schema_error_names_the_entry_by_id(dogfood):
     with pytest.raises(ManifestLoadError) as exc:
         load_manifest(dogfood)
     art_id = json.loads((dogfood / MANIFEST).read_text(encoding="utf-8"))["artifacts"][2]["id"]
-    assert f"artifacts[2] (id {art_id!r}).sha256" in exc.value.findings[0].message
+    [finding] = exc.value.findings
+    assert finding.code is Code.schema_invalid
+    assert finding.severity is Severity.error
+    assert finding.issue_location == "/artifacts/2/sha256"
+    assert finding.issue_category == "invalid_value"
+    assert finding.message == "Manifest schema validation failed at /artifacts/2/sha256: invalid value"
+    assert art_id not in finding.message
 
 
 def test_same_name_file_from_another_run_is_not_suggested_as_moved(dogfood):

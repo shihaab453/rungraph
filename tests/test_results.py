@@ -310,3 +310,25 @@ def test_changed_metrics_file_with_same_value_only_reports_the_hash(experiment):
     report = check(experiment)
     assert "hash-mismatch" in codes(report)
     assert Code.result_value_mismatch not in {f.code for f in report.findings}
+
+
+def test_deeply_nested_metrics_file_is_unverifiable_not_a_crash(experiment):
+    """Deep JSON must be a fixed unverifiable finding, not RecursionError."""
+    doc = read_doc(experiment)
+    target = next(a for a in doc["artifacts"] if a["id"] == "tuned-metrics")
+    deep = "[" * 20000 + "0" + "]" * 20000
+    (experiment / target["path"]).write_text(deep, encoding="utf-8")
+    doc["artifacts"] = [
+        {**a, "sha256": hashlib.sha256(deep.encode()).hexdigest(),
+         "size_bytes": len(deep.encode())} if a["id"] == "tuned-metrics" else a
+        for a in doc["artifacts"]
+    ]
+    write_doc(experiment, doc)
+
+    report = check(experiment)
+
+    unverifiable = [f for f in report.findings if f.code is Code.result_unverifiable]
+    assert len(unverifiable) == 1
+    assert "could not parse" in unverifiable[0].message
+    assert Code.result_value_mismatch not in {f.code for f in report.findings}
+    assert report.exit_code() == 0
