@@ -11,6 +11,14 @@ coverage is claimed here.
 
 from __future__ import annotations
 
+import pytest
+
+# This module imports ``fcntl`` directly and ``directory_publication``, which
+# imports it at module level. Windows cannot import it, so collection skips
+# instead of erroring; the CLI's lazy import of that module already fails
+# closed off POSIX.
+pytest.importorskip("fcntl")
+
 import contextlib
 import errno
 import fcntl
@@ -24,13 +32,13 @@ import tempfile
 import textwrap
 from pathlib import Path
 
-import pytest
-
 from runevidence import cli
 from runevidence import directory_publication as dp
 from runevidence import directory_scanner as ds
 from runevidence.manifest import dump_raw
 from runevidence.models import MANIFEST_FILENAME
+
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="Linux-only evidence")
 
 REPO = Path(__file__).resolve().parents[1]
 SRC = REPO / "src"

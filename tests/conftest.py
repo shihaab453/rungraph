@@ -1,4 +1,5 @@
 import functools
+import json
 import os
 import shutil
 import stat
@@ -10,6 +11,26 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "examples" / "generic-experiment"
+
+# --- runtime JSON nesting capability ----------------------------------------
+#
+# Python 3.14 replaced the recursive C JSON scanner: a 20k-deep document now
+# parses instead of raising RecursionError. Deep-JSON tests assert whichever
+# controlled outcome this runtime produces, so they probe it once here rather
+# than comparing version numbers.
+DEEP_JSON_DEPTH = 20000
+
+
+def deep_json_parses(depth: int = DEEP_JSON_DEPTH) -> bool:
+    """True when ``json.loads`` handles ``depth`` nested arrays here."""
+    try:
+        json.loads("[" * depth + "0" + "]" * depth)
+    except (ValueError, RecursionError):
+        return False
+    return True
+
+
+DEEP_JSON_PARSES = deep_json_parses()
 
 # Six experimental R5 modules need Windows-only evidence prerequisites
 # (R5_EVIDENCE_ROOT under LOCALAPPDATA/Temp). A module-level pytestmark is avoided

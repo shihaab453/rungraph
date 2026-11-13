@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from conftest import DEEP_JSON_PARSES
 from runevidence.checks import run_checks
 from runevidence.cli import main
 from runevidence.edit import EditError, plan_add
@@ -786,7 +787,12 @@ def test_rehash_deeply_nested_metrics_does_not_crash(experiment, capsys):
     document = read_doc(experiment)
     result = next(r for r in document["results"] if r["id"] == "tuned-accuracy")
     assert result["value"] == 1.0
-    assert "could not parse" in out
+    if DEEP_JSON_PARSES:
+        # 3.14 parses the deep document, so the pointer is simply not there.
+        assert "could not parse" not in out
+        assert "/eval/accuracy is not in runs/tuned/metrics.json any more" in out
+    else:
+        assert "could not parse" in out
     assert "Traceback" not in out
 
 

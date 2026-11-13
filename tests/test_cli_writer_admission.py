@@ -26,10 +26,17 @@ from pathlib import Path
 
 import pytest
 
+# ``directory_publication`` imports ``fcntl`` at module level. Windows cannot
+# import it, so collection skips instead of erroring; the CLI's lazy import of
+# that module already fails closed off POSIX.
+pytest.importorskip("fcntl")
+
 from runevidence import cli
 from runevidence import directory_publication as dp
 from runevidence.manifest import dump_raw
 from runevidence.models import MANIFEST_FILENAME
+
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="Linux-only evidence")
 
 REPO = Path(__file__).resolve().parents[1]
 SRC = REPO / "src"

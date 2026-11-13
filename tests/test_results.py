@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import DEEP_JSON_PARSES
 from runevidence.checks import run_checks
 from runevidence.checks.results import _MISSING, resolve_pointer, values_match
 from runevidence.cli import main
@@ -329,6 +330,10 @@ def test_deeply_nested_metrics_file_is_unverifiable_not_a_crash(experiment):
 
     unverifiable = [f for f in report.findings if f.code is Code.result_unverifiable]
     assert len(unverifiable) == 1
-    assert "could not parse" in unverifiable[0].message
+    if DEEP_JSON_PARSES:
+        # 3.14 parses the deep array as a list, so the pointer is absent.
+        assert "not found" in unverifiable[0].message
+    else:
+        assert "could not parse" in unverifiable[0].message
     assert Code.result_value_mismatch not in {f.code for f in report.findings}
     assert report.exit_code() == 0

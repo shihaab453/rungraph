@@ -22,6 +22,13 @@ power-loss proof.
 
 from __future__ import annotations
 
+import pytest
+
+# ``fcntl`` is POSIX-only, so this module cannot be imported on Windows at
+# all. Skip at collection; the platform skipif below only runs once the
+# module-level imports succeed.
+pytest.importorskip("fcntl")
+
 import errno
 import fcntl
 import hashlib
@@ -35,8 +42,6 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
-
-import pytest
 
 import runevidence
 from runevidence import directory_publication as dp
