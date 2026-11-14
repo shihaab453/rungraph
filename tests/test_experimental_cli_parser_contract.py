@@ -98,6 +98,10 @@ HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
     # S4 prelude bytes (2026-11-12): superseded by the S6 init 0.2 refusal.
     "cd717cb6d942437dddecbe07a7494c64d7486196a95a2c08cad3365bfce736c7",  # LF
     "00d4a0f2751175d185661df68aebcfcd2db11a243a432a5f909985cdb602db50",  # CRLF
+    # Slice D phase 4a (2026-11-14): migrate --to 0.5, the init 0.5 refusal and
+    # version-keyed conditions; superseded by the phase 4b volatile hook.
+    "acfb857e1e1b0af5963036c4e848e356449f2b7f8fe97e38209675af559e9084",  # LF
+    "67ddbd0d38b65038163c107ec5e82cb4666f0788ed769af54bbd16d889ca283b",  # CRLF
 })
 HISTORICAL_READER_HASHES = (
     "d1d0bfe3d854ba44e42db8b92b292b49bb408fe8c7bd0442ebbb616c0e0e67d5",  # original reader test
@@ -120,13 +124,14 @@ HISTORICAL_READER_DIGEST_23 = (
 )
 # ---- CURRENT PROSPECTIVE PINS: M51 locator slice A, 2026-11-12 ----
 # Exact reviewed 26-route CLI bytes in LF and CRLF checkout forms. Slice D
-# phase 4a (2026-11-14) adds migrate --to 0.5, the init 0.5 refusal and the
-# version-keyed conditions 0.5 text; the 26-route surface is unchanged. Each
+# phase 4a (2026-11-14) added migrate --to 0.5, the init 0.5 refusal and the
+# version-keyed conditions 0.5 text; phase 4b adds the adapter volatile-target
+# hook. The 26-route surface is unchanged. Each
 # pin is an exact byte SHA-256. Nothing is normalized during checking. Static
 # != plugin safety.
 CLI_HASH = frozenset({
-    "acfb857e1e1b0af5963036c4e848e356449f2b7f8fe97e38209675af559e9084",  # LF
-    "67ddbd0d38b65038163c107ec5e82cb4666f0788ed769af54bbd16d889ca283b",  # CRLF
+    "37ca37bf0f32fd45ffe9a10acf24ef5bae5ef3a2244b5dab8d40fcd117c22980",  # LF
+    "97a89251f71f5255ee4dd68b47d3c401abb4b8e352385140c3ce143255740d19",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.

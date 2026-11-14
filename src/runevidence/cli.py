@@ -51,7 +51,15 @@ from .manifest import (LoadedManifest, ManifestLoadError, load_manifest, load_ra
                        save_raw)
 from .conditions_authoring import FIELDS as CONDITIONS_FIELDS, ConditionsError, author_conditions
 from .migrate import TARGET_VERSIONS, MigrationError, migrate_manifest
-from .models import BACKUP_FILENAME, MANIFEST_FILENAME, Manifest, backup_generation, json_schema
+from .models import (
+    BACKUP_FILENAME,
+    MANIFEST_FILENAME,
+    Manifest,
+    Manifest05,
+    TensorboardLocator,
+    backup_generation,
+    json_schema,
+)
 from .report import format_findings, format_overview, to_json
 from .run_compare import ComparisonError, compare_runs, format_comparison
 from .run_leaderboard import LeaderboardError, rank_runs, format_leaderboard
@@ -926,6 +934,14 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         print(f"ERROR: adapter {adapter.name!r} produced an invalid manifest: {_validation_summary(exc)}")
         print("Nothing was written.")
         return EXIT_INVALID
+    if args.volatile and _event_artifact_is_volatile(manifest, args.volatile):
+        # The frozen Adapter.extract signature has no volatile channel, so the
+        # refusal belongs here: before _mark_volatile, any backup or any write.
+        print(
+            f"ERROR: adapter {adapter.name!r} cannot read {root}: "
+            "an event artifact cannot be volatile; nothing was written"
+        )
+        return EXIT_INVALID
     if args.volatile:
         manifest = _mark_volatile(manifest, args.volatile)
     backup: Optional[Path] = None
@@ -1318,6 +1334,25 @@ def cmd_conditions(args: argparse.Namespace) -> int:
               f"(set: {sets}; cleared: {cleared}).\n"
               f"Backup: {backup}")
     return EXIT_OK
+
+
+def _event_artifact_is_volatile(manifest: Manifest, patterns: list[str]) -> bool:
+    """True when a --volatile glob targets a TensorBoard-locator artifact.
+
+    Only a schema 0.5 manifest with tensorboard locators has event artifacts;
+    generic and 0.1-0.4 init are untouched by this check.
+    """
+    if not isinstance(manifest, Manifest05):
+        return False
+    targeted = {
+        result.artifact_id
+        for result in manifest.results
+        if isinstance(result.locator, TensorboardLocator)
+    }
+    return any(
+        artifact.id in targeted and any(glob_match(artifact.path, pattern) for pattern in patterns)
+        for artifact in manifest.artifacts
+    )
 
 
 def _mark_volatile(manifest: Manifest, patterns: list[str]) -> Manifest:

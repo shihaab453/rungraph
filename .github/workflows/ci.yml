@@ -64,7 +64,7 @@ jobs:
       # Adapter packages live in packages/. Installed after core, so pip
       # uses this checkout's runevidence instead of looking for one online.
       - name: Install adapter packages
-        run: python -m pip install ./packages/runevidence-hydra ./packages/runevidence-mlflow ${{ matrix.deps == 'minimum' && '-c .github/constraints-minimum.txt' || '' }}
+        run: python -m pip install ./packages/runevidence-hydra ./packages/runevidence-mlflow ./packages/runevidence-tensorboard ${{ matrix.deps == 'minimum' && '-c .github/constraints-minimum.txt' || '' }}
 
       - name: Show dependency versions
         run: python -c "import pydantic, yaml; print('pydantic', pydantic.VERSION, 'PyYAML', yaml.__version__)"
@@ -77,7 +77,7 @@ jobs:
       # The adapter's tests skip themselves when it is not installed. Fail
       # here instead, so a broken install cannot hide behind a green run.
       - name: Check adapters are registered
-        run: python -c "from runevidence.adapters import get_adapter; get_adapter('hydra'); get_adapter('mlflow')"
+        run: python -c "from runevidence.adapters import get_adapter; get_adapter('hydra'); get_adapter('mlflow'); get_adapter('tensorboard')"
 
       - name: Run tests
         run: python -m pytest
@@ -131,11 +131,13 @@ jobs:
               "core": (".", "runevidence", "runevidence"),
               "hydra": ("packages/runevidence-hydra", "runevidence-hydra", "runevidence_hydra"),
               "mlflow": ("packages/runevidence-mlflow", "runevidence-mlflow", "runevidence_mlflow"),
+              "tensorboard": ("packages/runevidence-tensorboard", "runevidence-tensorboard", "runevidence_tensorboard"),
           }
           ENTRY = {
               "core": ("console_scripts", "runevidence", "runevidence.cli:main"),
               "hydra": ("runevidence.adapters", "hydra", "runevidence_hydra:HydraAdapter"),
               "mlflow": ("runevidence.adapters", "mlflow", "runevidence_mlflow:MlflowAdapter"),
+              "tensorboard": ("runevidence.adapters", "tensorboard", "runevidence_tensorboard:TensorboardAdapter"),
           }
           BAD_DIR = {".git", ".github", ".pytest_cache", "examples", "dist", "build", "multirun", "outputs", "runs", "checkpoints", "mlruns", ".hydra", "__pycache__"}
           BAD_SUFFIX = (".pkl", ".pickle", ".joblib", ".csv", ".bin", ".pt", ".pth", ".ckpt", ".npy", ".npz", ".parquet", ".feather", ".arrow", ".tfrecord", ".msgpack", ".h5", ".onnx", ".safetensors", ".zip", ".whl", ".tar", ".gz", ".pyc", ".pyo", ".pem", ".key")
@@ -321,7 +323,9 @@ jobs:
                   ensure(bool(msg.get_payload()), f"{key} {label} empty long description")
                   reqs = [Requirement(s) for s in msg.get_all("Requires-Dist", [])]
                   reqnames = {canonicalize_name(r.name) for r in reqs}
-                  needed = {"pydantic"} if key == "core" else {"runevidence", "pyyaml"}
+                  needed = {"pydantic"} if key == "core" else {"runevidence"} | (
+                      {"pyyaml"} if key in ("hydra", "mlflow") else set()
+                  )
                   ensure(needed <= reqnames and "pytest" in reqnames, f"{key} {label} missing runtime or dev dependencies")
                   if key != "core":
                       with (ROOT / "pyproject.toml").open("rb") as fp:
@@ -382,12 +386,12 @@ jobs:
                   ensure(one_stable == two_stable, f"{key} tree-vs-sdist wheel payload/entry-point/license difference")
                   print(f"SDIST-TO-WHEEL {key}: normalized package and stable metadata payload PASS")
               paths = [one(OUT / kind / key, suffix) for kind, suffix in (("sdist", "*.tar.gz"), ("wheel-tree", "*.whl"), ("wheel-sdist", "*.whl")) for key in SPECS]
-              ensure(len(paths) == 9, "expected nine total archives")
+              ensure(len(paths) == 12, "expected twelve total archives")
               run(sys.executable, "-m", "twine", "check", "--strict", *paths)
-              print("PACKAGING ADVISORY: ALL NINE ARCHIVES PASS")
+              print("PACKAGING ADVISORY: ALL TWELVE ARCHIVES PASS")
               summary = Path(os.environ.get("GITHUB_STEP_SUMMARY", str(OUT / "summary.md")))
               with summary.open("a", encoding="utf-8") as f:
-                  f.write("### Packaging advisory: PASS\nNine archives built and checked, including three sdist-derived wheels. See job log for SHA-256, members, metadata, and validators. No artifacts uploaded.\n")
+                  f.write("### Packaging advisory: PASS\nTwelve archives built and checked, including four sdist-derived wheels. See job log for SHA-256, members, metadata, and validators. No artifacts uploaded.\n")
 
 
           if __name__ == "__main__":
