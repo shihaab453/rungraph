@@ -1,9 +1,18 @@
-# TensorBoard scalar locators — slice D design RFC (v0.8)
+# TensorBoard scalar locators — slice D design RFC (v0.9)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A design gate and an owner schema-admission decision (D2) are required before any code.
 
-## 0. Changes in v0.8 (round-7 findings)
+## 0. Changes in v0.9 (round-8 findings)
+
+- **Race vectors**: fstat 140/EOF 140 is over-cap again; the EOF == cap boundary is fstat 140/EOF
+  128 → artifact-changed; fstat 140/EOF 141 is over-cap.
+- **Fuzz**: the directory seed pins `enable_directory_artifacts=False` and adds `not-a-file`; an
+  absent-(tag, step) / occurrence-beyond seed makes `locator-mismatch` deterministic.
+- **Errata**: item 24 quotes `not-a-file` without the final period (no stray “.;”), item 17 keeps
+  case-insensitivity for all kinds, item 27 says “whose read ends past its cap”.
+
+## 0.1 Changes in v0.8 (round-7 findings)
 
 - **Fuzz harness**: entry point is `check_files` with the targeted callback; `missing-file`,
   `hash-mismatch` and `size-mismatch` are in the exact reachable subset; corpus (i) recomputes
@@ -14,7 +23,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
   artifact-changed) are pinned.
 - **Changelog headings** renumbered.
 
-## 0.1 Changes in v0.7 (round-6 findings)
+## 0.2 Changes in v0.7 (round-6 findings)
 
 - **Fixed-id reservation**: `tb-*` ids are reserved in `used` before generic allocation; generic
   slugs suffix on any collision; only fixed-vs-fixed collisions are `AdapterError`.
@@ -28,7 +37,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
   over-cap. One short-read wording; `checks/files.py` scoped to TensorBoard-raised snapshots.
 - **Hints/fence**: the `claim-at-risk` cap hint is listed; the INIT note is outside the fence.
 
-## 0.2 Changes in v0.6 (round-5 findings)
+## 0.3 Changes in v0.6 (round-5 findings)
 
 - **Comparator scope**: parent errata cover 0.5 string/jsonl/csv-cell at 1e-9/1e-12; TensorBoard
   floats use 1e-6/1e-9 with abs 1e-12.
@@ -47,7 +56,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
   and the v0.9 header/status; gate 13 is gate 8.
 - **Table/step**: artifact `no-digest` row; step 8 includes unsupported selection; per-key flags.
 
-## 0.3 Changes in v0.5 (round-4 findings)
+## 0.4 Changes in v0.5 (round-4 findings)
 
 - **O(1) Event scanning**: the reader tracks the last non-`summary` member offset and the sum of
   summary payload bytes after it; no slice list. The 16 MiB cap is the sum of merged summary
@@ -67,7 +76,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
 - **Checklist**: correct modules (`manifest.py`, `locator_profiles.py`, `run_fingerprint.py`) and
   the `checks/files.py` row.
 
-## 0.4 Changes from v0.3 (round-3 findings)
+## 0.5 Changes from v0.3 (round-3 findings)
 
 - **Scalar classification is exclusive** and has an ordered selection table; a no-member or
   no-encoding value is classified; non-scalar uses `locator-unsupported-value` (parent §4.3).
@@ -205,7 +214,7 @@ predicate; no kind mismatch is invented.
 | `checks/files.py` | per-target snapshot cap chosen from kind eligibility, single-copy allocation from `os.fstat` on the protected descriptor (TensorBoard-raised snapshots only; 0.3/0.4 keep read-to-EOF), cap visible to the per-kind 50 MiB check |
 | `checks/__init__.py` | `_LOCATOR_SCHEMAS` includes 0.5; four targeted gates; `_csv_cell_cap` accepts 0.5; tensorboard cap pre-pass; per-artifact snapshot cap; per-kind callback/early-return discipline |
 | `checks/results.py` | `has_locators`, `_extension_matches`/`_expected_extension` (tensorboard basename), tensorboard route before the JSONL pre-scan, `_check_one_tensorboard`, per-kind structural/cap status, `display_locator`, 0.5 directory hint |
-| `checks/graph.py` | 0.5 `claim-unverified` text |
+| `checks/graph.py` | 0.5 `claim-unverified` text and the cap-specific `claim-at-risk` hint |
 | `cli.py` / `migrate.py` | `TARGET_VERSIONS` +0.5, `UNSUPPORTED_TARGET`, conditions 0.5 text, `INIT_0_5_REFUSAL`, help/docstrings |
 | `edit.py` / `conditions_authoring.py` / `run_comparability.py` | dispatcher use, 0.5 refusal, comparability guard |
 | `run_claim.py` / `run_lineage.py` / `run_details.py` | `_display_details` includes tensorboard; display copies; 0.3/0.4 bytes unchanged |
@@ -218,8 +227,8 @@ snapshot size is checked with `os.fstat` on the **opened protected descriptor** 
 allocation (a pre-open path stat could misclassify a shrink race); an over-cap file is
 stream-hashed without a snapshot. A short read is truncated in place; growth during the read is
 detected by the running total. **This fstat sizing and growth/shrink rule applies only when a
-kind-eligible TensorBoard locator raises the cap to 128 MiB; 0.3/0.4 keep the delivered
-read-to-EOF behavior.** Size races:
+kind-eligible TensorBoard locator raises the cap to 128 MiB; 0.3/0.4, and 0.5 string/jsonl/csv-cell
+locators, keep the delivered read-to-EOF behavior.** Size races:
 
 | fstat | EOF | Outcome |
 |---|---|---|
@@ -419,7 +428,7 @@ For an artifact with eligible entries of a capped kind:
 | No digest | `locator-no-digest` | error | per result; size compared |
 | Digestless artifact with no usable locator remains | `no-digest` | warning | one per artifact |
 | Per-kind over-cap | `locator-unreadable` | error | per result for that kind |
-| TensorBoard cap | `locator-unreadable` (cap message) | error | one per eligible artifact and kind |
+| TensorBoard cap | `locator-unreadable` (cap message) | error | one per eligible artifact and kind in `ok`/`over-cap` |
 | Structural refusal (per kind) | `locator-unreadable` | error | per result for that kind |
 | `hash-mismatch` / `size-mismatch` | existing | error | one per artifact; compared unless capped/over-cap/refused/volatile/no-digest |
 | Not found | `locator-mismatch` (`was not found`) | error | per result |
@@ -449,7 +458,7 @@ Exact texts:
   0.5; their recorded values were not checked`.
 
 Hints are `None` except structural, directory, the reused no-digest/volatile hints and the
-`claim-at-risk` cap hint.
+`claim-at-risk` cap hint `a resource cap is not a change; narrow the manifest or raise the limit`.
 
 ## 8. Display and privacy (D6)
 
@@ -577,7 +586,7 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
    any hash/size or kind finding; no value is compared.” with “A capped artifact emits at most one
    cap finding per capped kind, alongside any hash/size or kind finding; no value is compared for
    that kind, and other kinds on the same artifact still verify. There is one cap finding per
-   eligible artifact and kind.”
+   eligible artifact and kind in state `ok` or `over-cap`.”
 6. §4.3 table: after the row
 
    ```
@@ -667,9 +676,9 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
     | Line/row/column/occurrence out of range | `locator-mismatch` (new) | error | 1 |
     ```
 17. §3.1 kind rule: replace “`kind` must match the artifact extension, case-insensitively: `jsonl`
-    on `.jsonl`, `csv-cell` on `.csv`.” with “`kind` must match the artifact: `jsonl` on
-    `.jsonl`, `csv-cell` on `.csv`, and `tensorboard` on a file whose basename contains
-    `.tfevents` (case-insensitive).”
+    on `.jsonl`, `csv-cell` on `.csv`.” with “`kind` must match the artifact, case-insensitively:
+    `jsonl` on `.jsonl`, `csv-cell` on `.csv`, and `tensorboard` on a basename containing
+    `.tfevents`.”
 18. §3.1 absent locator: replace “in 0.3 and 0.4.” with “in 0.3, 0.4 and 0.5.”
 19. §9 gate 1 extension: replace “extension matching (`.json`/`.jsonl`/`.csv`; `.ndjson`/`.tsv`
     refused)” with “extension matching (`.json`/`.jsonl`/`.csv`, or a TensorBoard basename
@@ -691,15 +700,17 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
 24. §9 gate 1 0.5 matrix: replace “`artifact_id` required for any non-null 0.3 locator; extension
     matching (`.json`/`.jsonl`/`.csv`, or a TensorBoard basename containing `.tfevents`;
     `.ndjson`/`.tsv` refused); directory artifact behavior with the flag on and off;
-    `not-a-file`.” with the same text plus “; a 0.5 matrix (Manifest05/Result05 round-trip,
-    tensorboard tag/step/occurrence and range errors, 0.5 string/jsonl/csv-cell carry-over).”
+    `not-a-file`” (without its final period) with the same text plus “; a 0.5 matrix
+    (Manifest05/Result05 round-trip, tensorboard tag/step/occurrence and range errors, 0.5
+    string/jsonl/csv-cell carry-over, and the 0.5 `artifact_id` cross-field rule).”
 25. Header/status: replace “# Verified value locators: design RFC (v0.8)” with “# Verified value
     locators: design RFC (v0.9)” and “Status: **v0.8 ERRATA FOR SLICE C.**” with “Status:
     **v0.9 ERRATA FOR SLICE C AND SLICE D.**”.
 26. §9 gate 6: replace “v1 refuses 0.2 and 0.3” with “v1 refuses 0.2, 0.3, 0.4 and 0.5”, and
     “old readers reject 0.3;” (with its semicolon) with “old readers reject 0.3, 0.4 and 0.5;”.
 27. §4.2 race sentence: after “`artifact-changed` is the only race signal.” add “The
-    TensorBoard-only size-race rows also classify a file that grew past its cap as over-cap.”.
+    TensorBoard-only size-race rows also classify a file whose read ends past its cap as
+    over-cap.”.
 
 ## 12. Verification plan
 
@@ -730,8 +741,9 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
   must verify inside the asserted ≤300 MB budget (no value cap).
 - **Snapshot races**: fstat 10,000,000 then EOF 10,000,300 → `artifact-changed`; EOF 9,999,700 →
   `artifact-changed`; fstat 100 MiB then EOF 129 MiB → over-cap; fstat 140 MiB then EOF 100 MiB →
-  `artifact-changed`; fstat 140 MiB then EOF 140 MiB → `artifact-changed`; fstat 140 MiB then
-  EOF 141 MiB → over-cap; a 0.4 manifest keeps the delivered read-to-EOF behavior.
+  `artifact-changed`; fstat 140 MiB then EOF 128 MiB → `artifact-changed` (EOF == cap); fstat
+  140 MiB then EOF 140 MiB → over-cap; fstat 140 MiB then EOF 141 MiB → over-cap; a 0.4 manifest
+  keeps the delivered read-to-EOF behavior.
 - **Caps/memory**: 50/128 MiB; 16 MiB merged summary; 10,000/10,001 and 16 MiB tag edges; 4.4M
   minimal scalar records in 127 MiB; a 16 MiB summary of ~8.4M empty Values and one of ~1.6M
   tagged scalars, both asserted inside the ≤300 MB budget; multiple occurrences; many unrequested
@@ -752,9 +764,11 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
   where the recorded sha256 *and* size are recomputed for every generated artifact, so no
   incidental hash/size finding; (ii) explicit seeds with a wrong recorded digest and a wrong size;
   (iii) manifest variants — a missing file on disk (not a dangling id), volatile, digestless,
-  digestless with only a wrong-kind locator (for `no-digest`), directory artifact, csv-cell kind
-  mismatch, 10,001-entry cap, wrong value, unsupported scalar, non-scalar. The closed set is the
-  §7.3 codes and messages; the **exact reachable subset** is `missing-file`,
+  digestless with only a wrong-kind locator (for `no-digest`), a directory artifact with
+  `enable_directory_artifacts=False` (so `not-a-file` is expected), csv-cell kind mismatch,
+  10,001-entry cap, wrong value, unsupported scalar, non-scalar, and a valid file with an absent
+  `(tag, step)` or occurrence beyond the supported count (for `locator-mismatch`). The closed set
+  is the §7.3 codes and messages; the **exact reachable subset** is `missing-file`, `not-a-file`,
   `directory-locator-unsupported`, `locator-kind-mismatch`, the TensorBoard cap, `no-digest`,
   `locator-no-digest`, `locator-unverified`, `locator-unreadable`, `locator-mismatch`,
   `locator-unsupported-value`, `result-value-mismatch`, `hash-mismatch`, `size-mismatch`.
@@ -770,7 +784,7 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
 - Zero-length records are valid and skipped; empty/zero-scalar files are valid and yield
   `locator-mismatch`.
 - Truncated/trailing bytes, CRC mismatch, invalid field keys, wrong wire types, groups, and a
-  `summary` over 16 MiB are structural refusals.
+  winning/merged `summary` over 16 MiB are structural refusals.
 - Message fields merge; scalar singular fields last-wins; oneof members replace; losing members
   are not decoded.
 - Event tags are bytewise, not UTF-8-validated or runtime-capped; `file_version` is not validated;
@@ -778,8 +792,9 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
 - `tensor_content` is little-endian; unknown fields are skipped; non-minimal varints accepted.
 - Out-of-int32 dtype enums are unsupported scalars.
 - The 10th varint byte must be ≤0x01 (C++ protobuf truncates instead).
-- Losing oneof members are never validated (protobuf parses them and fails on malformed input);
-  the profile is therefore not TensorBoard-equivalent for a malformed losing member.
+- Losing oneof *payloads* are never validated; their keys and wire types are checked. Protobuf
+  parses the payload and fails on malformed input, so the profile is not TensorBoard-equivalent
+  for a malformed losing payload.
 - A known field with the wrong wire type is refused (protobuf treats it as unknown).
 - Only float/double rank-0/[1] scalars are indexed; other shapes/dtypes are unsupported.
 - One file is one artifact; multi-file runs and tag filtering are out of scope.
@@ -792,7 +807,8 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
 - float32 tolerance differs from JSON/CSV; documented.
 - Tags may contain secrets; display hides them, recorded names may not.
 - One-file-one-run and no tag filtering exclude common workflows.
-- 128 MiB and one-snapshot exclude very large logs; a summary over 16 MiB refuses the file.
+- 128 MiB and one-snapshot exclude very large logs; a winning/merged summary over 16 MiB
+  refuses the file.
 - Cap findings conservatively mark the artifact broken, so a verified result of another kind on the
   same artifact can raise claim risk; intended and tested. The 0.5 `claim-at-risk` finding gains
   the hint `a resource cap is not a change; narrow the manifest or raise the limit`; the reused
