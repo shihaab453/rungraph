@@ -24,14 +24,17 @@ from typing import Annotated, Any, ClassVar, Literal, Optional, Union
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StrictBool,
     StrictInt,
     StrictStr,
+    TypeAdapter,
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 SCHEMA_VERSION = "0.1"
 # First-class comparability fields require an explicit 0.2 declaration. An
@@ -39,8 +42,12 @@ SCHEMA_VERSION = "0.1"
 SCHEMA_VERSION_0_2 = "0.2"
 # 0.3 adds structured locators. It is an explicit opt-in; omitted still means 0.1.
 SCHEMA_VERSION_0_3 = "0.3"
+# 0.4 adds csv-cell locators. The base Manifest stays at 0.1-0.3; Manifest04
+# is only reached through the manifest dispatcher.
+SCHEMA_VERSION_0_4 = "0.4"
 SCHEMA_VERSIONS = (SCHEMA_VERSION, SCHEMA_VERSION_0_2, SCHEMA_VERSION_0_3)
 MAX_JSONL_LINE = 2**63 - 1
+MAX_CSV_CELL_HEADER = 65536
 # 0.3 JSON Pointer grammar: empty, or a slash-prefixed pointer where every
 # tilde is the start of ~0/~1. A prefixed string such as "jsonl:..." fails.
 # CR, LF, U+2028 and U+2029 are forbidden anywhere: JSON Schema pattern `$`
@@ -592,6 +599,84 @@ class JsonlLocator(_Strict):
         return value
 
 
+class CsvCellLocator(_Strict):
+    """Structured 0.4 locator for one CSV data cell.
+
+    ``row`` is one-based over data records (the header is never selectable) and
+    ``column`` is one-based over the parsed header. Both use ``StrictInt`` at
+    runtime (the JSON Schema draft integer accepts ``1.0``; the model rejects
+    it and booleans). ``header`` is the recorded header assertion at that
+    column; it never appears in a finding or human display.
+    """
+
+    kind: Literal["csv-cell"] = Field(description="Locator kind; 0.4 admits csv-cell.")
+    row: StrictInt = Field(
+        ge=1,
+        le=MAX_JSONL_LINE,
+        description=(
+            "One-based data record. StrictInt runtime: 1.0 is schema-valid under "
+            "draft 2020-12 but model-rejected; true/string are rejected."
+        ),
+    )
+    column: StrictInt = Field(
+        ge=1,
+        le=MAX_JSONL_LINE,
+        description=(
+            "One-based column in the parsed header. StrictInt runtime: 1.0 is "
+            "schema-valid under draft 2020-12 but model-rejected; true/string "
+            "are rejected."
+        ),
+    )
+    header: StrictStr = Field(
+        min_length=1,
+        max_length=MAX_CSV_CELL_HEADER,
+        description=(
+            "Recorded header assertion at this column, in code points. A lone "
+            "surrogate is rejected."
+        ),
+    )
+
+    @field_validator("header", mode="after")
+    @classmethod
+    def _header_is_utf8_encodable(cls, value: str) -> str:
+        # StrictStr accepts a lone surrogate in Python-mode validation. Encode
+        # so a hand-built value is rejected exactly like the dict path, which
+        # already reports string_unicode through the discriminated adapter.
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise PydanticCustomError(
+                "string_unicode", "header contains a lone surrogate"
+            ) from None
+        return value
+
+
+_LOCATOR_ADAPTER = TypeAdapter(
+    Annotated[
+        Union[JsonlLocator, CsvCellLocator],
+        Field(discriminator="kind"),
+    ]
+)
+
+
+def _dispatch_locator_04(value: Any) -> Any:
+    """Normalize a 0.4 locator before the field union validates it."""
+    if value is None:
+        return None
+    if type(value) is str:
+        if not is_valid_locator_pointer(value):
+            raise ValueError("locator must be empty or use the JSON Pointer grammar")
+        return value
+    if isinstance(value, (JsonlLocator, CsvCellLocator)):
+        # Models are already validated; returning them avoids a second parse.
+        return value
+    if type(value) is dict:
+        # A raised ValidationError propagates with the field location prefixed
+        # and the discriminator tag in ``loc`` for the error-aware walker.
+        return _LOCATOR_ADAPTER.validate_python(value)
+    raise ValueError("locator must be a string, an object, or null")
+
+
 class Result(_Strict):
     _zero_two_only_fields = ("metric_definition",)
 
@@ -622,6 +707,28 @@ class Result(_Strict):
         if value is None or type(value) is str or type(value) is dict:
             return value
         if isinstance(value, JsonlLocator):
+            return value
+        raise ValueError("locator must be a string, an object, or null")
+
+
+class Result04(Result):
+    """0.4 result: a string pointer, a ``jsonl`` object, a ``csv-cell`` object, or null."""
+
+    locator: Annotated[
+        Optional[Union[StrictStr, JsonlLocator, CsvCellLocator]],
+        BeforeValidator(_dispatch_locator_04),
+    ] = None
+
+    @field_validator("locator", mode="before")
+    @classmethod
+    def _locator_scalar_shape(cls, value: Any) -> Any:
+        # Override the 0.3 scalar-shape guard: an already-built CsvCellLocator
+        # must reach the dispatcher instead of being rejected by the base
+        # validator. A plain union would report only branch-level locations
+        # for a scalar such as 5, so keep rejecting it at the field.
+        if value is None or type(value) is str or type(value) is dict:
+            return value
+        if isinstance(value, (JsonlLocator, CsvCellLocator)):
             return value
         raise ValueError("locator must be a string, an object, or null")
 
@@ -669,7 +776,11 @@ class Manifest(_Strict):
 
     def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         data = super().model_dump(*args, **kwargs)
-        if self.schema_version in (SCHEMA_VERSION_0_2, SCHEMA_VERSION_0_3):
+        if self.schema_version in (
+            SCHEMA_VERSION_0_2,
+            SCHEMA_VERSION_0_3,
+            SCHEMA_VERSION_0_4,
+        ):
             # Default fields keep their normal 0.1 spelling. The per-model
             # presence overrides already removed only unset 0.2+ members.
             if "schema_version" not in data:
@@ -706,11 +817,40 @@ class Manifest(_Strict):
                         )
                 elif not isinstance(locator, JsonlLocator):
                     raise ValueError("a schema 0.3 locator must be a string or a jsonl object")
+        elif self.schema_version == SCHEMA_VERSION_0_4:
+            for result in self.results:
+                locator = result.locator
+                if locator is None:
+                    continue
+                if result.artifact_id is None:
+                    raise ValueError("a schema 0.4 locator requires artifact_id")
+                if type(locator) is str:
+                    if not is_valid_locator_pointer(locator):
+                        raise ValueError(
+                            "a schema 0.4 string locator must be empty or a JSON Pointer"
+                        )
+                elif not isinstance(locator, (JsonlLocator, CsvCellLocator)):
+                    raise ValueError(
+                        "a schema 0.4 locator must be a string, a jsonl object, "
+                        "or a csv-cell object"
+                    )
         else:
             for result in self.results:
                 if isinstance(result.locator, JsonlLocator):
                     raise ValueError("object locators require schema_version 0.3")
         return self
+
+
+class Manifest04(Manifest):
+    """Schema 0.4 manifest: string, jsonl and csv-cell locators."""
+
+    schema_version: Literal["0.4"]
+    results: list[Result04] = Field(default_factory=list)
+
+
+def is_manifest(value: object) -> bool:
+    """True for either manifest model the dispatcher can return."""
+    return isinstance(value, (Manifest, Manifest04))
 
 
 def _strip_0_2_keys(data: dict[str, Any]) -> None:
@@ -772,6 +912,7 @@ def _restore_locator_0_1(schema: dict[str, Any]) -> None:
     """Remove the 0.3 object branch and restore the frozen string-only locator."""
     defs = schema.get("$defs", {})
     defs.pop("JsonlLocator", None)
+    defs.pop("CsvCellLocator", None)
     defs["Result"]["properties"]["locator"] = _locator_0_1_property()
 
 
@@ -894,6 +1035,14 @@ def _generated_schema() -> dict[str, Any]:
     return schema
 
 
+def _generated_schema_0_4() -> dict[str, Any]:
+    """The canonical JSON Schema for Manifest04, before version fixes."""
+    schema = Manifest04.model_json_schema()
+    _canonicalize_schema(schema)
+    _add_artifact_type_rules(schema["$defs"]["Artifact"])
+    return schema
+
+
 def _publish_schema_0_2(schema: dict[str, Any]) -> None:
     _publish_common_0_2(schema)
     _restore_locator_0_1(schema)
@@ -970,4 +1119,69 @@ def json_schema_0_3() -> dict[str, Any]:
     _pin_schema_version(schema, SCHEMA_VERSION_0_3, required=True)
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     schema["$id"] = f"urn:runevidence:manifest:{SCHEMA_VERSION_0_3}"
+    return schema
+
+
+def json_schema_0_4() -> dict[str, Any]:
+    """JSON Schema for the 0.4 manifest (string/``jsonl``/``csv-cell`` locators).
+
+    The 0.3 file stays byte-frozen. This schema keeps every 0.2 field, the
+    0.3 ``jsonl`` object and adds the ``csv-cell`` object. A non-null locator
+    requires ``artifact_id``. Draft 2020-12 accepts ``1.0`` for an integer;
+    the runtime model uses ``StrictInt`` and rejects it, as documented on the
+    ``row``/``column``/``line`` properties.
+    """
+    schema = _generated_schema_0_4()
+    _publish_common_0_2(schema)
+    defs = schema["$defs"]
+    jsonl = defs["JsonlLocator"]
+    jsonl["description"] = (
+        "Structured 0.4 jsonl locator for one physical JSONL line and a JSON "
+        "Pointer.\n\n0.4 admits ``jsonl``; the locator union admits "
+        "``jsonl``/``csv-cell``. ``line`` is one-based and uses ``StrictInt`` "
+        "at runtime (the JSON Schema draft integer accepts ``1.0``; the model "
+        "rejects it and booleans). ``pointer`` is empty or a slash-prefixed "
+        "pointer using only ``~0``/``~1`` escapes."
+    )
+    jsonl["properties"]["kind"]["description"] = (
+        "Locator kind; 0.4 admits jsonl; the locator union admits jsonl/csv-cell."
+    )
+    jsonl["properties"]["pointer"]["pattern"] = _LOCATOR_POINTER_JSON_PATTERN
+    jsonl["properties"]["pointer"]["description"] = (
+        "JSON Pointer inside the selected line; empty or /-prefixed, "
+        "with only ~0/~1 escapes."
+    )
+    defs["Result04"]["properties"]["locator"] = {
+        "oneOf": [
+            {
+                "type": "string",
+                "pattern": _LOCATOR_POINTER_JSON_PATTERN,
+                "description": (
+                    "Empty or a JSON Pointer string with only ~0/~1 escapes into "
+                    "a .json artifact."
+                ),
+            },
+            {"$ref": "#/$defs/JsonlLocator"},
+            {"$ref": "#/$defs/CsvCellLocator"},
+            {"type": "null"},
+        ],
+        "default": None,
+        "title": "Locator",
+        "description": (
+            "RFC 6901 JSON Pointer string, a structured jsonl or csv-cell "
+            "locator object, or null. In 0.4 any non-null locator requires "
+            "artifact_id."
+        ),
+    }
+    defs["Result04"]["if"] = {
+        "required": ["locator"],
+        "properties": {"locator": {"not": {"type": "null"}}},
+    }
+    defs["Result04"]["then"] = {
+        "required": ["artifact_id"],
+        "properties": {"artifact_id": {"type": "string"}},
+    }
+    _pin_schema_version(schema, SCHEMA_VERSION_0_4, required=True)
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["$id"] = f"urn:runevidence:manifest:{SCHEMA_VERSION_0_4}"
     return schema
