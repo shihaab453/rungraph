@@ -340,6 +340,49 @@ def compare_values(recorded: Any, actual: Any) -> bool:
     return recorded == actual
 
 
+def compare_tensorboard(recorded: Any, actual: Any, *, float32: bool) -> bool | None:
+    """TensorBoard scalar comparator (slice D RFC section 5.4).
+
+    ``actual`` is a decoded Event scalar: always a float.  float32-origin
+    values (``simple_value`` and ``DT_FLOAT``) use ``rel_tol=1e-6`` and
+    float64-origin values (``DT_DOUBLE``) use ``rel_tol=1e-9``; both use
+    ``abs_tol=1e-12``.  An integer recorded value uses the same tolerance as
+    the actual value's origin and falls back to exact comparison when
+    ``math.isclose`` cannot convert it (``OverflowError``).  NaN equals NaN;
+    infinities equal only themselves; finite versus NaN/infinity is a
+    mismatch.
+
+    Returns ``True`` for a match, ``False`` for a mismatch, and ``None`` when
+    the recorded value's type is not representable as a TensorBoard scalar
+    (``str``, ``bool``, ``None`` or any other non-number), which the caller
+    maps to ``locator-unsupported-value``.  The delivered ``compare_values``
+    stays at its 0.3/0.4 ``1e-9`` tolerance.
+    """
+    if isinstance(recorded, bool) or not isinstance(recorded, (int, float)):
+        return None
+    recorded_nan = isinstance(recorded, float) and math.isnan(recorded)
+    actual_nan = isinstance(actual, float) and math.isnan(actual)
+    if recorded_nan or actual_nan:
+        return recorded_nan and actual_nan
+    recorded_infinite = isinstance(recorded, float) and math.isinf(recorded)
+    actual_infinite = isinstance(actual, float) and math.isinf(actual)
+    if recorded_infinite or actual_infinite:
+        return (
+            isinstance(recorded, float)
+            and isinstance(actual, float)
+            and recorded == actual
+        )
+    try:
+        return math.isclose(
+            recorded,
+            actual,
+            rel_tol=1e-6 if float32 else 1e-9,
+            abs_tol=1e-12,
+        )
+    except OverflowError:
+        return recorded == actual
+
+
 def display_locator(locator: Any, *, limit: int = 200) -> str:
     """A bounded, escaped display form; never used for parsing or identity.
 
