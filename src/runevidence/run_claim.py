@@ -21,15 +21,20 @@ def _display_details(details: dict[str, Any]) -> dict[str, Any]:
     """A human-display copy of one target/node ``details`` mapping.
 
     A 0.4 ``csv-cell`` locator is shown as ``csv-cell:<row>,<column>`` so the
-    recorded ``header`` never reaches the terminal. Every other locator form
-    (0.3 strings and ``jsonl`` objects) stays exactly as recorded, which keeps
-    the 0.3 human bytes unchanged. The caller's data is never mutated; this
-    returns a shallow copy only when the locator is actually replaced.
+    recorded ``header`` never reaches the terminal, and a 0.5 ``tensorboard``
+    locator as ``tensorboard:step=<step>,occurrence=<n>`` so the recorded tag
+    never does. Every other locator form (0.3 strings and ``jsonl`` objects)
+    stays exactly as recorded, which keeps the 0.3 human bytes unchanged. The
+    caller's data is never mutated; this returns a shallow copy only when the
+    locator is actually replaced.
     """
     locator = details.get("locator")
-    if (
-        isinstance(locator, dict) and locator.get("kind") == "csv-cell"
-    ) or getattr(locator, "kind", None) == "csv-cell":
+    kind = (
+        locator.get("kind")
+        if isinstance(locator, dict)
+        else getattr(locator, "kind", None)
+    )
+    if kind in ("csv-cell", "tensorboard"):
         return {**details, "locator": display_locator(locator)}
     return details
 

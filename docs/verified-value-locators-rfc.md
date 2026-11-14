@@ -1,13 +1,13 @@
-# Verified value locators: design RFC (v0.8)
+# Verified value locators: design RFC (v0.9)
 
-Status: **v0.8 ERRATA FOR SLICE C.** Slice B is delivered (2026-11-13): JSONL object locators and
-strict whole-document JSON verification for 0.3 string locators. This revision carries the
-`csv-cell`/schema 0.4 errata accepted with the slice C design; the CSV verifier is a separate
-implementation gate. TensorBoard and other adapters remain later slices. No Windows/macOS parity,
-no R5, no release.
-Answers the design gate requested by `docs/tool-adapters-csv-tensorboard-decision-memo.md`
-v0.3. Acceptance does not authorize implementation; a separate implementation gate is
-required.
+Status: **v0.9 ERRATA FOR SLICE C AND SLICE D.** Slice B is delivered (2026-11-13): JSONL
+object locators and strict whole-document JSON verification for 0.3 string locators. This
+revision carries the `csv-cell`/schema 0.4 errata accepted with the slice C design; the CSV
+verifier is a separate implementation gate. TensorBoard scalar locators are specified by the
+slice D design RFC; other adapters remain later slices. No Windows/macOS parity, no R5, no
+release. Answers the design gate requested by
+`docs/tool-adapters-csv-tensorboard-decision-memo.md` v0.3. Acceptance does not authorize
+implementation; a separate implementation gate is required.
 
 ## 1. Problem and evidence
 
@@ -23,11 +23,12 @@ per-epoch histories. G11 supports locator work, not a preference for JSONL over 
 
 ## 2. Scope and non-goals
 
-In scope: a structured locator union in an opt-in schema; the `jsonl` kind implemented
-first; the `csv-cell` kind specified but admitted only with its verifier; verification
-semantics, outcomes, privacy, limits, compatibility and gates.
+In scope: a structured locator union in an opt-in schema; the `jsonl` kind implemented first;
+the `csv-cell` kind specified but admitted only with its verifier; the `tensorboard` kind
+specified for slice D; verification semantics, outcomes, privacy, limits, compatibility and
+gates.
 
-Out of scope: TensorBoard (separate RFC), computed/aggregate values, YAML manifests,
+Out of scope: computed/aggregate values, YAML manifests,
 changing 0.1/0.2 or their readers, new CLI routes or flags.
 
 ## 3. Manifest model
@@ -59,11 +60,11 @@ Rules:
 - `locator` stays optional. An omitted locator and explicit `null` both mean "no locator".
 - In 0.3 **any non-null locator requires `artifact_id`** (string or object); JSON Schema
   uses `if`/`then` for it. `result-unverifiable` is **never emitted under 0.3**.
-- An absent locator yields `result-unverified` (warning, §4.3) in 0.3 and 0.4.
+- An absent locator yields `result-unverified` (warning, §4.3) in 0.3, 0.4 and 0.5.
 - The locator carries no file path. Bytes come only from `Result.artifact_id`.
-- `kind` must match the artifact extension, case-insensitively: `jsonl` on `.jsonl`,
-  `csv-cell` on `.csv`. `.ndjson` and `.tsv` are not admitted. A mismatch is
-  `locator-kind-mismatch` (error), checked at validation.
+- `kind` must match the artifact, case-insensitively: `jsonl` on `.jsonl`, `csv-cell` on
+  `.csv`, and `tensorboard` on a basename containing `.tfevents`. `.ndjson` and `.tsv` are not
+  admitted. A mismatch is `locator-kind-mismatch` (error), checked at validation.
 - An unknown `kind` is a **load-time schema refusal** (`schema-invalid`, exit 2).
 - An object locator in a 0.1/0.2 manifest is a schema error.
 - 0.3 string locators must target `.json`; a string on any other artifact is
@@ -99,10 +100,10 @@ Rules:
 
 ### 4.1 Snapshot safety and scope
 
-Only artifacts targeted by a 0.3 or 0.4 locator (string, `jsonl` or `csv-cell`) get a retained
-in-memory snapshot. Every other artifact keeps today's streaming hash; 0.1/0.2 behavior is unchanged.
-For a targeted artifact, the **file check and the locator checks share one snapshot**; the
-file check does not hash the artifact a second time.
+Only artifacts targeted by a 0.3, 0.4 or 0.5 locator (string, `jsonl`, `csv-cell` or
+`tensorboard`) get a retained in-memory snapshot. Every other artifact keeps today's streaming
+hash; 0.1/0.2 behavior is unchanged. For a targeted artifact, the **file check and the locator
+checks share one snapshot**; the file check does not hash the artifact a second time.
 
 The snapshot is built with a protected open:
 
@@ -118,13 +119,13 @@ The snapshot is built with a protected open:
    open succeeds but `fstat` reports a non-regular file → `artifact-changed` (the reference
    check already confirmed a file); any other errno (`ENXIO`, `EIO`, `EMFILE`, ...) →
    `locator-unreadable`.
-4. Read bounded bytes, hash them, and parse the same bytes. Aggregate memory is one
-   artifact snapshot at a time (released after its locators are checked), capped at 50 MiB.
-   **Over the cap:** the file check still streams the hash through the same protected open
-   (integrity checking is never dropped by adding a locator), while each locator on the normal
-   path emits `locator-unreadable`; a csv-cell-capped artifact (eligible csv-cell entries in a
-   capped manifest) emits one cap finding instead, one per eligible artifact (including an
-   over-cap artifact).
+4. Read bounded bytes, hash them, and parse the same bytes. Aggregate memory is one artifact
+   snapshot at a time (released after its locators are checked), capped at 50 MiB, or at 128
+   MiB when the artifact is targeted by a kind-eligible TensorBoard locator. **Over the cap:**
+   the file check still streams the hash through the same protected open (integrity checking is
+   never dropped by adding a locator), while each locator on the normal path emits
+   `locator-unreadable`; a capped artifact emits one cap finding per capped kind, one per
+   eligible artifact and kind (including over-cap artifacts).
 
 Verification means: the recorded digest equals the digest of the bytes parsed. The identity
 checks detect a path swap before opening and a replacement during the read; they do not
@@ -148,14 +149,15 @@ For a targeted artifact, one snapshot serves both checks:
    volatile).
 3. Protected snapshot; identity before open and after read. A change is
    `artifact-changed`; the value is not compared.
-4. Snapshot digest vs recorded digest: different → the file check reports `hash-mismatch`.
-   The value is still compared (preserving the existing JSON behavior), except on a
-   csv-cell-capped artifact, where no value is compared; the result is **never called
-   verified**.
+4. Snapshot digest vs recorded digest: different → the file check reports `hash-mismatch`. The
+   value is still compared (preserving the existing JSON behavior), except for a locator kind
+   whose artifact is capped for that kind, where no value is compared; the result is **never
+   called verified**.
 5. Snapshot digest equals the recorded digest → normal verification.
 
-Because the snapshot is shared, there is no second read and no digest disagreement between
-the file check and the locator check. `artifact-changed` is the only race signal.
+Because the snapshot is shared, there is no second read and no digest disagreement between the
+file check and the locator check. `artifact-changed` is the only race signal. The
+TensorBoard-only size-race rows also classify a file whose read ends past its cap as over-cap.
 
 ### 4.3 Outcomes and propagation
 
@@ -168,11 +170,11 @@ finding is exit `1`; warnings only are exit `0` (`1` with `--strict`).
 | Recorded bytes differ | `hash-mismatch` (existing) | error | 1 |
 | Recorded size differs on a nonvolatile artifact with a matching digest (or no recorded digest) | `size-mismatch` (existing) | error | 1 |
 | Locator kind/extension mismatch | `locator-kind-mismatch` (new) | error | 1 |
-| Line/row/column out of range | `locator-mismatch` (new) | error | 1 |
+| Line/row/column/occurrence out of range | `locator-mismatch` (new) | error | 1 |
 | Header assertion differs | `locator-mismatch` (new) | error | 1 |
 | Pointer not found / malformed at run time | `locator-mismatch` (new) | error | 1 |
 | Profile refusal (encoding, dialect, caps, parse) | `locator-unreadable` (new) | error | 1 |
-| Unsupported target type / non-scalar | `locator-unsupported-value` (new) | error | 1 |
+| Recorded type / unsupported scalar / non-scalar | `locator-unsupported-value` (new) | error | 1 |
 | Snapshot identity changed | `artifact-changed` (new) | error | 1 |
 | Targeted artifact has no digest | `locator-no-digest` (new) | error | 1 |
 | Volatile artifact with a locator | `locator-unverified` (new) | error | 1 |
@@ -181,13 +183,16 @@ finding is exit `1`; warnings only are exit `0` (`1` with `--strict`).
 | Resolved scalar differs | `result-value-mismatch` (existing) | error | 1 |
 | Dangling artifact reference | `dangling-reference` (existing) | error | 1 |
 | Directory artifact locator | `directory-locator-unsupported` (existing) | error | 1 |
+| TensorBoard scalar cap | `locator-unreadable` (new) | error | 1 |
 | Artifact is not a file | `not-a-file` (existing) | error | 1 |
 | Unknown kind | `schema-invalid` (existing) | load refusal | 2 |
 | Kind declared but no verifier | `locator-verifier-unavailable` (new) | load refusal | 2 (defensive; unreachable by construction) |
 | Invalid manifest / command cannot run | existing | n/a | 2 |
 
-A csv-cell-capped artifact emits at most one cap finding, alongside any hash/size or kind
-finding; no value is compared. `size-mismatch` is emitted once per artifact.
+A capped artifact emits at most one cap finding per capped kind, alongside any hash/size or
+kind finding; no value is compared for that kind, and other kinds on the same artifact still
+verify. There is one cap finding per eligible artifact and kind in state `ok` or `over-cap`.
+`size-mismatch` is emitted once per artifact.
 
 Broken-set membership (drives claim risk through existing graph propagation):
 `missing-file`, `hash-mismatch`, `locator-kind-mismatch`, `locator-mismatch`,
@@ -245,8 +250,12 @@ by unverified results gets the `claim-unverified` warning (no exit change unless
   total cells 10,000,000 per artifact, never summed across artifacts; csv-cell locator results
   10,000 and csv-cell header metadata 16 MiB per manifest, counting only manifest-eligible
   entries (non-directory `.csv` artifact with a recorded sha256, not volatile), without reading
-  a file. Lengths are bytes of decoded UTF-8; the file cap uses raw on-disk bytes (a leading BOM
-  counts) and the record cap uses raw record bytes after BOM strip, excluding the terminator.
+  a file. Lengths are bytes of decoded UTF-8; the file cap uses raw on-disk bytes (a leading
+  BOM counts) and the record cap uses raw record bytes after BOM strip, excluding the
+  terminator. A TensorBoard target uses a 128 MiB file cap and a 16 MiB merged summary payload
+  cap per Event; TensorBoard results and tag metadata are capped at 10,000 entries and 16 MiB
+  per manifest, counting only manifest-eligible entries (non-directory file whose basename
+  contains `.tfevents`, a recorded sha256, and not volatile), without reading a file.
 
 ### 5.3 JSON (0.3 string locators)
 
@@ -266,32 +275,38 @@ stricter than 0.1/0.2 JSON parsing, which stays unchanged.
   fraction/exponent literal becomes a float; overflow to infinity or underflow from a
   nonzero significand is refused. Python's own 4300-digit conversion limit is mapped to
   `locator-unreadable`, never a crash.
-- **Comparator:** 0.3 and 0.4 locators (string, `jsonl` and `csv-cell`) use a new comparator: int-to-int is
-  exact; mixed int/float uses `values_match` (`rel_tol=1e-9`, `abs_tol=1e-12`) and is
-  documented as approximate; booleans compare as booleans (`true` never equals `1`); NaN
-  equals NaN; null equals null. 0.1/0.2 keep the existing `values_match` unchanged, even
-  though it approximates adjacent large integers.
+- **Comparator:** string, `jsonl` and `csv-cell` locators (0.3, 0.4 and 0.5) use a new
+  comparator: int-to-int is exact; mixed int/float uses `values_match` (`rel_tol=1e-9`,
+  `abs_tol=1e-12`) and is documented as approximate; booleans compare as booleans (`true` never
+  equals `1`); NaN equals NaN; null equals null. 0.1/0.2 keep the existing `values_match`
+  unchanged, even though it approximates adjacent large integers. TensorBoard locators use
+  `compare_tensorboard`: `rel_tol=1e-6, abs_tol=1e-12` for float32-origin values;
+  `rel_tol=1e-9, abs_tol=1e-12` for float64; a TensorBoard int recorded value uses the actual
+  value's origin tolerance; a recorded string, boolean or null is `locator-unsupported-value`.
+  The mixed int/float `1e-9` rule remains scoped to string, `jsonl` and `csv-cell` locators
+  (including 0.5).
 
 ## 6. Canonical form and display
 
-Fingerprint v1 is frozen: it accepts schema **0.1 only** and refuses both 0.2 and 0.3. A
+Fingerprint v1 is frozen: it accepts schema **0.1 only** and refuses 0.2, 0.3, 0.4 and 0.5. A
 0.1 manifest's fingerprint must remain unchanged. Cross-version fingerprint equality for a
 string-only 0.3 migration is **not** a v1 requirement; it becomes a requirement on a future
 fingerprint v2, which is a separate design. Canonical object form (for future use): UTF-8
 JSON, sorted keys, no insignificant whitespace, decimal integers, no floats, no Unicode
 normalization, JSON escaping only.
 
-Human rendering is display-only and never fingerprint input: canonical JSON for machine
-output; compact escaped text for humans (`jsonl:41#/val_rmse`; empty pointer rendered
-`jsonl:41#`; `csv-cell:41,4`). Pointer components escape `@`, `,`, `#`, control characters and
-backslash; the csv-cell display is numbers only, and length is bounded.
+Human rendering is display-only and never fingerprint input: canonical JSON for machine output;
+compact escaped text for humans (`jsonl:41#/val_rmse`; empty pointer rendered `jsonl:41#`;
+`csv-cell:41,4`; `tensorboard:step=40,occurrence=0`). Pointer components escape `@`, `,`, `#`,
+control characters and backslash; the csv-cell display is numbers only, and length is bounded.
 
 ## 7. Privacy and output safety
 
-- Verification diagnostics never expose newly read source values, raw exception text or
-  parser messages. They name the artifact-relative path, the escaped locator, the fixed code,
-  and - for `jsonl`/string locators - the recorded assertion (pointer); a `csv-cell` finding
-  never names the header. `OSError`/`UnicodeDecodeError` text is never echoed.
+- Verification diagnostics never expose newly read source values, raw exception text or parser
+  messages. They name the artifact-relative path, the escaped locator, the fixed code, and -
+  for `jsonl`/string locators - the recorded assertion (pointer); a `csv-cell` finding never
+  names the header, and a `tensorboard` finding never names the tag.
+  `OSError`/`UnicodeDecodeError` text is never echoed.
 - Recorded `Result.value`, header assertions and normal reports intentionally contain
   recorded data. A product-wide "no values" rule is not claimed.
 - The existing JSON mismatch message prints recorded and actual values. It stays as a
@@ -315,8 +330,9 @@ backslash; the csv-cell display is numbers only, and length is bounded.
   rendering; `run_claim.py`, `run_lineage.py` locator-valued JSON output;
   `directory_audit.py`; `inspect`; `directory_authoring`/`directory_publication` wording;
   `migrate`; README/docs/exit tables.
-- Omitted `schema_version` is 0.1. New readers read 0.1/0.2 without rewriting them; old
-  readers reject 0.3.
+- Omitted `schema_version` is 0.1. New readers read 0.1-0.5 without rewriting them; old readers
+  reject 0.3, 0.4 and 0.5. A 0.3/0.4 manifest migrates to 0.5 as a version-only bump; 0.5 has
+  no downgrade.
 - **Migration 0.2→0.3 is pre-checked and transactional.** A valid 0.2 manifest can contain
   locators that 0.3 rejects or that cannot be verified: prefixed/invalid pointer strings,
   strings on non-`.json` artifacts, locators without `artifact_id`, locators on volatile
@@ -343,32 +359,37 @@ backslash; the csv-cell display is numbers only, and length is bounded.
 ## 9. Gates before implementation is authorized
 
 1. Schema/model matrix: object in 0.2 rejected; unknown kind load-refused; pointer grammar
-   (empty, `~0`/`~1`, `~2` rejected, `/` prefix); integer schema-vs-model behavior
-   (`1.0` schema-accepted but model-rejected; `true`/`0`/`-1`/`2**63` rejected);
-   `artifact_id` required for any non-null 0.3 locator; extension matching
-   (`.json`/`.jsonl`/`.csv`; `.ndjson`/`.tsv` refused); directory artifact behavior with the flag
-   on and off; `not-a-file`.
+   (empty, `~0`/`~1`, `~2` rejected, `/` prefix); integer schema-vs-model behavior (`1.0`
+   schema-accepted but model-rejected; `true`/`0`/`-1`/`2**63` rejected); `artifact_id`
+   required for any non-null 0.3 locator; extension matching (`.json`/`.jsonl`/`.csv`, or a
+   TensorBoard basename containing `.tfevents`; `.ndjson`/`.tsv` refused); directory artifact
+   behavior with the flag on and off; `not-a-file`; a 0.5 matrix (Manifest05/Result05
+   round-trip, tensorboard tag/step/occurrence and range errors, 0.5 string/jsonl/csv-cell
+   carry-over, and the 0.5 `artifact_id` cross-field rule).
 2. Outcome table: every row in §4.3, including stale+malformed, missing digest, volatile,
-   absent locator (0.3 and 0.4) vs legacy 0.1/0.2 `result-unverifiable`, unsupported verifier
+   absent locator (0.3, 0.4 and 0.5) vs legacy 0.1/0.2 `result-unverifiable`, unsupported verifier
    (fault-injected; unreachable by design), broken-set membership, claim propagation, exit
    precedence, and over-cap targeted artifacts.
 3. Profiles: lone CR, bare quote, BOM in a CSV header, JSONL leading BOM (stripped) and a
    mid-file BOM (data), trailing blank record, U+2028, `1e999`, underflow, deep nesting
    (selected line and `.json`), duplicate JSON keys, `Infinity`/`NaN`, mixed int/float,
    512-digit integer, 4300-digit limit, caps.
-4. Snapshot: protected open for the initial hash, descriptor identity, path/FIFO swap
-   before and during the read, containment, one snapshot per targeted artifact, streaming
-   for others, aggregate memory, an explicit 60 MiB over-cap fixture (hash still checked,
-   locators `locator-unreadable` on the normal path; a csv-cell-capped artifact (eligible
-   csv-cell entries in a capped manifest) emits one cap finding, one per eligible artifact
-   (including an over-cap artifact)), no cross-run cache.
+4. Snapshot: protected open for the initial hash, descriptor identity, path/FIFO swap before
+   and during the read, containment, one snapshot per targeted artifact, streaming for others,
+   aggregate memory, an explicit 60 MiB over-cap fixture for 50 MiB kinds and a 129 MiB fixture
+   for TensorBoard targets (hash still checked; normal-path locators `locator-unreadable`; a
+   capped artifact emits one cap finding per capped kind, one per eligible artifact and kind,
+   including over-cap artifacts), no cross-run cache.
 5. Privacy: canaries for values, headers, pointer, absolute path, OS text; formula/terminal
    injection; legacy JSON echo documented.
-6. Version matrix: 0.1 fingerprints unchanged; v1 refuses 0.2 and 0.3; 0.1/0.2 checks
-   unchanged (warnings, `--strict`, exits); 0.3 reads; old readers reject 0.3; migrations
+6. Version matrix: 0.1 fingerprints unchanged; v1 refuses 0.2, 0.3, 0.4 and 0.5; 0.1/0.2 checks
+   unchanged (warnings, `--strict`, exits); 0.3 reads; old readers reject 0.3, 0.4 and 0.5; migrations
    pre-checked and transactional; rehash refuses.
 7. Packaging: full suite, skip accounting, installed wheel/sdist, no new core dependency
    (jsonl uses the standard library).
+8. TensorBoard adds framing/CRC/protobuf vectors: duplicate singular fields,
+   message merge, oneof interleaving, packed/unpacked values, the merged summary cap,
+   and the 50/128 MiB overlap.
 
 ## 10. Open questions
 

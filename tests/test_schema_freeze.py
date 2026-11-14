@@ -32,6 +32,9 @@ SCHEMA_PINS = {
     "schema/runevidence-0.4.schema.json": (
         "973099fb21c3d67a8775c6c0ceb3d2baeb6416df464b2b980f7148f90c962078"
     ),
+    "schema/runevidence-0.5.schema.json": (
+        "af1c085eb50ab3d8111404c23503628c3af2433bfb5b0a956d75bee6f00935b4"
+    ),
 }
 
 REJECT_VECTORS = (

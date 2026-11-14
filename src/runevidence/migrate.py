@@ -1,4 +1,4 @@
-"""Explicit, value-preserving migration of a manifest to schema 0.2, 0.3 or 0.4.
+"""Explicit, value-preserving migration of a manifest to schema 0.2, 0.3, 0.4 or 0.5.
 
 The command layer owns argument parsing, output and exit codes. This module
 owns the migration contract: one validated load, independent decodes, a strict
@@ -44,7 +44,13 @@ SOURCE_VERSION = "0.1"
 TARGET_VERSION = "0.2"
 TARGET_VERSION_0_3 = "0.3"
 TARGET_VERSION_0_4 = "0.4"
-TARGET_VERSIONS = (TARGET_VERSION, TARGET_VERSION_0_3, TARGET_VERSION_0_4)
+TARGET_VERSION_0_5 = "0.5"
+TARGET_VERSIONS = (
+    TARGET_VERSION,
+    TARGET_VERSION_0_3,
+    TARGET_VERSION_0_4,
+    TARGET_VERSION_0_5,
+)
 
 # The CLI adds INVALID_ARGUMENTS and UNSUPPORTED_TARGET before calling this
 # module; the core has exactly this closed set of outcomes.
@@ -177,12 +183,13 @@ def without_schema_version(obj: dict) -> dict:
 def migrate_manifest(
     path: Path, *, dry_run: bool = False, target_version: str = TARGET_VERSION
 ) -> MigrationResult:
-    """Declare an existing valid 0.1-0.3 manifest as 0.2, 0.3 or 0.4 additively.
+    """Declare an existing valid 0.1-0.4 manifest as 0.2, 0.3, 0.4 or 0.5 additively.
 
-    The only value changed is ``schema_version``. A 0.2-to-0.3 or 0.1/0.2-to-0.4
-    migration is pre-checked for locators the target cannot accept or verify
-    and refuses the whole migration before any write. A 0.3-to-0.4 migration is
-    a version-only bump (0.4 admits every 0.3 locator) and skips that
+    The only value changed is ``schema_version``. A 0.1/0.2-to-0.3,
+    0.1/0.2-to-0.4 or 0.1/0.2-to-0.5 migration is pre-checked for locators the
+    target cannot accept or verify and refuses the whole migration before any
+    write. A 0.3-to-0.4, 0.3-to-0.5 or 0.4-to-0.5 migration is a version-only
+    bump (each target admits every locator of its source) and skips that
     pre-check. Refusals raise ``MigrationError`` with a closed code; a
     successful real run has already replaced the manifest and a dry run wrote
     nothing.
@@ -201,6 +208,7 @@ def migrate_manifest(
 def _migrate_manifest(
     target: Path, *, dry_run: bool, target_version: str = TARGET_VERSION
 ) -> MigrationResult:
+    """Execute one 0.2/0.3/0.4/0.5 migration after the sanitized boundary."""
     _reject_reserved_target(target)
 
     if target_version not in TARGET_VERSIONS:
@@ -228,19 +236,30 @@ def _migrate_manifest(
             raise MigrationError("DOWNGRADE_UNSUPPORTED")
     elif target_version == TARGET_VERSION_0_3:
         # --to 0.3 is additive from 0.1 or 0.2; a 0.3 source is a no-op above.
-        # A loaded 0.4 source is a downgrade, never an internal failure.
-        if source_version == TARGET_VERSION_0_4:
+        # A loaded 0.4 or 0.5 source is a downgrade, never an internal failure.
+        if source_version in (TARGET_VERSION_0_4, TARGET_VERSION_0_5):
             raise MigrationError("DOWNGRADE_UNSUPPORTED")
         if source_version not in (SOURCE_VERSION, TARGET_VERSION):
             raise MigrationError("INTERNAL_ERROR")
         _check_locator_migration(loaded.manifest)
-    else:
+    elif target_version == TARGET_VERSION_0_4:
         # --to 0.4 is additive from every earlier version. 0.1/0.2 keep the
         # same manifest-only pre-check as 0.2->0.3; 0.3 is a version-only bump
-        # because 0.4 admits every locator 0.3 admits.
+        # because 0.4 admits every locator 0.3 admits. A 0.5 source is a
+        # downgrade, never an internal failure.
         if source_version in (SOURCE_VERSION, TARGET_VERSION):
             _check_locator_migration(loaded.manifest)
+        elif source_version == TARGET_VERSION_0_5:
+            raise MigrationError("DOWNGRADE_UNSUPPORTED")
         elif source_version != TARGET_VERSION_0_3:
+            raise MigrationError("INTERNAL_ERROR")
+    else:
+        # --to 0.5 is additive from every earlier version. 0.1/0.2 keep the
+        # same manifest-only pre-check as the earlier targets; 0.3/0.4 are
+        # version-only bumps because 0.5 admits every locator they admit.
+        if source_version in (SOURCE_VERSION, TARGET_VERSION):
+            _check_locator_migration(loaded.manifest)
+        elif source_version not in (TARGET_VERSION_0_3, TARGET_VERSION_0_4):
             raise MigrationError("INTERNAL_ERROR")
 
     # Two independent decodes: source_a is the immutable baseline, source_b
@@ -306,14 +325,14 @@ def _reject_reserved_target(target: Path) -> None:
 
 
 def _check_locator_migration(manifest: Manifest) -> None:
-    """Refuse a 0.1/0.2 -> 0.3 or 0.1/0.2 -> 0.4 migration when a locator
-    cannot be safe there.
+    """Refuse a 0.1/0.2 -> 0.3, 0.1/0.2 -> 0.4 or 0.1/0.2 -> 0.5 migration
+    when a locator cannot be safe there.
 
     The check is purely manifest-level (no file read, no artifact I/O): a
     prefixed/invalid pointer, a locator without artifact_id, a string locator
     on a non-``.json`` artifact (including a ``.csv`` file), or a locator on a
     volatile/no-digest/directory artifact. The refusal code is fixed and
-    value-free. 0.3 sources skip this check because 0.4 is a superset.
+    value-free. 0.3/0.4 sources skip this check because 0.5 is a superset.
     """
     artifacts = {artifact.id: artifact for artifact in manifest.artifacts}
     for result in manifest.results:

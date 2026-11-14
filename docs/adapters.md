@@ -295,3 +295,47 @@ backup generations protect the manifest bytes but are not a merge tool.
 Example: [examples/mlflow-file-store](../examples/mlflow-file-store) is a
 small synthetic store with two runs. Copy it before running `init` if you
 want to keep the checked-out example untouched.
+
+### `tensorboard` (`packages/runevidence-tensorboard`)
+
+For folders that hold TensorBoard event files (`.tfevents`). TensorFlow and
+the `protobuf` runtime are **not** needed: the adapter uses the dependency-free
+reader in core. Install it next to RunEvidence:
+
+```
+pip install -e . -e ./packages/runevidence-tensorboard
+runevidence adapters                      # lists "tensorboard"
+runevidence init --adapter tensorboard path/to/project
+runevidence validate path/to/project
+```
+
+How it reads the folder:
+
+- **Artifacts:** every regular file except RunEvidence's own manifest and
+  backups. Non-event files keep the generic adapter's IDs and have no
+  `run_id`. Event files (basename contains `.tfevents`, case-insensitively)
+  get `tb-art-<16 hex of SHA-256(path)>`.
+- **Runs:** one per event file, never a folder run. The run ID is
+  `tb-run-<same hash>` and the run name is the recorded relative path, so two
+  event files never merge into a multi-file run.
+- **Results:** every supported scalar in record order, then
+  `Summary.Value` order. A result ID is tag-free and built from the run ID,
+  tag, step and occurrence; the name is `tag @ step`, with ` #occurrence` when
+  occurrence is greater than 0. The locator is the schema 0.5
+  `{"kind": "tensorboard", ...}` object.
+- **Profile:** TFRecord framing and CRC, the strict protobuf subset, and
+  rank-0/rank-1[1] float and double scalars; the same reader the checker uses.
+  A malformed or truncated event file refuses the whole `init` and writes
+  nothing; a tag that cannot be represented in schema 0.5 (empty, invalid
+  UTF-8, longer than 4,096 bytes) does the same.
+- **Budgets:** 10,000 results and 16 MiB of tag UTF-8 bytes per manifest. The
+  event file cap is 128 MiB.
+- **One read:** the artifact digest and the parsed scalars come from the same
+  protected read, so a file that changes during extraction refuses instead of
+  producing a digest/parse mismatch.
+- **Volatile:** an event artifact cannot be `--volatile`; matching one stops
+  `init` before any backup or save.
+
+The adapter emits `Manifest05`, so `runevidence validate` verifies the scalar
+locators. See
+[Schema 0.5 TensorBoard scalar locators](../README.md#schema-05-tensorboard-scalar-locators-slice-d).

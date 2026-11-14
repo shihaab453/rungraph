@@ -51,7 +51,15 @@ from .manifest import (LoadedManifest, ManifestLoadError, load_manifest, load_ra
                        save_raw)
 from .conditions_authoring import FIELDS as CONDITIONS_FIELDS, ConditionsError, author_conditions
 from .migrate import TARGET_VERSIONS, MigrationError, migrate_manifest
-from .models import BACKUP_FILENAME, MANIFEST_FILENAME, Manifest, backup_generation, json_schema
+from .models import (
+    BACKUP_FILENAME,
+    MANIFEST_FILENAME,
+    Manifest,
+    Manifest05,
+    TensorboardLocator,
+    backup_generation,
+    json_schema,
+)
 from .report import format_findings, format_overview, to_json
 from .run_compare import ComparisonError, compare_runs, format_comparison
 from .run_leaderboard import LeaderboardError, rank_runs, format_leaderboard
@@ -868,6 +876,12 @@ INIT_0_4_REFUSAL = (
     "Move the manifest aside, run init, then runevidence migrate --to 0.4 and reapply the "
     "first-class values and locators."
 )
+INIT_0_5_REFUSAL = (
+    "ERROR: the existing manifest declares schema 0.5. init --force would regenerate the "
+    "manifest and cannot carry over first-class values or locators. Nothing was written. "
+    "Move the manifest aside, run init, then run runevidence migrate PATH --to 0.5 (unless "
+    "the adapter writes 0.5 itself) and reapply the first-class values and locators."
+)
 
 
 def _declared_manifest_version(path: Path):
@@ -888,12 +902,14 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         print(f"ERROR: {out} already exists. Use --force to overwrite it.")
         return EXIT_INVALID
     declared = _declared_manifest_version(out) if out.exists() else None
-    if out.exists() and args.force and declared in ("0.2", "0.3", "0.4"):
+    if out.exists() and args.force and declared in ("0.2", "0.3", "0.4", "0.5"):
         # Refuse before adapter discovery, backup creation or any write: a raw
-        # 0.2/0.3/0.4 declaration means hand-entered data (or a would-be
+        # 0.2/0.3/0.4/0.5 declaration means hand-entered data (or a would-be
         # downgrade) is at risk. An unparseable manifest keeps the legacy
         # backup-and-replace path below.
-        if declared == "0.4":
+        if declared == "0.5":
+            print(INIT_0_5_REFUSAL)
+        elif declared == "0.4":
             print(INIT_0_4_REFUSAL)
         elif declared == "0.3":
             print(INIT_0_3_REFUSAL)
@@ -917,6 +933,14 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
     except ValidationError as exc:
         print(f"ERROR: adapter {adapter.name!r} produced an invalid manifest: {_validation_summary(exc)}")
         print("Nothing was written.")
+        return EXIT_INVALID
+    if args.volatile and _event_artifact_is_volatile(manifest, args.volatile):
+        # The frozen Adapter.extract signature has no volatile channel, so the
+        # refusal belongs here: before _mark_volatile, any backup or any write.
+        print(
+            f"ERROR: adapter {adapter.name!r} cannot read {root}: "
+            "an event artifact cannot be volatile; nothing was written"
+        )
         return EXIT_INVALID
     if args.volatile:
         manifest = _mark_volatile(manifest, args.volatile)
@@ -958,7 +982,7 @@ _MIGRATE_ERROR_TEXT = {
         "Nothing was written."
     ),
     "UNSUPPORTED_TARGET": (
-        "ERROR (UNSUPPORTED_TARGET): only --to 0.2, --to 0.3 or --to 0.4 is "
+        "ERROR (UNSUPPORTED_TARGET): only --to 0.2, --to 0.3, --to 0.4 or --to 0.5 is "
         "supported; downgrade and other versions are not available. Nothing was written."
     ),
     "RESERVED_PATH": (
@@ -1047,7 +1071,7 @@ def _migrate_result_document(result) -> dict:
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
-    """Declare an existing 0.1-0.3 manifest as 0.2, 0.3 or 0.4 additively."""
+    """Declare an existing 0.1-0.4 manifest as 0.2, 0.3, 0.4 or 0.5 additively."""
     if args.to not in TARGET_VERSIONS:
         return _migrate_failure("UNSUPPORTED_TARGET", args.json)
     if not args.dry_run and not _writer_target_folder_exists(args.path):
@@ -1155,12 +1179,18 @@ _CONDITIONS_ERROR_TEXT = {
     "LOCK_UNAVAILABLE": LOCK_UNAVAILABLE_TEXT,
 }
 
-# Schema 0.4 has no downgrade path and the shared 0.3 sentence would name the
-# wrong version, so the source version selects one extra fixed line.
+# Schema 0.4 and 0.5 have no downgrade path and the shared 0.3 sentence would
+# name the wrong version, so each source version selects its own fixed line.
 _CONDITIONS_UNSUPPORTED_VERSION_0_4 = (
     "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
     "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
     "runevidence migrate PATH --to 0.2; schema 0.3 and 0.4 have no downgrade path. "
+    "Nothing was written."
+)
+_CONDITIONS_UNSUPPORTED_VERSION_0_5 = (
+    "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
+    "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
+    "runevidence migrate PATH --to 0.2; schema 0.3, 0.4 and 0.5 have no downgrade path. "
     "Nothing was written."
 )
 
@@ -1180,6 +1210,8 @@ def _conditions_failure(code: str, as_json: bool, *, version: str | None = None)
         print(json.dumps(document, indent=2, ensure_ascii=True, allow_nan=False))
     elif code == "UNSUPPORTED_VERSION" and version == "0.4":
         print(_CONDITIONS_UNSUPPORTED_VERSION_0_4)
+    elif code == "UNSUPPORTED_VERSION" and version == "0.5":
+        print(_CONDITIONS_UNSUPPORTED_VERSION_0_5)
     else:
         print(_CONDITIONS_ERROR_TEXT[code])
     return EXIT_INVALID
@@ -1302,6 +1334,25 @@ def cmd_conditions(args: argparse.Namespace) -> int:
               f"(set: {sets}; cleared: {cleared}).\n"
               f"Backup: {backup}")
     return EXIT_OK
+
+
+def _event_artifact_is_volatile(manifest: Manifest, patterns: list[str]) -> bool:
+    """True when a --volatile glob targets a TensorBoard-locator artifact.
+
+    Only a schema 0.5 manifest with tensorboard locators has event artifacts;
+    generic and 0.1-0.4 init are untouched by this check.
+    """
+    if not isinstance(manifest, Manifest05):
+        return False
+    targeted = {
+        result.artifact_id
+        for result in manifest.results
+        if isinstance(result.locator, TensorboardLocator)
+    }
+    return any(
+        artifact.id in targeted and any(glob_match(artifact.path, pattern) for pattern in patterns)
+        for artifact in manifest.artifacts
+    )
 
 
 def _mark_volatile(manifest: Manifest, patterns: list[str]) -> Manifest:
@@ -2416,10 +2467,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "migrate",
-        help="declare an existing manifest as schema 0.2, 0.3 or 0.4 without changing any recorded value (explicit, no inference)",
+        help="declare an existing manifest as schema 0.2, 0.3, 0.4 or 0.5 without changing any recorded value (explicit, no inference)",
     )
     p.add_argument("path", type=Path, help=f"experiment folder (containing {MANIFEST_FILENAME}) or manifest file")
-    p.add_argument("--to", required=True, metavar="VERSION", help="target schema version (0.2, 0.3 or 0.4)")
+    p.add_argument("--to", required=True, metavar="VERSION", help="target schema version (0.2, 0.3, 0.4 or 0.5)")
     p.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
     p.add_argument("--json", action="store_true", help="machine-readable result")
     p.set_defaults(func=cmd_migrate)

@@ -53,11 +53,15 @@ from . import _experimental_comparability_bridge as bridge
 from . import comparability
 from . import manifest
 from .manifest import ManifestLoadError
-from .models import SCHEMA_VERSION_0_3, SCHEMA_VERSION_0_4
+from .models import SCHEMA_VERSION_0_3, SCHEMA_VERSION_0_4, SCHEMA_VERSION_0_5
 
 # Comparability is defined on the 0.1/0.2 recorded-condition projections.
-# Both later schemas refuse rather than compare silently.
-_UNSUPPORTED_COMPARABILITY_SCHEMAS = (SCHEMA_VERSION_0_3, SCHEMA_VERSION_0_4)
+# Every later schema refuses rather than compare silently.
+_UNSUPPORTED_COMPARABILITY_SCHEMAS = (
+    SCHEMA_VERSION_0_3,
+    SCHEMA_VERSION_0_4,
+    SCHEMA_VERSION_0_5,
+)
 
 __all__ = [
     "APPLICATION_STATUS",

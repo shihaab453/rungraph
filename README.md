@@ -293,7 +293,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence inspect PATH` | Summarize the manifest, then run every check, also listing files the manifest does not track. |
 | `runevidence comparability BASELINE TARGET --baseline-result ID --target-result ID [--json]` | Experimental read-only comparison of five mandatory recorded conditions across two manifests (no artifact checks; exit `0` comparable, `1` different, `2` unavailable). `--preflight` is a text-only read-only readiness listing/pair check (no JSON; exit `0` list/ready, `1` not ready, `2` load/unknown/invalid). See [Comparability (verdict CLI experimental)](#comparability-verdict-cli-experimental). |
 | `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`, `--volatile GLOB`). With `--force`, the old manifest is kept as a backup, because a fresh scan does not carry over hand-written results and claims. See [Backups from `init --force`](#backups-from-init---force). |
-| `runevidence migrate PATH --to 0.2\|0.3\|0.4 [--dry-run] [--json]` | Declare an existing valid manifest as the chosen schema without changing any recorded value. Exits `0` on success, no-op or dry run; `2` on refusal or failure. There is no inference and no downgrade. See [Migrating a manifest to 0.2](#migrating-a-manifest-to-02) and [Schema 0.4 CSV cell locators](#schema-04-csv-cell-locators-slice-c). |
+| `runevidence migrate PATH --to 0.2\|0.3\|0.4\|0.5 [--dry-run] [--json]` | Declare an existing valid manifest as the chosen schema without changing any recorded value. Exits `0` on success, no-op or dry run; `2` on refusal or failure. There is no inference and no downgrade. See [Migrating a manifest to 0.2](#migrating-a-manifest-to-02), [Schema 0.4 CSV cell locators](#schema-04-csv-cell-locators-slice-c) and [Schema 0.5 TensorBoard scalar locators](#schema-05-tensorboard-scalar-locators-slice-d). |
 | `runevidence conditions PATH --run RUN_ID [--patch FILE\|-] [--clear FIELD]... [--dry-run] [--json]` | Set or clear recorded run conditions on a 0.2 manifest from a local JSON patch; no condition values on the command line. Exits `0` on success, no-op or dry run; `2` on refusal or failure. See [Authoring run conditions](#authoring-run-conditions). |
 | `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read values only for supported, resolvable scalar JSON-located results in changed files (`--volatile`, `--no-volatile`, `--dry-run`). `--directory` re-records one exact directory artifact ID. |
 | `runevidence add PATH FILE...` | Track new files or folders without re-running `init` (`--id`, `--kind`, `--run`, `--no-run`, `--volatile`, `--dry-run`). `add PATH DIR --directory --id ID` records one folder as a directory artifact. |
@@ -529,7 +529,7 @@ scheme; see [Migrating a manifest to 0.2](#migrating-a-manifest-to-02).
 | `project` | What the folder is about | `id`, `name`, `description`, `tags` |
 | `runs` | Executions of any kind | `id`, `name`, `started_at`, `params` |
 | `artifacts` | Files on disk | `id`, `path` (relative, forward slashes), `sha256`, `size_bytes`, `volatile` (existence only), `kind`, `run_id` (producer) |
-| `results` | Named values a run produced | `id`, `run_id`, `name`, `value`, `artifact_id`, `locator` (JSON Pointer, or a 0.3/0.4 structured locator) |
+| `results` | Named values a run produced | `id`, `run_id`, `name`, `value`, `artifact_id`, `locator` (JSON Pointer, or a 0.3/0.4/0.5 structured locator) |
 | `evidence` | Claims in plain words | `id`, `claim`, `supports`, `contradicts`, `source` |
 | `relationships` | Extra typed edges | `source`, `target`, `type`: `produced_by`, `input_to`, `result_of`, `reported_in`, `derived_from`, `supports`, `contradicts` |
 
@@ -581,7 +581,7 @@ absent locator in 0.3 is `result-unverified` (warning). CSV/`csv-cell` is not
 part of slice B; schema 0.4 adds it (see below). Schemas 0.1 and 0.2 are
 unchanged. See [docs/schema-0.3-locators.md](docs/schema-0.3-locators.md).
 
-Only artifacts named by a 0.3 or 0.4 locator use the protected snapshot. All other
+Only artifacts named by a 0.3, 0.4 or 0.5 locator use the protected snapshot. All other
 artifacts, including every artifact in a 0.1 or 0.2 manifest, are hashed with an
 ordinary open that follows symbolic links after a separate containment check,
 so a concurrent swap of a parent directory can make validate hash, and report
@@ -643,6 +643,63 @@ pre-0.4 binary does not know 0.4 and instead backs it up and replaces it with
 prints 0.1; the 0.4 schema is `schema/runevidence-0.4.schema.json`. Schemas
 0.1/0.2/0.3 are unchanged and 0.3 still refuses `csv-cell`. See
 [docs/schema-0.4-csv-cell.md](docs/schema-0.4-csv-cell.md).
+
+### Schema 0.5 TensorBoard scalar locators (slice D)
+
+Schema 0.5 is an explicit opt-in that adds one locator kind, `tensorboard`, to
+the 0.3/0.4 string, `jsonl` and `csv-cell` forms. A result locates one numeric
+scalar in a `.tfevents` artifact:
+
+```json
+{
+  "id": "val_loss",
+  "run_id": "tuned",
+  "name": "validation loss",
+  "value": 0.25,
+  "artifact_id": "events",
+  "locator": {"kind": "tensorboard", "tag": "loss/val", "step": 40, "occurrence": 0}
+}
+```
+
+`tag` is the exact event tag (1 to 4,096 code points and at most 4,096 UTF-8
+bytes; no normalization or glob), `step` is a signed 64-bit integer (an absent
+on-disk step is `0`), and `occurrence` is required: the zero-based position
+among supported scalars with that exact `(tag, step)` in file order. `kind`
+must match the artifact: `tensorboard` needs a basename containing
+`.tfevents`, case-insensitively. Any non-null 0.5 locator requires
+`artifact_id`. Unknown kinds, bad ranges, an empty tag, a lone surrogate, and
+a non-string/non-object locator are `schema-invalid` load refusals (exit `2`).
+
+The verifier is dependency-free and strict: TFRecord framing with masked
+CRC32C, a bounded protobuf subset (wire types 0/1/2/5, oneof/last-wins/merge
+semantics), rank-0 or rank-1[1] `DT_FLOAT`/`DT_DOUBLE` scalars in `tensor_content`
+or `float_val`/`double_val` form plus legacy `simple_value`, and a 16 MiB cap
+on the merged `summary` payload of one Event. Structural caps are per kind: a
+50 MiB file for JSON/JSONL/CSV and 128 MiB for TensorBoard, each verifier
+keeping its own cap on a shared snapshot. Two eligibility caps are per
+manifest and counted without reading files: 10,000 `tensorboard` results and
+16 MiB of tag metadata, independent of the csv-cell caps. A capped kind emits
+one `locator-unreadable` cap finding per eligible artifact, marks the artifact
+broken, and reads no scalar for that kind; other kinds on the same artifact
+still verify.
+
+Human output shows a tensorboard locator as
+`tensorboard:step=<step>,occurrence=<n>` and never the recorded tag; `--json`
+keeps the structured locator including `tag`. A finding never includes the
+tag, a scalar value, protobuf/CRC text or OS error text. Use
+`runevidence migrate PATH --to 0.5` to opt in: 0.3/0.4 sources get a
+version-only bump, 0.1/0.2 sources run the manifest-only locator precheck
+before any write (`LOCATOR_MIGRATION_UNSUPPORTED`), and 0.5 → 0.4/0.3/0.2 is
+`DOWNGRADE_UNSUPPORTED`. A 0.5-capable `init --force` refuses an existing 0.5
+manifest before writing (`INIT_0_5_REFUSAL`); a pre-0.5 binary backs it up and
+replaces it with 0.1, so keep 0.5 manifests away from older builds. The
+optional `packages/runevidence-tensorboard` adapter turns event files into
+one run, one artifact and one result per supported scalar, with fixed `tb-`
+ids and step-qualified names; an event artifact cannot be `--volatile`. The
+`schema` command still prints 0.1; the 0.5 schema is
+`schema/runevidence-0.5.schema.json`. Schemas 0.1-0.4 are unchanged and 0.4
+remains byte-frozen. See
+[docs/schema-0.5-tensorboard.md](docs/schema-0.5-tensorboard.md).
 
 ### Migrating a manifest to 0.2
 

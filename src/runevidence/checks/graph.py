@@ -13,7 +13,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ..findings import Code, Finding, Severity
-from ..models import SCHEMA_VERSION_0_4, Manifest, RelationshipType as T
+from ..models import (
+    SCHEMA_VERSION_0_4,
+    SCHEMA_VERSION_0_5,
+    Manifest,
+    RelationshipType as T,
+)
 
 ARTIFACT, RUN, RESULT, EVIDENCE, PROJECT = "artifact", "run", "result", "evidence", "project"
 
@@ -119,20 +124,29 @@ def _find_cycle(graph: dict[str, set[str]]) -> Optional[list[str]]:
 
 
 def check_graph(
-    manifest: Manifest, broken: set[str], *, unverified: set[str] | None = None
+    manifest: Manifest,
+    broken: set[str],
+    *,
+    unverified: set[str] | None = None,
+    capped: set[str] | None = None,
 ) -> list[Finding]:
     """``broken`` holds ids of artifacts/results already known to be bad
-    (missing, changed, value mismatch). Claims that rest on them are flagged."""
+    (missing, changed, value mismatch). Claims that rest on them are flagged.
+
+    ``capped`` names artifacts that received a per-manifest resource-cap
+    finding. On a 0.5 manifest a claim resting on one gets the cap-specific
+    hint; 0.3/0.4 hint bytes stay exactly as delivered."""
     kinds, findings = build_index(manifest)
     add = findings.append
-    # Only a 0.3/0.4 manifest can reach the unverified warning. A 0.4 source
-    # names its own version in the message; every earlier source keeps the
-    # delivered 0.3 bytes.
+    # Only a 0.3/0.4/0.5 manifest can reach the unverified warning. A 0.4 or
+    # 0.5 source names its own version in the message; every earlier source
+    # keeps the delivered 0.3 bytes.
     locator_schema = (
-        SCHEMA_VERSION_0_4
-        if manifest.schema_version == SCHEMA_VERSION_0_4
+        manifest.schema_version
+        if manifest.schema_version in (SCHEMA_VERSION_0_4, SCHEMA_VERSION_0_5)
         else "0.3"
     )
+    capped = capped or set()
 
     valid: list[Edge] = []
     for edge in collect_edges(manifest):
@@ -392,7 +406,13 @@ def check_graph(
                         f"Claim {ev.id!r} rests on evidence that is missing or changed: "
                         f"{', '.join(described)}"
                     ),
-                    hint=f"Claim: {ev.claim!r}",
+                    hint=(
+                        "a resource cap is not a change; narrow the manifest or "
+                        "raise the limit"
+                        if manifest.schema_version == SCHEMA_VERSION_0_5
+                        and any(ident in capped for ident in at_risk)
+                        else f"Claim: {ev.claim!r}"
+                    ),
                 )
             )
         elif supports[ev.id] and unverified and all(

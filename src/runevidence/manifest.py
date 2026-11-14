@@ -18,11 +18,14 @@ from .findings import Code, Finding, Severity
 from .models import (
     MANIFEST_FILENAME,
     SCHEMA_VERSION_0_4,
+    SCHEMA_VERSION_0_5,
     Artifact,
     CsvCellLocator,
     JsonlLocator,
     Manifest,
     Manifest04,
+    Manifest05,
+    TensorboardLocator,
 )
 
 
@@ -71,6 +74,7 @@ def _issue_category(error_type: str) -> str:
 _LOCATOR_TAGS: dict[str, type[BaseModel]] = {
     "jsonl": JsonlLocator,
     "csv-cell": CsvCellLocator,
+    "tensorboard": TensorboardLocator,
 }
 
 
@@ -271,18 +275,28 @@ def _is_resolution_loop(exc: RuntimeError) -> bool:
 def validate_manifest(raw: object) -> Manifest:
     """Validate decoded manifest data with the model its version requires.
 
-    Only ``schema_version == "0.4"`` dispatches to ``Manifest04``; every other
-    value keeps the historical base-model behavior (including its refusals).
+    Only ``schema_version == "0.4"`` dispatches to ``Manifest04`` and only an
+    explicit ``schema_version == "0.5"`` dispatches to ``Manifest05``; every
+    other value keeps the historical base-model behavior (including its
+    refusals).
     """
-    if isinstance(raw, dict) and raw.get("schema_version") == SCHEMA_VERSION_0_4:
-        return Manifest04.model_validate(raw)
+    if isinstance(raw, dict):
+        version = raw.get("schema_version")
+        if version == SCHEMA_VERSION_0_4:
+            return Manifest04.model_validate(raw)
+        if version == SCHEMA_VERSION_0_5:
+            return Manifest05.model_validate(raw)
     return Manifest.model_validate(raw)
 
 
 def _root_model_for(raw: object) -> type[BaseModel]:
     """The model whose fields an error location should be resolved against."""
-    if isinstance(raw, dict) and raw.get("schema_version") == SCHEMA_VERSION_0_4:
-        return Manifest04
+    if isinstance(raw, dict):
+        version = raw.get("schema_version")
+        if version == SCHEMA_VERSION_0_4:
+            return Manifest04
+        if version == SCHEMA_VERSION_0_5:
+            return Manifest05
     return Manifest
 
 
@@ -389,7 +403,7 @@ def artifact_to_dict(artifact: Artifact, schema_version: str = "0.1") -> dict:
     ``digest_format`` are omitted). ``dataset_id`` is 0.2+ and is emitted only
     when it was supplied; an omitted label stays omitted.
     """
-    if schema_version not in ("0.1", "0.2", "0.3", "0.4"):
+    if schema_version not in ("0.1", "0.2", "0.3", "0.4", "0.5"):
         raise ValueError(f"unsupported schema version {schema_version!r}")
     data = artifact.model_dump(mode="json", exclude_defaults=False)
     # Written only when set, so manifests from before the field existed

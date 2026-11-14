@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ..findings import Code, Finding, Severity
@@ -22,6 +22,7 @@ from ..locator_profiles import (
     ProfileError,
     _Failure,
     _raise_failure,
+    compare_tensorboard,
     compare_values,
     display_locator,
     parse_json_document,
@@ -29,16 +30,20 @@ from ..locator_profiles import (
 from ..models import (
     SCHEMA_VERSION_0_3,
     SCHEMA_VERSION_0_4,
+    SCHEMA_VERSION_0_5,
     CsvCellLocator,
     JsonlLocator,
     Manifest,
+    TensorboardLocator,
 )
+from ..tensorboard_events import EventFileError, ScalarOutcome, scan_scalars
 from .csv import (
     CsvNotNumeric,
     CsvNumberOverflow,
     CsvProfile,
     CsvProfileError,
 )
+from .files import TENSORBOARD_MAX_FILE_BYTES
 
 MAX_JSON_BYTES = 50 * 1024 * 1024
 _MISSING = object()
@@ -48,6 +53,18 @@ CSV_CELL_CAP_MESSAGE = (
     "16 MiB of header metadata); no CSV cell was read"
 )
 CSV_PROFILE_HINT = "the CSV artifact does not satisfy the strict csv-cell profile"
+TENSORBOARD_CAP_MESSAGE = (
+    "the manifest exceeds the tensorboard verification limit (10,000 entries or "
+    "16 MiB of tag metadata); no TensorBoard scalar was read"
+)
+TENSORBOARD_PROFILE_HINT = (
+    "the TensorBoard event file does not satisfy the strict profile"
+)
+
+
+def _tensorboard_path_matches(path: str) -> bool:
+    """RFC 4.4 TensorBoard predicate: basename contains ".tfevents"."""
+    return ".tfevents" in PurePosixPath(path.replace("\\", "/")).name.lower()
 
 
 def _is_index(token: str, size: int) -> bool:
@@ -105,6 +122,8 @@ def _extension_matches(artifact_path: str, locator: Any) -> bool:
         return lowered.endswith(".json")
     if isinstance(locator, CsvCellLocator):
         return lowered.endswith(".csv")
+    if isinstance(locator, TensorboardLocator):
+        return _tensorboard_path_matches(artifact_path)
     return lowered.endswith(".jsonl")
 
 
@@ -113,6 +132,8 @@ def _expected_extension(locator: Any) -> str:
         return ".json"
     if isinstance(locator, CsvCellLocator):
         return ".csv"
+    if isinstance(locator, TensorboardLocator):
+        return "TensorBoard event"
     return ".jsonl"
 
 
@@ -377,6 +398,70 @@ def _check_one_csv_cell(
     return findings, False
 
 
+def _check_one_tensorboard(
+    result, artifact_path: str, locator: TensorboardLocator, selection
+) -> tuple[list[Finding], bool]:
+    """Map one already-selected TensorBoard scalar to its fixed outcome."""
+    findings: list[Finding] = []
+    outcome = selection.outcome
+    if outcome is ScalarOutcome.mismatch:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_mismatch, "was not found",
+            )
+        )
+        return findings, True
+    if outcome is ScalarOutcome.unsupported_scalar:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unsupported_value,
+                "selects an unsupported scalar encoding",
+            )
+        )
+        return findings, True
+    if outcome is not ScalarOutcome.value:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unsupported_value, "selects an unsupported value",
+            )
+        )
+        return findings, True
+
+    matched = compare_tensorboard(
+        result.value, selection.value, float32=selection.float32
+    )
+    if matched is None:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unsupported_value, "selects an unsupported value",
+            )
+        )
+        return findings, True
+    if not matched:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.result_value_mismatch, "does not match the recorded value",
+            )
+        )
+        return findings, True
+    return findings, False
+
+
+def _locator_kind(locator: Any) -> str:
+    if isinstance(locator, TensorboardLocator):
+        return "tensorboard"
+    if isinstance(locator, CsvCellLocator):
+        return "csv-cell"
+    if isinstance(locator, JsonlLocator):
+        return "jsonl"
+    return "string"
+
+
 def check_targeted_results(
     manifest: Manifest,
     artifact,
@@ -384,8 +469,10 @@ def check_targeted_results(
     *,
     csv_cell_capped: bool = False,
     csv_cell_eligible: bool = False,
+    tensorboard_capped: bool = False,
+    tensorboard_eligible: bool = False,
 ) -> tuple[list[Finding], set[str], bool]:
-    """Validate and verify every 0.3/0.4 locator on one targeted artifact."""
+    """Validate and verify every 0.3/0.4/0.5 locator on one targeted artifact."""
     findings: list[Finding] = []
     broken: set[str] = set()
     results = _targeted_results(manifest, artifact.id)
@@ -393,11 +480,20 @@ def check_targeted_results(
         return findings, broken, False
 
     if target_check.state == "directory":
-        directory_hint = (
-            "Point the result at a single JSON, JSONL or CSV file artifact, or drop the locator."
-            if manifest.schema_version == SCHEMA_VERSION_0_4
-            else "Point the result at a single JSON/JSONL file artifact, or drop the locator."
-        )
+        if manifest.schema_version == SCHEMA_VERSION_0_5:
+            directory_hint = (
+                "Point the result at a single JSON, JSONL, CSV or TensorBoard event "
+                "file artifact, or drop the locator."
+            )
+        elif manifest.schema_version == SCHEMA_VERSION_0_4:
+            directory_hint = (
+                "Point the result at a single JSON, JSONL or CSV file artifact, or "
+                "drop the locator."
+            )
+        else:
+            directory_hint = (
+                "Point the result at a single JSON/JSONL file artifact, or drop the locator."
+            )
         for result in results:
             findings.append(
                 _locator_finding(
@@ -451,29 +547,83 @@ def check_targeted_results(
             broken.add(result.id)
             kind_broken.add(result.id)
 
-    # Capped path (RFC section 6.3): on a manifest over either eligibility
-    # limit, an eligible artifact in state ok/over-cap gets exactly one
-    # artifact-level cap finding and no cell is read. The kind findings above
-    # stay additive for non-csv-cell locators; missing/path/refused states
-    # returned before this point and get no cap.
-    if (
-        csv_cell_capped
-        and csv_cell_eligible
-        and target_check.state in ("ok", "over-cap")
-    ):
-        findings.append(
-            Finding(
-                code=Code.locator_unreadable,
-                severity=Severity.error,
-                subject=artifact.id,
-                path=artifact.path,
-                message=CSV_CELL_CAP_MESSAGE,
-                hint=None,
+    # Capped path (RFC section 7.2): a capped kind on an eligible artifact in
+    # state ok/over-cap gets exactly one artifact-level cap finding. Other
+    # kinds on the same artifact continue their own path; kind mismatches above
+    # stay additive and neither kind's cap suppresses the other.
+    capped_kinds: set[str] = set()
+    capped_artifact = False
+    if target_check.state in ("ok", "over-cap"):
+        if tensorboard_capped and tensorboard_eligible:
+            findings.append(
+                Finding(
+                    code=Code.locator_unreadable,
+                    severity=Severity.error,
+                    subject=artifact.id,
+                    path=artifact.path,
+                    message=TENSORBOARD_CAP_MESSAGE,
+                    hint=None,
+                )
             )
-        )
-        return findings, broken, True
+            capped_kinds.add("tensorboard")
+            capped_artifact = True
+        if csv_cell_capped and csv_cell_eligible:
+            findings.append(
+                Finding(
+                    code=Code.locator_unreadable,
+                    severity=Severity.error,
+                    subject=artifact.id,
+                    path=artifact.path,
+                    message=CSV_CELL_CAP_MESSAGE,
+                    hint=None,
+                )
+            )
+            capped_kinds.add("csv-cell")
+            capped_artifact = True
 
-    usable = [result for result in results if result.id not in kind_broken]
+    snapshot = target_check.snapshot if target_check.state == "ok" else None
+    data = snapshot.data if snapshot is not None else None
+    data_size = len(data) if data is not None else None
+    # Per-kind file cap: 128 MiB for tensorboard, 50 MiB for every other kind.
+    # A shared snapshot up to 128 MiB can still be over the 50 MiB cap for a
+    # string/jsonl/csv-cell result on the same artifact.
+    file_over_cap_128 = target_check.state == "over-cap" or (
+        data_size is not None and data_size > TENSORBOARD_MAX_FILE_BYTES
+    )
+    file_over_cap_50 = target_check.state == "over-cap" or (
+        data_size is not None and data_size > MAX_JSON_BYTES
+    )
+
+    usable: list = []
+    for result in results:
+        if result.id in kind_broken:
+            continue
+        kind = _locator_kind(result.locator)
+        if kind in capped_kinds:
+            continue
+        if kind == "tensorboard":
+            if file_over_cap_128:
+                findings.append(
+                    _value_error(
+                        result, artifact.path, result.locator,
+                        Code.locator_unreadable,
+                        "was not read because the artifact exceeds 128 MiB",
+                    )
+                )
+                broken.add(result.id)
+                continue
+        elif file_over_cap_50:
+            findings.append(
+                _value_error(
+                    result, artifact.path, result.locator,
+                    Code.locator_unreadable,
+                    "was not read because the artifact exceeds 50 MiB",
+                )
+            )
+            broken.add(result.id)
+            continue
+        usable.append(result)
+
     # ``edit.plan_rehash`` refuses the whole manifest when any object locator
     # exists, not only one on this artifact, so both no-digest branches use the
     # same manifest-wide predicate and wording.
@@ -506,7 +656,7 @@ def check_targeted_results(
                     hint=no_digest_hint,
                 )
             )
-        return findings, broken, False
+        return findings, broken, capped_artifact
 
     if target_check.state == "no-digest":
         for result in usable:
@@ -517,7 +667,7 @@ def check_targeted_results(
                 ).model_copy(update={"hint": no_digest_hint})
             )
             broken.add(result.id)
-        return findings, broken, False
+        return findings, broken, capped_artifact
 
     if target_check.state == "volatile":
         for result in usable:
@@ -530,28 +680,46 @@ def check_targeted_results(
                 )
             )
             broken.add(result.id)
-        return findings, broken, False
+        return findings, broken, capped_artifact
 
-    if target_check.state == "over-cap":
-        for result in usable:
-            findings.append(
-                _value_error(
-                    result, artifact.path, result.locator,
-                    Code.locator_unreadable, "was not read because the artifact exceeds 50 MiB",
-                )
+    if target_check.state != "ok" or snapshot is None or data is None:
+        return findings, broken, capped_artifact
+
+    # TensorBoard routing is before the JSONL line pre-scan: one scan per
+    # artifact supplies every tensorboard result. A structural refusal is
+    # per-kind and never stops string/jsonl/csv-cell results.
+    tensorboard_results = [
+        result for result in usable if isinstance(result.locator, TensorboardLocator)
+    ]
+    tensorboard_refused: set[str] = set()
+    selections = None
+    if tensorboard_results:
+        requests = [
+            (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
             )
-            broken.add(result.id)
-        return findings, broken, False
+            for result in tensorboard_results
+        ]
+        try:
+            selections = scan_scalars(data, requests)
+        except EventFileError:
+            for result in tensorboard_results:
+                finding = _value_error(
+                    result, artifact.path, result.locator,
+                    Code.locator_unreadable,
+                    "could not be read under the strict TensorBoard profile",
+                )
+                findings.append(
+                    finding.model_copy(update={"hint": TENSORBOARD_PROFILE_HINT})
+                )
+                broken.add(result.id)
+                tensorboard_refused.add(result.id)
 
-    if target_check.state != "ok" or target_check.snapshot is None:
-        return findings, broken, False
-
-    data = target_check.snapshot.data
-    if data is None:
-        return findings, broken, False
     values = _LocatorValues(data)
-    # The JSONL pre-scan accepts only JsonlLocator entries: a csv-cell has no
-    # ``line`` and is routed to the CSV pass below instead.
+    # The JSONL pre-scan accepts only JsonlLocator entries: a csv-cell or
+    # tensorboard result has no ``line`` and is routed to its own pass.
     selected_lines = [
         result.locator.line
         for result in usable
@@ -568,16 +736,31 @@ def check_targeted_results(
     if csv_results:
         try:
             # One strict whole-file pass per artifact, retaining only the
-            # requested data-row offsets and the parsed header.
+            # requested data-row offsets and the parsed header. The delivered
+            # profile takes bytes; a TensorBoard-raised snapshot is a bytearray,
+            # and this copy is bounded by the 50 MiB per-kind cap above.
+            csv_data = data if type(data) is bytes else bytes(data)
             csv_profile = CsvProfile(
-                data, rows=[result.locator.row for result in csv_results]
+                csv_data, rows=[result.locator.row for result in csv_results]
             )
         except CsvProfileError:
             # Structural refusal affects only csv-cell results; jsonl/string
             # results on the same artifact still compare normally.
             csv_profile = None
     for result in usable:
-        if isinstance(result.locator, CsvCellLocator):
+        if result.id in tensorboard_refused:
+            continue
+        if isinstance(result.locator, TensorboardLocator):
+            assert selections is not None
+            key = (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+            )
+            result_findings, failed = _check_one_tensorboard(
+                result, artifact.path, result.locator, selections[key]
+            )
+        elif isinstance(result.locator, CsvCellLocator):
             result_findings, failed = _check_one_csv_cell(
                 result, artifact.path, result.locator, csv_profile
             )
@@ -592,7 +775,7 @@ def check_targeted_results(
     # soon as this artifact's locators are done.
     del csv_profile
     del values
-    return findings, broken, False
+    return findings, broken, capped_artifact
 
 
 def check_results(
@@ -620,6 +803,7 @@ def check_results(
     has_locators = manifest.schema_version in (
         SCHEMA_VERSION_0_3,
         SCHEMA_VERSION_0_4,
+        SCHEMA_VERSION_0_5,
     )
 
     def unverifiable(res_id: str, msg: str) -> None:

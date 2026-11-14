@@ -340,21 +340,73 @@ def compare_values(recorded: Any, actual: Any) -> bool:
     return recorded == actual
 
 
+def compare_tensorboard(recorded: Any, actual: Any, *, float32: bool) -> bool | None:
+    """TensorBoard scalar comparator (slice D RFC section 5.4).
+
+    ``actual`` is a decoded Event scalar: always a float.  float32-origin
+    values (``simple_value`` and ``DT_FLOAT``) use ``rel_tol=1e-6`` and
+    float64-origin values (``DT_DOUBLE``) use ``rel_tol=1e-9``; both use
+    ``abs_tol=1e-12``.  An integer recorded value uses the same tolerance as
+    the actual value's origin and falls back to exact comparison when
+    ``math.isclose`` cannot convert it (``OverflowError``).  NaN equals NaN;
+    infinities equal only themselves; finite versus NaN/infinity is a
+    mismatch.
+
+    Returns ``True`` for a match, ``False`` for a mismatch, and ``None`` when
+    the recorded value's type is not representable as a TensorBoard scalar
+    (``str``, ``bool``, ``None`` or any other non-number), which the caller
+    maps to ``locator-unsupported-value``.  The delivered ``compare_values``
+    stays at its 0.3/0.4 ``1e-9`` tolerance.
+    """
+    if isinstance(recorded, bool) or not isinstance(recorded, (int, float)):
+        return None
+    recorded_nan = isinstance(recorded, float) and math.isnan(recorded)
+    actual_nan = isinstance(actual, float) and math.isnan(actual)
+    if recorded_nan or actual_nan:
+        return recorded_nan and actual_nan
+    recorded_infinite = isinstance(recorded, float) and math.isinf(recorded)
+    actual_infinite = isinstance(actual, float) and math.isinf(actual)
+    if recorded_infinite or actual_infinite:
+        return (
+            isinstance(recorded, float)
+            and isinstance(actual, float)
+            and recorded == actual
+        )
+    try:
+        return math.isclose(
+            recorded,
+            actual,
+            rel_tol=1e-6 if float32 else 1e-9,
+            abs_tol=1e-12,
+        )
+    except OverflowError:
+        return recorded == actual
+
+
 def display_locator(locator: Any, *, limit: int = 200) -> str:
     """A bounded, escaped display form; never used for parsing or identity.
 
     The ``#`` separator is part of the fixed prefix. Delimiter characters
     inside the user-supplied pointer are escaped so the rendered form cannot
     be confused with that prefix. A ``csv-cell`` locator is rendered as
-    ``csv-cell:<row>,<column>``: numbers only, never the recorded header."""
+    ``csv-cell:<row>,<column>``: numbers only, never the recorded header. A
+    ``tensorboard`` locator is rendered as
+    ``tensorboard:step=<step>,occurrence=<n>``: never the recorded tag."""
     if type(locator) is str:
         prefix, payload = "json#", locator
     elif isinstance(locator, dict):
         if locator.get("kind") == "csv-cell":
             return f"csv-cell:{locator.get('row')},{locator.get('column')}"
+        if locator.get("kind") == "tensorboard":
+            return (
+                f"tensorboard:step={locator.get('step')},"
+                f"occurrence={locator.get('occurrence')}"
+            )
         prefix, payload = f"jsonl:{locator.get('line')}#", str(locator.get('pointer', ''))
     elif getattr(locator, "kind", None) == "csv-cell":
         return f"csv-cell:{locator.row},{locator.column}"
+    elif getattr(locator, "kind", None) == "tensorboard":
+        return f"tensorboard:step={locator.step},occurrence={locator.occurrence}"
     else:
         prefix, payload = f"jsonl:{locator.line}#", str(locator.pointer)
     escaped = json.dumps(payload, ensure_ascii=True)[1:-1]
