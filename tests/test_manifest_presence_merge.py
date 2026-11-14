@@ -22,6 +22,7 @@ from runevidence.models import (
     Run,
     _presence_exclude,
     _presence_exclude_value,
+    _strip_none_false,
 )
 
 
@@ -587,6 +588,33 @@ def test_entry_false_leaf_overrides_all_and_keeps_the_field(json_mode):
     assert "params" not in data["runs"][0]
     assert "params" not in data["runs"][1]
     validate_manifest(data)
+
+
+@pytest.mark.parametrize("sub", [None, False])
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_nested_none_or_false_under_all_is_cleaned_recursively(sub, json_mode):
+    # The __all__ cleanup must recurse: a nested None/False leaf at a path the
+    # presence tree also touches would otherwise leave duplicate keys and make
+    # pydantic raise. The supplied nested field must stay.
+    manifest = validate_manifest(_nested_all_doc())
+    exclude = {
+        "runs": {"__all__": {"conditions": {"evaluation_protocol": sub}}}
+    }
+    data = _dump(manifest, json_mode, exclude=exclude)
+    assert [run["id"] for run in data["runs"]] == ["r0", "r1"]
+    assert data["runs"][0]["conditions"]["evaluation_protocol"] == {
+        "protocol_id": "p1"
+    }
+    assert data["runs"][1]["conditions"] == {}
+    validate_manifest(data)
+
+
+def test_strip_none_false_is_recursive():
+    # The helper must clean every depth; a shallow version leaves nested
+    # None/False leaves that can collide with a presence rule.
+    assert _strip_none_false(
+        {"a": {"b": None, "c": False, "d": True}, "e": None}
+    ) == {"a": {"d": True}}
 
 
 def test_large_uniform_list_dumps_without_unset_members():
