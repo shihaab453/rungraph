@@ -86,6 +86,7 @@ def _write(
     *,
     data: bytes = CSV,
     write_files: bool = True,
+    evidence: list[dict] | None = None,
 ) -> None:
     root.mkdir(parents=True, exist_ok=True)
     if write_files:
@@ -104,7 +105,7 @@ def _write(
         "runs": [{"id": "run", "name": "Run"}],
         "artifacts": artifacts if artifacts is not None else [_artifact()],
         "results": results,
-        "evidence": [],
+        "evidence": evidence or [],
     }
     (root / "runevidence.json").write_text(
         dump_manifest(Manifest04.model_validate(doc)), encoding="utf-8"
@@ -583,3 +584,18 @@ def test_absent_locator_0_4_is_result_unverified(tmp_path):
     )
     assert report.exit_code() == 0
     assert report.exit_code(strict=True) == 1
+
+
+def test_capped_artifact_propagates_claim_risk(tmp_path):
+    _write(
+        tmp_path,
+        _many_results(10_001),
+        evidence=[{"id": "claim", "claim": "tuned model", "supports": ["a-r0"]}],
+    )
+    report = _report(tmp_path)
+    assert len(_cap_findings(report)) == 1
+    at_risk = _finding(report, "claim-at-risk")
+    assert at_risk.subject == "claim"
+    assert at_risk.severity.value == "error"
+    # One cap finding only: no per-result locator finding accompanies it.
+    assert not [finding for finding in report.findings if finding.subject.startswith("r")]
