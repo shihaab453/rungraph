@@ -160,10 +160,13 @@ def _normalize_list_selection(spec: Any, values: list | tuple) -> Any:
     def normalized_index(key: Any) -> int | None:
         if type(key) is not int:
             return None
-        if key < 0:
-            candidate = length + key
-            return candidate if 0 <= candidate < length else None
-        return key
+        if length == 0:
+            # An empty list has no entry to address; pydantic ignores it.
+            return key
+        # Pydantic wraps out-of-range indices with Python's modulo, so
+        # normalize here too: the merge must agree with the serializer about
+        # which retained entry a caller spec addresses.
+        return key % length
 
     if isinstance(spec, (set, frozenset)):
         indices: set[Any] = set()
@@ -198,59 +201,6 @@ def _normalize_list_selection(spec: Any, values: list | tuple) -> Any:
     return spec
 
 
-def _selection_excludes_key(caller: Any, key: Any) -> bool:
-    if caller is True or caller is Ellipsis:
-        return True
-    if isinstance(caller, (set, frozenset)):
-        return key in caller
-    if isinstance(caller, dict):
-        direct = caller.get(key, _MISSING)
-        if direct is True or direct is Ellipsis:
-            return True
-        if direct is not _MISSING:
-            # An explicit partial spec retains the entry even with __all__ whole.
-            return False
-        every = caller.get("__all__", _MISSING)
-        return every is True or every is Ellipsis
-    return False
-
-
-def _nested_caller_spec(caller: Any, key: Any) -> Any:
-    """The caller exclusion applying to one retained field/entry."""
-    if not isinstance(caller, dict):
-        return _MISSING
-    direct = caller.get(key, _MISSING)
-    every = caller.get("__all__", _MISSING)
-    if direct is not _MISSING:
-        if every is True or every is Ellipsis or every is _MISSING:
-            # __all__ whole is overridden by an explicit partial retention.
-            return direct
-        return _merge_exclude_values(direct, every)
-    return every
-
-
-def _prune_presence(presence: Any, caller: Any) -> Any:
-    """Drop presence entries the caller already excludes wholly."""
-    if presence is None or caller is None:
-        return presence
-    if caller is True or caller is Ellipsis:
-        return None
-    if not isinstance(presence, dict):
-        return presence
-    out: dict[Any, Any] = {}
-    for key, value in presence.items():
-        if _selection_excludes_key(caller, key):
-            continue
-        nested = _nested_caller_spec(caller, key)
-        if isinstance(value, dict) and nested is not _MISSING:
-            pruned = _prune_presence(value, nested)
-            if pruned is not None:
-                out[key] = pruned
-        else:
-            out[key] = value
-    return out or None
-
-
 def _presence_exclude(model: BaseModel) -> Any:
     """An ``exclude`` tree for 0.2-only members that were never supplied.
 
@@ -276,11 +226,20 @@ def _presence_exclude_value(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         indices: dict[int, Any] = {}
         for index, item in enumerate(value):
-            if isinstance(item, BaseModel):
-                nested = _presence_exclude(item)
-                if nested is not None:
-                    indices[index] = nested
-        return indices or None
+            nested = _presence_exclude_value(item)
+            if nested is not None:
+                indices[index] = nested
+        if not indices:
+            return None
+        if len(indices) == len(value):
+            # Every entry carries the same nested exclusion. Pydantic's
+            # per-entry form collapses that to one rule. A per-index tree of
+            # the same size makes 2.6 serialization quadratic in the list
+            # length, so emit the uniform form whenever it is exact.
+            first = indices[0]
+            if all(nested == first for nested in indices.values()):
+                return {"__all__": first}
+        return indices
     return None
 
 
@@ -297,9 +256,48 @@ def _merge_exclude(caller: Any, presence: Any) -> Any:
     return _merge_exclude_values(caller, presence)
 
 
+def _spec_as_dict(spec: Any) -> dict[Any, Any] | None:
+    """A caller field/index spec as a dict, or None when it is not partial."""
+    if isinstance(spec, dict):
+        return dict(spec)
+    if isinstance(spec, (set, frozenset)):
+        return {key: True for key in spec}
+    return None
+
+
+def _caller_all_base(left_all: Any) -> Any:
+    """The caller's ``__all__`` spec as the base for one entry."""
+    if left_all is _MISSING or left_all is None or left_all is False:
+        return {}
+    if left_all is True or left_all is Ellipsis:
+        return {}
+    as_dict = _spec_as_dict(left_all)
+    return as_dict if as_dict is not None else {}
+
+
+def _caller_entry(left_all: Any, entry: Any) -> Any:
+    """One caller entry with ``__all__`` applied; the entry wins on its keys."""
+    if entry is None or entry is False:
+        return _caller_all_base(left_all)
+    if entry is True or entry is Ellipsis:
+        return True
+    base = _caller_all_base(left_all)
+    entry_dict = _spec_as_dict(entry)
+    if entry_dict is None:
+        return entry
+    base.update(entry_dict)
+    return base
+
+
 def _merge_exclude_values(left: Any, right: Any) -> Any:
     if left is True or right is True or left is Ellipsis or right is Ellipsis:
         return True
+    # A set containing ``__all__`` excludes every entry; pydantic does not let
+    # an index in the same set retain anything. Presence rules are irrelevant
+    # here, and merging a partial presence index beside ``__all__`` would turn
+    # it into a dict whitelist entry and keep a run the caller excluded.
+    if isinstance(left, (set, frozenset)) and "__all__" in left:
+        return {**{key: True for key in left}, "__all__": True}
     # A caller may pass False to keep a field. It selects nothing, so the
     # other side is the whole answer.
     if left is None or left is False:
@@ -307,13 +305,60 @@ def _merge_exclude_values(left: Any, right: Any) -> Any:
     if right is None or right is False:
         return left
     if isinstance(left, dict) and isinstance(right, dict):
-        merged = dict(left)
-        for key, value in right.items():
-            merged[key] = (
-                _merge_exclude_values(merged[key], value)
-                if key in merged
-                else value
+        left_all = left.get("__all__", _MISSING)
+        if left_all is True or left_all is Ellipsis:
+            # The caller lists exactly the entries to retain. Presence rules
+            # must apply to those entries but must not add entries of their own:
+            # a dict entry key under ``__all__: True`` is a retention whitelist,
+            # so merging an untouched presence index would keep a run the caller
+            # excluded. Fold the rule for each retained (already normalized)
+            # entry and leave the whitelist as written.
+            merged = dict(left)
+            right_all = right.get("__all__", _MISSING)
+            for key in left:
+                if key == "__all__":
+                    continue
+                current = merged[key]
+                if current is True or current is Ellipsis:
+                    continue
+                rule = (
+                    right_all
+                    if isinstance(right_all, (dict, set, frozenset))
+                    else right.get(key, _MISSING)
+                )
+                if rule is _MISSING:
+                    continue
+                merged[key] = _merge_exclude_values(current, rule)
+            return merged
+        right_all = right.get("__all__", _MISSING)
+        merged: dict[Any, Any] = {}
+        if left_all is not _MISSING or right_all is not _MISSING:
+            combined = _merge_exclude_values(
+                left_all if left_all is not _MISSING else None,
+                right_all if right_all is not _MISSING else None,
             )
+            if combined is not None and combined is not False:
+                merged["__all__"] = combined
+        keys = [key for key in left if key != "__all__"]
+        keys.extend(
+            key for key in right if key != "__all__" and key not in left
+        )
+        for key in keys:
+            caller_entry = left.get(key, _MISSING)
+            presence_rule = right.get(key, _MISSING)
+            if presence_rule is _MISSING and isinstance(
+                right_all, (dict, set, frozenset)
+            ):
+                presence_rule = right_all
+            if caller_entry is _MISSING:
+                base = _caller_all_base(left_all)
+            else:
+                base = _caller_entry(left_all, caller_entry)
+            if presence_rule is _MISSING:
+                if caller_entry is not _MISSING:
+                    merged[key] = base
+                continue
+            merged[key] = _merge_exclude_values(base, presence_rule)
         return merged
     if isinstance(left, dict):
         merged = dict(left)
@@ -347,10 +392,11 @@ class _Strict(BaseModel):
         if include is not None:
             kwargs["include"] = _normalize_selection(include, self)
 
-        presence = _presence_exclude(self)
-        if presence is not None and exclude is not None:
-            presence = _prune_presence(presence, exclude)
-        merged = _merge_exclude(exclude, presence)
+        # Presence rules are always merged, never pruned against the caller's
+        # spec: pydantic lets an explicit entry win over ``__all__`` on a shared
+        # key, so a caller partial spec must not be trusted to have dropped the
+        # rule. The merge folds the rule into every explicit entry.
+        merged = _merge_exclude(exclude, _presence_exclude(self))
         if merged is not None:
             kwargs["exclude"] = merged
         return kwargs
