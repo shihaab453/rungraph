@@ -23,9 +23,6 @@ from runevidence.checks import (
 from runevidence.checks import files as file_checks
 from runevidence.checks import results as result_checks
 from runevidence.checks.results import (
-    CSV_CELL_CAP_MESSAGE,
-    TENSORBOARD_CAP_MESSAGE,
-    TENSORBOARD_PROFILE_HINT,
     _extension_matches,
     _tensorboard_path_matches,
 )
@@ -60,6 +57,21 @@ import tensorboard_builder as tb
 MIB = 1024 * 1024
 EVENT_PATH = "events.tfevents"
 TAG = "loss/val"
+
+# Literal shipped texts. Do not import these from the implementation: a test
+# that compares a finding to the same module constant that produced it cannot
+# detect a changed message.
+TENSORBOARD_PROFILE_TEXT = (
+    "the TensorBoard event file does not satisfy the strict profile"
+)
+TENSORBOARD_CAP_TEXT = (
+    "the manifest exceeds the tensorboard verification limit (10,000 entries or "
+    "16 MiB of tag metadata); no TensorBoard scalar was read"
+)
+CSV_CELL_CAP_TEXT = (
+    "the manifest exceeds the csv-cell verification limit (10,000 entries or "
+    "16 MiB of header metadata); no CSV cell was read"
+)
 
 
 # --- helpers ---------------------------------------------------------------
@@ -383,7 +395,7 @@ def test_structural_refusal_is_per_result_with_the_fixed_hint(tmp_path):
     report = _report(tmp_path)
     assert _codes(report) == ["locator-unreadable", "locator-unreadable"]
     for finding in report.findings:
-        assert finding.hint == TENSORBOARD_PROFILE_HINT
+        assert finding.hint == TENSORBOARD_PROFILE_TEXT
         assert finding.message == (
             f"result {finding.subject!r} locator "
             "tensorboard:step=40,occurrence=0 could not be read under the "
@@ -405,7 +417,7 @@ def test_structural_refusal_never_stops_a_csv_result_on_the_same_artifact(tmp_pa
     assert _codes(report) == ["locator-unreadable"]
     finding = _finding(report, "locator-unreadable")
     assert finding.subject == "tb"
-    assert finding.hint == TENSORBOARD_PROFILE_HINT
+    assert finding.hint == TENSORBOARD_PROFILE_TEXT
     assert "csv-cell" not in finding.message
 
 
@@ -537,7 +549,7 @@ def test_10001_tensorboard_entries_emit_one_artifact_cap(tmp_path):
     assert finding.subject == "a"
     assert finding.path == EVENT_PATH
     assert finding.hint is None
-    assert finding.message == TENSORBOARD_CAP_MESSAGE
+    assert finding.message == TENSORBOARD_CAP_TEXT
 
 
 def test_tensorboard_tag_metadata_at_16_mib_is_uncapped(tmp_path):
@@ -554,7 +566,7 @@ def test_tensorboard_tag_metadata_one_byte_over_16_mib_is_capped(tmp_path):
     _write(tmp_path, _many_tb(4097, tag=tag), [_artifact(data=data)])
     report = _report(tmp_path)
     assert _codes(report) == ["locator-unreadable"]
-    assert report.findings[0].message == TENSORBOARD_CAP_MESSAGE
+    assert report.findings[0].message == TENSORBOARD_CAP_TEXT
 
 
 def test_cap_unit_is_utf8_bytes_not_code_points():
@@ -603,7 +615,7 @@ def test_csv_cell_and_tensorboard_caps_are_independent(tmp_path):
         for finding in report.findings
         if finding.code.value == "locator-unreadable"
     )
-    assert messages == sorted([CSV_CELL_CAP_MESSAGE, TENSORBOARD_CAP_MESSAGE])
+    assert messages == sorted([CSV_CELL_CAP_TEXT, TENSORBOARD_CAP_TEXT])
     assert {finding.subject for finding in report.findings} == {"a", "b"}
 
 
@@ -635,7 +647,7 @@ def test_tensorboard_cap_does_not_suppress_another_kind_or_a_kind_mismatch(tmp_p
     )
     report = _report(tmp_path)
     assert _codes(report).count("locator-unreadable") == 1
-    assert _finding(report, "locator-unreadable").message == TENSORBOARD_CAP_MESSAGE
+    assert _finding(report, "locator-unreadable").message == TENSORBOARD_CAP_TEXT
     kind = _finding(report, "locator-kind-mismatch")
     assert kind.subject == "jsonl"
     assert "needs a .jsonl artifact" in kind.message
@@ -652,7 +664,7 @@ def test_capped_artifact_propagates_claim_risk_with_the_cap_hint(tmp_path):
         evidence=[{"id": "claim", "claim": "tuned model", "supports": ["tb-0"]}],
     )
     report = _report(tmp_path)
-    assert len([f for f in report.findings if f.message == TENSORBOARD_CAP_MESSAGE]) == 1
+    assert len([f for f in report.findings if f.message == TENSORBOARD_CAP_TEXT]) == 1
     at_risk = _finding(report, "claim-at-risk")
     assert at_risk.severity.value == "error"
     assert at_risk.hint == (
