@@ -122,8 +122,9 @@ The snapshot is built with a protected open:
    artifact snapshot at a time (released after its locators are checked), capped at 50 MiB.
    **Over the cap:** the file check still streams the hash through the same protected open
    (integrity checking is never dropped by adding a locator), while each locator on the normal
-   path emits `locator-unreadable` because the value cannot be read under the profile cap; a
-   csv-cell-capped manifest emits one artifact-level cap finding instead.
+   path emits `locator-unreadable`; a csv-cell-capped artifact (eligible csv-cell entries in a
+   capped manifest) emits one cap finding instead, one per eligible artifact (including an
+   over-cap artifact).
 
 Verification means: the recorded digest equals the digest of the bytes parsed. The identity
 checks detect a path swap before opening and a replacement during the read; they do not
@@ -358,8 +359,9 @@ backslash; the csv-cell display is numbers only, and length is bounded.
 4. Snapshot: protected open for the initial hash, descriptor identity, path/FIFO swap
    before and during the read, containment, one snapshot per targeted artifact, streaming
    for others, aggregate memory, an explicit 60 MiB over-cap fixture (hash still checked,
-   locators `locator-unreadable` on the normal path; a csv-cell-capped manifest emits one
-   artifact-level cap finding), no cross-run cache.
+   locators `locator-unreadable` on the normal path; a csv-cell-capped artifact (eligible
+   csv-cell entries in a capped manifest) emits one cap finding, one per eligible artifact
+   (including an over-cap artifact)), no cross-run cache.
 5. Privacy: canaries for values, headers, pointer, absolute path, OS text; formula/terminal
    injection; legacy JSON echo documented.
 6. Version matrix: 0.1 fingerprints unchanged; v1 refuses 0.2 and 0.3; 0.1/0.2 checks

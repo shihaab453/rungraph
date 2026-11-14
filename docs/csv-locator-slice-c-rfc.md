@@ -1,14 +1,14 @@
-# CSV cell locators (`csv-cell`) — slice C design RFC (v0.30)
+# CSV cell locators (`csv-cell`) — slice C design RFC (v0.31)
 
 Status: **DESIGN PROPOSAL, REVISED AFTER FIFTEEN DESIGN PANEL ROUNDS AND A FINAL CONSISTENCY PASS. NOTHING IMPLEMENTED.
 NOTHING AUTHORIZED BY THIS DOCUMENT.** Acceptance authorizes only a separate implementation gate
 and the owner's schema-admission decision.
 
-## 0. Changes in v0.30 (errata applied)
+## 0. Changes in v0.31 (errata text aligned)
 
 - **Parent reissued**: `docs/verified-value-locators-rfc.md` is now v0.8
-  (`3a2fee0f779b382490a712a3e5c52a818de9035d90f7d21337442f8b83bb246d`); the pre-errata v0.7 was
-  `f04ecfc8…`.
+  (`090cb77c5bea6f8f635a64dca6abfd249f4357389eab07c8e969e0e42f69c85f`); the pre-errata v0.7 was
+  `f04ecfc8…`. Its over-cap sentences now match §9.4/§9.5 verbatim.
 - **Parent version corrected**: the parent contract (v0.7) is reissued as **v0.8**, not the
   slice-C revision number; every reference now says v0.8.
 - **The parent §5.2 bullet is quoted** (`Caps: file 50 MiB, …`) and replaced wholesale, keeping `file 50 MiB per artifact` and the units line, while making only the two
@@ -651,7 +651,7 @@ reused and is imprecise for a resource cap; this limitation is documented and ve
 ### 9.1 Parent v0.8 errata (authorized by §16)
 
 The parent document is **`docs/verified-value-locators-rfc.md`**, reissued as **v0.8**
-(`3a2fee0f779b382490a712a3e5c52a818de9035d90f7d21337442f8b83bb246d`; pre-errata v0.7 was
+(`090cb77c5bea6f8f635a64dca6abfd249f4357389eab07c8e969e0e42f69c85f`; pre-errata v0.7 was
 `f04ecfc8…`). It carries replacement text for:
 - §6: display `csv-cell:<row>,<column>`, no header;
 - §7: findings never echo the header assertion for `csv-cell`;
@@ -744,7 +744,7 @@ Replace that whole bullet with:
   codes, severities and exits are unchanged); both now apply to 0.3 and 0.4.
 - Replace the parent §6 display example `csv-cell:41,4@val_rmse` with `csv-cell:41,4` and change
   “Header and pointer components escape …” to “Pointer components escape …; the csv-cell display
-  is numbers only.”
+  is numbers only, and length is bounded.”
 - Replace the §8 migration sentence “refuses the **whole** migration before writing, listing the
   offending result IDs.” with “refuses the **whole** migration before writing. Migration never
   lists result IDs.”
@@ -753,7 +753,7 @@ Replace that whole bullet with:
 
 - §7: replace “They name the artifact-relative path, the escaped locator, the fixed code and the
   recorded assertion (header).” with “They name the artifact-relative path, the escaped locator,
-  the fixed code, and — for `jsonl`/string locators — the recorded assertion (pointer); a
+  the fixed code, and - for `jsonl`/string locators - the recorded assertion (pointer); a
   `csv-cell` finding never names the header.”
 - §4.1: replace “Only artifacts targeted by a 0.3 locator (string or object) get a retained
   in-memory snapshot.” with “Only artifacts targeted by a 0.3 or 0.4 locator (string, `jsonl` or
