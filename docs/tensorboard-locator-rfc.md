@@ -1,9 +1,9 @@
-# TensorBoard scalar locators — slice D design RFC (v0.3)
+# TensorBoard scalar locators — slice D design RFC (v0.4)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A design gate and an owner schema-admission decision (D2) are required before any code.
 
-## 0. Changes from v0.2 (round-2 findings)
+## 0. Changes from v0.3 (round-3 findings)
 
 - **Scalar classification is exclusive** and has an ordered selection table; a no-member or
   no-encoding value is classified; non-scalar uses `locator-unsupported-value` (parent §4.3).
@@ -23,6 +23,13 @@ A design gate and an owner schema-admission decision (D2) are required before an
 - **Adapter**: fixed texts for over-cap/truncated/unrepresentable tags, per-manifest budget,
   tag-free digest ids, `Run.name` rule, and a truthful 0.5 init refusal.
 - **Benchmark (c)** uses minimal scalar records and the wall bound is 30 s (CRC plus decode).
+- **Round-3 fixes**: every non-repeated, non-message field is last-wins (including
+  `tensor_content`, `tag`, `Dim.size`), last-present for merged messages, with oneof interleaving
+  after the last different member; supported shapes require `unknown_rank=false` and shape is
+  classified before encoding; the 16 MiB cap applies to the merged summary; 0.5 `model_dump`
+  preserves 0.2+ fields; parent errata are exact and complete (snapshot scope, gate 4, table row,
+  mismatch row); adapter runs are per event file with path-based ids and one name rule; adapter
+  failure strings and volatile-event refusal are quoted.
 
 ## 1. Problem and evidence
 
@@ -71,7 +78,8 @@ The dependency-free parser is security-relevant: its gate is bounds, caps, CRC a
 - `Manifest05`: `schema_version: Literal["0.5"]`, `results: list[Result05] =
   Field(default_factory=list)`, cross-field rule: any non-null locator requires `artifact_id`.
 - `_version_specific_shape` gains a 0.5 branch; the inherited `else` must never see a 0.5 locator.
-- `validate_manifest`, `is_manifest`, `model_dump`, `artifact_to_dict(..., "0.5")`,
+- `validate_manifest`, `is_manifest`, `model_dump` (0.5 joins the 0.2+ preservation branch so `conditions`, `dataset_id` and
+`metric_definition` survive), `artifact_to_dict(..., "0.5")`,
   `json_schema_0_5()` (`$id urn:runevidence:manifest:0.5`, root `Manifest05`, `$defs`
   `Result05`/`JsonlLocator`/`CsvCellLocator`/`TensorboardLocator`, hand-built `oneOf`,
   description overrides with no 0.3/0.4-only text, `if`/`then` artifact_id), written to
@@ -101,6 +109,7 @@ Unknown/missing kind is `schema-invalid`; `union_tag_*` locations append `/kind`
 | `step: 2**63` / `-2**63-1` | `less_than_equal` / `greater_than_equal` | `/results/0/locator/step` | `invalid_value` |
 | `occurrence: -1` / `2**31` | `greater_than_equal` / `less_than_equal` | `/results/0/locator/occurrence` | `invalid_value` |
 | empty `tag` | `string_too_short` | `/results/0/locator/tag` | `invalid_value` |
+| `tag` >4,096 code points | `string_too_long` | `/results/0/locator/tag` | `invalid_value` |
 | unknown kind | `union_tag_invalid` | `/results/0/locator/kind` | `invalid_value` |
 | missing kind | `union_tag_not_found` | `/results/0/locator/kind` | `missing_required` |
 | extra key | `extra_forbidden` | `None` | `invalid_value` |
@@ -128,6 +137,7 @@ predicate; no kind mismatch is invented.
 |---|---|
 | `models.py` | version const, `TensorboardLocator`, `Result05` + validator override, `Manifest05`, `_version_specific_shape` 0.5, `_LOCATOR_TAGS`, `json_schema_0_5`, `is_manifest`, `model_dump`, `artifact_to_dict` |
 | `manifest.py` | `validate_manifest`, `_root_model_for`, `_issue_location` (tag map, root forwarding), 0.5 `artifact_to_dict` |
+| `checks/files.py` | per-target snapshot cap chosen from kind eligibility, single-copy allocation from `os.fstat` on the protected descriptor, cap visible to the per-kind 50 MiB check |
 | `checks/__init__.py` | `_LOCATOR_SCHEMAS` includes 0.5; four targeted gates; `_csv_cell_cap` accepts 0.5; tensorboard cap pre-pass; per-artifact snapshot cap; per-kind callback/early-return discipline |
 | `checks/results.py` | `has_locators`, `_extension_matches`/`_expected_extension` (tensorboard basename), tensorboard route before the JSONL pre-scan, `_check_one_tensorboard`, per-kind structural/cap status, `display_locator`, 0.5 directory hint |
 | `checks/graph.py` | 0.5 `claim-unverified` text |
@@ -139,8 +149,9 @@ predicate; no kind mismatch is invented.
 ## 5. Event-file profile (D3)
 
 The file is read once through the protected snapshot; the same bytes are hashed and parsed. The
-snapshot is allocated **after** the stat size is checked against the per-kind cap; an over-cap
-file is stream-hashed without a snapshot. A short read is sliced; growth during the read is
+snapshot size is checked with `os.fstat` on the **opened protected descriptor** before
+allocation (a pre-open path stat could misclassify a shrink race); an over-cap file is
+stream-hashed without a snapshot. A short read is sliced; growth during the read is
 detected by the running total and, if it crosses the cap, becomes over-cap; profiles receive
 `bytes` or `bytearray`, never a `memoryview`.
 
@@ -151,8 +162,9 @@ detected by the running total and, if it crosses the cap, becomes over-cap; prof
 - Zero-length records are valid (empty `Event`) and skipped.
 - Truncated length/data, CRC mismatch, or trailing bytes after the last record are structural
   refusals. A record length over the remaining bytes is a structural refusal.
-- The file cap is checked before parsing; there is no per-record byte cap. The `summary` message
-  cap (§5.2) is what bounds decoding.
+- The file cap is checked before parsing; there is no per-record byte cap. The 16 MiB cap applies
+  to the **merged** `summary` payload of one Event (the sum of its `summary` occurrences, which
+  merge); it is what bounds decoding.
 - CRC32C is a table-driven core implementation; the benchmark records its cost.
 
 ### 5.2 Protobuf subset
@@ -166,19 +178,25 @@ Depth is bounded by the fixed schema (Event→Summary→Value→TensorProto→Te
 - `Event`: `wall_time` (1) ignored; `step` (2, int64; absent = 0); `what` is a oneof
   (`file_version` 3, `graph_def` 4, `summary` 5, `log_message` 6, `session_log` 7,
   `tagged_run_metadata` 8, `meta_graph_def` 9). `file_version` is not validated. Different
-  members replace; the losing member is skipped, never decoded or size-checked.
+  members replace; the losing member is skipped and never decoded or size-checked. If a
+  `summary` member is later replaced by another `what` field, its bytes are not decoded and the
+  16 MiB summary cap applies only to the winning summary; implementations may record its slice
+  while scanning.
 - `Summary`: `value` (1) repeated; repeated `summary` fields merge.
 - `Summary.Value`: `tag` (1) separate; the value member is a oneof (`simple_value` 2, obsolete
   histogram 3, `image` 4, `histo` 5, `audio` 6, `tensor` 8); `metadata` (9) ignored. Different
   members replace; a repeated winning member is merged (tensor fields merge).
 - `TensorProto`: `dtype` (1, enum `DT_FLOAT=1`, `DT_DOUBLE=2`; last-wins), `tensor_shape` (2,
-  merges), `tensor_content` (4, bytes; repeated concatenate; LE IEEE-754), `float_val` (5, packed
+  merges), `tensor_content` (4, singular bytes: last-wins across repeated fields and merged
+  tensors; LE IEEE-754), `float_val` (5, packed
   wire 2 or unpacked wire 5), `double_val` (6, packed wire 2 or unpacked wire 1). Packed length
   must be a multiple of 4/8.
 - `TensorShapeProto`: `dim` (2) repeated `Dim{size=1 int64, name=2}`; `unknown_rank` (3, bool).
   `Dim.size` absent means 0. Repeated shapes merge their dim lists.
-- Scalar singular fields (`step`, `dtype`, `unknown_rank`) last-wins; repeated fields append;
-  message fields merge; different oneof members replace.
+- Every non-repeated, non-message field (numeric, enum, string or bytes — including `step`,
+  `dtype`, `tag`, `Dim.size` and `tensor_content`) is last-wins. For a merged message that means
+  the last **present** value. Only repeated fields append; only message fields merge; different
+  oneof members replace, and only occurrences after the last different member merge.
 
 ### 5.3 Classification and selection
 
@@ -189,15 +207,20 @@ UTF-8 bytes at load.
 
 For one `Summary.Value`:
 
-1. **Supported scalar**: `simple_value` wins; or `tensor` wins with `DT_FLOAT`/`DT_DOUBLE`, shape
-   rank-0 (`dim` empty, `unknown_rank == false`) or rank-1 with one dim of size 1, and exactly one
-   encoding: `DT_FLOAT` = 4 content bytes XOR one `float_val`; `DT_DOUBLE` = 8 content bytes XOR
-   one `double_val`. Packed and unpacked both admitted; content is LE.
+Shape is classified first. A tensor is **scalar-shaped** only when `unknown_rank == false` and
+its shape is rank-0 (`dim` empty) or rank-1 with exactly one dim of size 1; every other shape is
+non-scalar regardless of dtype or encoding.
+
+1. **Supported scalar**: the winning oneof member is `simple_value`; or it is `tensor`, the
+   tensor is scalar-shaped, has
+   `DT_FLOAT`/`DT_DOUBLE`, and has exactly one encoding: `DT_FLOAT` = 4 content bytes XOR one
+   `float_val`, with no `double_val`; `DT_DOUBLE` = 8 content bytes XOR one `double_val`, with no
+   `float_val`. Packed and unpacked both admitted; content is LE.
 2. **Unsupported scalar**: scalar-shaped tensor with another dtype (half, bfloat16, int, string,
    out-of-int32 enum) or an ambiguous/absent encoding (non-empty content plus a `*_val`, wrong
    count, `float_val` on double or vice versa, empty content and no `*_val`).
-3. **Non-scalar**: winning member is histogram/image/audio, or shape is not rank-0/[1]
-   (`unknown_rank`, rank ≥2, rank-1 dim ≠1), or there is no winning value member.
+3. **Non-scalar**: winning member is histogram/image/audio, or the tensor is not scalar-shaped
+   (`unknown_rank == true`, rank ≥2, rank-1 dim ≠1), or there is no winning value member.
 4. **Malformed**: structural refusal.
 
 Selection:
@@ -237,7 +260,7 @@ Per-artifact structural caps (per-result `locator-unreadable`):
 |---|---|---|
 | file (json/jsonl/csv) | raw bytes | 50 MiB |
 | file (tensorboard) | raw bytes | 128 MiB |
-| `summary` message | decoded length | 16 MiB (larger refuses the file structurally) |
+| merged `summary` payload per Event | decoded length | 16 MiB (larger refuses the file structurally) |
 
 The locator `tag` cap is load-time only; event tags are byte-compared with no runtime cap.
 
@@ -329,6 +352,7 @@ Exact texts:
 - not found: `... was not found in {path!r}`
 - kind: `... needs a TensorBoard event artifact, not {path!r}`
 - over-cap: `was not read because the artifact exceeds {50|128} MiB`
+- value: `result {id!r} locator {display} does not match the recorded value in {path!r}`
 - directory hint 0.5: `Point the result at a single JSON, JSONL, CSV or TensorBoard event file
   artifact, or drop the locator.`
 - `result-unverified` 0.5: `result {id!r} has no locator in schema 0.5; its recorded value was not
@@ -356,28 +380,42 @@ Hints are `None` except structural, directory and the reused no-digest/volatile 
 Optional package `packages/runevidence-tensorboard`; core verification is unchanged if absent.
 
 - **Discovery**: every regular file is recorded as an artifact (generic behavior, so untracked
-  checks behave); event basenames (`.tfevents`) additionally produce scalar results. Zero event
-  files is not an error: artifacts only.
+  checks behave); non-event artifacts keep the generic adapter's ids, event artifacts use `tb-art-`.
+  Event basenames (`.tfevents`) additionally produce scalar results. Zero event files is not an
+  error: artifacts only.
 - **Selection v1**: all supported scalars, record order, then `Summary.Value` order. No `--tags`
   flag and no parser change. Tags that are absent/empty, invalid UTF-8, or longer than 4,096 UTF-8
   bytes cannot be represented; if any selected supported scalar has such a tag, the adapter raises
   `AdapterError` (nothing written). Plugin pseudo-scalars (e.g. a float placeholder from another
   plugin) are selected in v1; plugin filtering is later work.
 - **Strict profile during extract**: a truncated/over-cap (129 MiB)/malformed event file raises
-  `AdapterError` with a fixed message and writes nothing. No silent omission.
+  `AdapterError` with a fixed message and writes nothing. Exact texts:
+  - over-cap: `the event file exceeds the 128 MiB TensorBoard limit; nothing was written`
+  - profile: `the event file does not satisfy the strict TensorBoard profile; nothing was written`
+  - unrepresentable tag: `a scalar tag cannot be represented in schema 0.5; nothing was written`
+  - budget: `the selected TensorBoard scalars exceed the 10,000-result or 16 MiB tag limit;
+    nothing was written`
 - **Budget per manifest**: at most 10,000 tensorboard results and 16 MiB of tag bytes across all
   event files in one `init`; otherwise `AdapterError`, nothing written.
-- **Identity**:
-  - run id `tb-run-<16 hex of SHA-256(relative parent path)>`; run name is the parent POSIX path
-    when it is not `.`, else the file name.
-  - artifact id `tb-art-<16 hex of SHA-256(relative path)>`.
+- **Identity** (one run per event file, never per folder):
+  - artifact id `tb-art-<16 hex of SHA-256(relative file path)>`.
+  - run id `tb-run-<16 hex of SHA-256(relative file path)>`; run name is the file name
+    (`PurePosixPath(rel).name`) for root and nested files alike. Two event files in one folder are
+    two runs; disjoint tags never merge into a multi-file run.
   - result id `tb-res-<16 hex of SHA-256(run_id + NUL + tag + NUL + str(step) + NUL +
-    str(occurrence))>`; valid under `ID_PATTERN`, tag-free. A collision raises `AdapterError`.
+    str(occurrence))>`; valid under `ID_PATTERN`, tag-free. Identical tags in different files get
+    different ids through `run_id`. A collision raises `AdapterError`.
   - result name is the tag (recorded data; see §8).
 - **Interface**: `Adapter.discover/extract` signatures stay unchanged; the adapter returns
   `Manifest05`. No warning channel is added.
+- **Volatile event targets**: the adapter records event artifacts non-volatile. A `--volatile`
+  glob matching an event file raises `AdapterError` with `an event artifact cannot be volatile;
+  nothing was written` (otherwise every scalar would be `locator-unverified`).
 - **init --force**: a 0.5-capable binary refuses an existing 0.5 manifest with
-  `INIT_0_5_REFUSAL` (below); a pre-0.5 binary backs up and replaces it.
+  `INIT_0_5_REFUSAL` (below); a pre-0.5 binary backs up and replaces it. The frozen 0.4 refusal
+  text still says “regenerate it as schema 0.1”; with the TensorBoard adapter the regeneration
+  target would be 0.5, so the text is adapter-dependent and documented here; 0.4 bytes stay
+  frozen.
 
 ## 10. Compatibility, migration and CLI (D8)
 
@@ -389,7 +427,9 @@ Optional package `packages/runevidence-tensorboard`; core verification is unchan
 - `TARGET_VERSIONS` +0.5; `UNSUPPORTED_TARGET` becomes `only --to 0.2, --to 0.3, --to 0.4 or
   --to 0.5 is supported; downgrade and other versions are not available. Nothing was written.`
   `--to` help and migrate docstring move.
-- Conditions 0.5 text: `... schema 0.3, 0.4 and 0.5 have no downgrade path. Nothing was written.`
+- Conditions 0.5 text: `ERROR (UNSUPPORTED_VERSION): the conditions command requires an
+  explicit schema 0.2 manifest. A schema 0.1 manifest can be migrated with runevidence migrate
+  PATH --to 0.2; schema 0.3, 0.4 and 0.5 have no downgrade path. Nothing was written.`
 - `INIT_0_5_REFUSAL`: `ERROR: the existing manifest declares schema 0.5. init --force would
   regenerate the manifest and cannot carry over first-class values or locators. Nothing was
   written. Move the manifest aside, run init with the same adapter, then reapply the first-class
@@ -404,28 +444,33 @@ Optional package `packages/runevidence-tensorboard`; core verification is unchan
 
 ## 11. Parent contract errata → v0.9 (D9) — exact quotes
 
-Reissue `docs/verified-value-locators-rfc.md` as **v0.9**. Each item is a replacement of the
-quoted v0.8 text (whitespace-normalized; the docs tests pin these strings).
+Reissue `docs/verified-value-locators-rfc.md` as **v0.9**. Each item quotes the v0.8 text and its
+replacement exactly (whitespace-normalized); docs tests pin these strings.
 
 1. §4.1 memory sentence: replace “Aggregate memory is one artifact snapshot at a time (released
    after its locators are checked), capped at 50 MiB.” with “Aggregate memory is one artifact
    snapshot at a time (released after its locators are checked), capped at 50 MiB, or at 128 MiB
    when the artifact is targeted by a TensorBoard locator.”
-2. §4.1 over-cap sentence: replace “while each locator on the normal path emits
+2. §4.1 snapshot scope: replace “Only artifacts targeted by a 0.3 or 0.4 locator (string, `jsonl`
+   or `csv-cell`) get a retained in-memory snapshot.” with “Only artifacts targeted by a 0.3, 0.4
+   or 0.5 locator (string, `jsonl`, `csv-cell` or `tensorboard`) get a retained in-memory
+   snapshot.”
+3. §4.1 over-cap sentence: replace “while each locator on the normal path emits
    `locator-unreadable`; a csv-cell-capped artifact (eligible csv-cell entries in a capped
    manifest) emits one cap finding instead, one per eligible artifact (including an over-cap
    artifact).” with “while each locator on the normal path emits `locator-unreadable`; a capped
    artifact emits one cap finding per capped kind, one per eligible artifact and kind (including
    over-cap artifacts).”
-3. §4.2 step 4: replace “except on a csv-cell-capped artifact, where no value is compared” with
+4. §4.2 step 4: replace “except on a csv-cell-capped artifact, where no value is compared” with
    “except for a locator kind whose artifact is capped for that kind, where no value is compared”.
-4. §4.3 cap sentence: replace “A csv-cell-capped artifact emits at most one cap finding, alongside
+5. §4.3 cap sentence: replace “A csv-cell-capped artifact emits at most one cap finding, alongside
    any hash/size or kind finding; no value is compared.” with “A capped artifact emits at most one
    cap finding per capped kind, alongside any hash/size or kind finding; no value is compared for
    that kind, and other kinds on the same artifact still verify.”
-5. §4.3 table: insert `| TensorBoard scalar cap | locator-unreadable | error | 1 per eligible artifact and kind |`
-   and extend the non-scalar/unsupported row to “Recorded type / unsupported scalar / non-scalar”.
-6. §5.2 caps bullet: replace the exact v0.8 bullet
+6. §4.3 table: insert `| TensorBoard scalar cap | locator-unreadable | error | 1 |` and state below
+   the table “one per eligible artifact and kind”; extend the non-scalar/unsupported row to
+   “Recorded type / unsupported scalar / non-scalar”.
+7. §5.2 caps bullet: replace the exact v0.8 bullet
 
    > Caps: file 50 MiB per artifact; record 1 MiB, field 64 KiB, rows 1,000,000, columns 1,024 and
    > total cells 10,000,000 per artifact, never summed across artifacts; csv-cell locator results
@@ -439,17 +484,35 @@ quoted v0.8 text (whitespace-normalized; the docs tests pin these strings).
    summary-message cap; TensorBoard results and tag metadata are capped at 10,000 entries and
    16 MiB per manifest, counting only manifest-eligible entries (non-directory file whose
    basename contains `.tfevents`, a recorded sha256, and not volatile), without reading a file.”
-7. §5.4 comparator sentence: replace “**Comparator:** 0.3 and 0.4 locators (string, `jsonl` and
+8. §5.4 comparator sentence: replace “**Comparator:** 0.3 and 0.4 locators (string, `jsonl` and
    `csv-cell`) use a new comparator:” with “**Comparator:** 0.3 and 0.4 locators (string, `jsonl`
    and `csv-cell`) use a new comparator, and TensorBoard float32 scalars use `rel_tol=1e-6,
    abs_tol=1e-12` (float64 keeps `1e-9`):”.
-8. §6 display: replace “`csv-cell:41,4`). Pointer components escape …” with “`csv-cell:41,4`;
-   `tensorboard:step=40,occurrence=0`). Pointer components escape …”.
-9. §7 privacy: replace “a `csv-cell` finding never names the header.” with “a `csv-cell` finding
-   never names the header, and a `tensorboard` finding never names the tag.”
-10. §8 migration: add “A 0.3/0.4 manifest migrates to 0.5 as a version-only bump; 0.5 has no
+9. §6 display: replace the exact substring “`csv-cell:41,4`). Pointer components escape” with
+   “`csv-cell:41,4`; `tensorboard:step=40,occurrence=0`). Pointer components escape”.
+10. §7 privacy: replace “a `csv-cell` finding never names the header.” with “a `csv-cell` finding
+    never names the header, and a `tensorboard` finding never names the tag.”
+11. §8 migration: add “A 0.3/0.4 manifest migrates to 0.5 as a version-only bump; 0.5 has no
     downgrade.”
-11. §9 gates: add TensorBoard framing/CRC/protobuf vectors and the 50/128 MiB overlap vector.
+12. §9 gate 4: replace “locators `locator-unreadable` on the normal path; a csv-cell-capped
+    artifact (eligible csv-cell entries in a capped manifest) emits one cap finding, one per
+    eligible artifact (including an over-cap artifact)” with “locators `locator-unreadable` on the
+    normal path; a capped artifact emits one cap finding per capped kind, one per eligible
+    artifact and kind (including over-cap artifacts)”.
+13. §9 gates: add TensorBoard framing/CRC/protobuf vectors and the 50/128 MiB overlap vector.
+14. §1 status: replace “TensorBoard and other adapters remain later slices.” with “TensorBoard
+    scalar locators are specified by the slice D design RFC; other adapters remain later
+    slices.”
+15. §2 scope: replace “Out of scope: TensorBoard (separate RFC), computed/aggregate values, YAML
+    manifests,” with “Out of scope: computed/aggregate values, YAML manifests,”.
+16. §4.3 mismatch row: replace `| Line/row/column out of range | locator-mismatch (new) | error | 1 |`
+    with `| Line/row/column/occurrence out of range | locator-mismatch (new) | error | 1 |`.
+17. §9 gate 4 fixture: replace “an explicit 60 MiB over-cap fixture (hash still checked, locators
+    `locator-unreadable` on the normal path; a capped artifact emits one cap finding per capped
+    kind, one per eligible artifact and kind (including over-cap artifacts))” with “an explicit
+    60 MiB over-cap fixture for 50 MiB kinds and a 129 MiB fixture for TensorBoard targets (hash
+    still checked; normal-path locators `locator-unreadable`; a capped artifact emits one cap
+    finding per capped kind)”.
 
 ## 12. Verification plan
 
@@ -457,7 +520,8 @@ quoted v0.8 text (whitespace-normalized; the docs tests pin these strings).
   bytes; CRC mismatch; length over remaining; header-only and empty files; zero scalar entries.
 - **Protobuf**: field 0/invalid keys; varint bounds/sign; non-minimal; packed/unpacked
   `float_val`/`double_val`; LE content; duplicate singular last-wins; repeated summary/tensor/
-  shape merge; oneof replacement and losing members skipped; wrong wire type; depth by schema;
+  shape merge; oneof interleaving (merge only after the last different member); tensor-last after
+  simple_value; duplicate tag/Dim.size/tensor_content last-wins; wrong wire type; depth by schema;
   `Dim.size` default 0; out-of-int32 dtype.
 - **Classification**: rank-0/[1]; rank-2 `[[0.5]]`; no winning member; no encoding; both content
   and `*_val`; dtype/field mismatch; half/bfloat16/int/string; histogram/image/audio; mixed
@@ -469,15 +533,24 @@ quoted v0.8 text (whitespace-normalized; the docs tests pin these strings).
 - **Precedence**: directory, missing/path, kind, volatile/no-digest, per-kind over-cap, per-kind
   structural, capped, hash/size, value; mixed `.tfevents.csv` with valid CSV and invalid TFRecord;
   both kinds capped → two findings; cap + non-matching kind.
-- **Caps/memory**: 50/128 MiB; 16 MiB summary; 10,000/10,001 and 16 MiB tag edges; 4.4M minimal
-  scalar records in 127 MiB; multiple occurrences; many unrequested tags.
+- **Framing/protobuf**: two merged `summary` fields of 15 MiB each exceed the 16 MiB merged cap;
+  a 16 MiB summary of ~1.6M values stays inside the memory budget or hits an explicit value cap.
+- **Caps/memory**: 50/128 MiB; 16 MiB merged summary; 10,000/10,001 and 16 MiB tag edges; 4.4M
+  minimal scalar records in 127 MiB; a 16 MiB summary with ~1.6M tiny values (value-count or
+  memory cap); multiple occurrences; many unrequested tags.
 - **Privacy**: tag token distinct from names; absent from human outputs/findings, present in JSON;
   0.3/0.4 bytes.
 - **Migration/CLI**: 0.3/0.4→0.5 version-only; 0.1/0.2 precheck; downgrade; texts; init refusal;
-  fixtures 0.6.
+  fixtures 0.6; a 0.4→0.5 round-trip preserves `conditions`, `dataset_id` and
+  `metric_definition`; two event files in one folder and two root files produce distinct run and
+  result ids.
 - **Oracle/fuzz**: checked-in real TensorBoard fixtures (legacy, `tensor_content`, packed/unpacked
   `float_val`/`double_val`, graph record) with provenance and hashes, plus a test-only writer;
-  seeded framing/protobuf mutation fuzz with a closed refusal set; no parser/OS text.
+  seeded framing/protobuf mutation fuzz whose closed set is exactly the §7.3 codes and messages
+  (schema-invalid, dangling-reference, the slice-B artifact codes, locator-kind-mismatch,
+  locator-unverified, locator-no-digest, locator-unreadable, locator-mismatch,
+  locator-unsupported-value, result-value-mismatch, result-unverified, claim-unverified,
+  claim-at-risk, plus the cap/structural texts); no parser/OS text.
 - **Benchmarks** (`ubuntu-latest`, 4 vCPU/16 GiB, Python 3.12): (a) 10,000 scalar events, 10
   results; (b) 1M events near 100 MiB, 10 results; (c) 127 MiB of minimal scalar records (~30 B).
   Wall ≤30 s (CRC ~7.5 s + decode ~8.6 s measured), `VmHWM − baseline` ≤300 MB, Linux-only with
@@ -495,6 +568,9 @@ quoted v0.8 text (whitespace-normalized; the docs tests pin these strings).
   `wall_time`, `node_name`, `metadata` are ignored.
 - `tensor_content` is little-endian; unknown fields are skipped; non-minimal varints accepted.
 - Out-of-int32 dtype enums are unsupported scalars.
+- The 10th varint byte must be ≤0x01 (C++ protobuf truncates instead).
+- Losing oneof members are never validated (protobuf parses them and fails on malformed input).
+- A known field with the wrong wire type is refused (protobuf treats it as unknown).
 - Only float/double rank-0/[1] scalars are indexed; other shapes/dtypes are unsupported.
 - One file is one artifact; multi-file runs and tag filtering are out of scope.
 
