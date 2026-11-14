@@ -1,9 +1,23 @@
-# TensorBoard scalar locators — slice D design RFC (v0.6)
+# TensorBoard scalar locators — slice D design RFC (v0.7)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A design gate and an owner schema-admission decision (D2) are required before any code.
 
-## 0. Changes in v0.6 (round-5 findings)
+## 0. Changes in v0.7 (round-6 findings)
+
+- **Fixed-id reservation**: `tb-*` ids are reserved in `used` before generic allocation; generic
+  slugs suffix on any collision; only fixed-vs-fixed collisions are `AdapterError`.
+- **Errata**: item 5 now contains the per-artifact-per-kind cardinality (item 6 no longer claims
+  it); item 7 reads “16 MiB merged summary payload cap per Event”; items 26/27 add gate 6 and the
+  parent §4.2 race sentence.
+- **Fuzz seeds**: byte mutations recompute the digest; explicit wrong digest/size and manifest
+  variants define an exact reachable subset including hash/size; graph/dangling/claim/schema are
+  upper-bound only.
+- **Race boundary**: fstat > cap with EOF == cap is `artifact-changed`; only EOF > cap is
+  over-cap. One short-read wording; `checks/files.py` scoped to TensorBoard-raised snapshots.
+- **Hints/fence**: the `claim-at-risk` cap hint is listed; the INIT note is outside the fence.
+
+## 0.1 Changes in v0.6 (round-5 findings)
 
 - **Comparator scope**: parent errata cover 0.5 string/jsonl/csv-cell at 1e-9/1e-12; TensorBoard
   floats use 1e-6/1e-9 with abs 1e-12.
@@ -177,7 +191,7 @@ predicate; no kind mismatch is invented.
 | `models.py` | version const, `TensorboardLocator`, `Result05` + validator override, `Manifest05`, `_version_specific_shape` 0.5, `json_schema_0_5`, `is_manifest`, `model_dump` (0.5 in the 0.2+ preservation branch) |
 | `manifest.py` | `validate_manifest`, `_root_model_for`, `_LOCATOR_TAGS`, `_issue_location` (tag map, root forwarding), 0.5 `artifact_to_dict` |
 | `locator_profiles.py` / `run_fingerprint.py` | `display_locator` tensorboard branch; fingerprint 0.5 refusal |
-| `checks/files.py` | per-target snapshot cap chosen from kind eligibility, single-copy allocation from `os.fstat` on the protected descriptor, cap visible to the per-kind 50 MiB check |
+| `checks/files.py` | per-target snapshot cap chosen from kind eligibility, single-copy allocation from `os.fstat` on the protected descriptor (TensorBoard-raised snapshots only; 0.3/0.4 keep read-to-EOF), cap visible to the per-kind 50 MiB check |
 | `checks/__init__.py` | `_LOCATOR_SCHEMAS` includes 0.5; four targeted gates; `_csv_cell_cap` accepts 0.5; tensorboard cap pre-pass; per-artifact snapshot cap; per-kind callback/early-return discipline |
 | `checks/results.py` | `has_locators`, `_extension_matches`/`_expected_extension` (tensorboard basename), tensorboard route before the JSONL pre-scan, `_check_one_tensorboard`, per-kind structural/cap status, `display_locator`, 0.5 directory hint |
 | `checks/graph.py` | 0.5 `claim-unverified` text |
@@ -191,7 +205,7 @@ predicate; no kind mismatch is invented.
 The file is read once through the protected snapshot; the same bytes are hashed and parsed. The
 snapshot size is checked with `os.fstat` on the **opened protected descriptor** before
 allocation (a pre-open path stat could misclassify a shrink race); an over-cap file is
-stream-hashed without a snapshot. A short read is sliced; growth during the read is
+stream-hashed without a snapshot. A short read is truncated in place; growth during the read is
 detected by the running total. **This fstat sizing and growth/shrink rule applies only when a
 kind-eligible TensorBoard locator raises the cap to 128 MiB; 0.3/0.4 keep the delivered
 read-to-EOF behavior.** Size races:
@@ -203,7 +217,8 @@ read-to-EOF behavior.** Size races:
 | ≤ cap | > fstat but ≤ cap | `artifact-changed` |
 | ≤ cap | > cap | over-cap |
 | > cap | < cap | `artifact-changed` |
-| > cap | ≥ cap | over-cap |
+| > cap | > cap | over-cap |
+| > cap | == cap | `artifact-changed` |
 
 Profiles receive `bytes` or `bytearray`, never a `memoryview`; a short read is truncated in place
 (`del buf[n:]`), not copied.
@@ -422,7 +437,8 @@ Exact texts:
   checked`; `claim-unverified` 0.5: `Claim {id!r} cites only results with no locator in schema
   0.5; their recorded values were not checked`.
 
-Hints are `None` except structural, directory and the reused no-digest/volatile hints.
+Hints are `None` except structural, directory, the reused no-digest/volatile hints and the
+`claim-at-risk` cap hint.
 
 ## 8. Display and privacy (D6)
 
@@ -445,12 +461,11 @@ Optional package `packages/runevidence-tensorboard`; core verification is unchan
 - **Discovery**: every regular file other than RunEvidence's own manifest and backups is recorded
   as an artifact (generic behavior, so untracked checks behave); the TensorBoard predicate is exactly §4.4 (`name.lower()` contains `.tfevents`); non-event artifacts keep the generic adapter's ids and have no `run_id`, event
   artifacts use `tb-art-`. The adapter does **not** create `runs/<name>/` folder runs (the generic
-  adapter's folder-run convention is not inherited). All artifact ids are allocated over one
-  `used` set with the generic suffix rule, so a slug collision cannot silently duplicate; `tb-*`
-  ids never shrink or suffix. Generic file slugs are allocated in discovery order and suffixed on
-  a slug collision; `tb-art`/`tb-run`/`tb-res` are fixed and never suffixed. A fixed-id collision
-  raises `AdapterError` with `a generated id collides with an existing id; nothing was written`;
-  `duplicate-id` is not used.
+  adapter's folder-run convention is not inherited). **All fixed `tb-art`/`tb-run`/`tb-res` ids
+  are reserved in `used` before any generic allocation.** Generic file slugs are then allocated
+  in discovery order and suffixed on any collision (including a collision with a fixed id). Only
+  a fixed-vs-fixed collision (two event files hashing to the same id) raises `AdapterError` with
+  `a generated id collides with an existing id; nothing was written`; `duplicate-id` is not used.
   Event basenames (`.tfevents`) additionally produce scalar results. Zero event files is not an
   error: artifacts only.
 - **Selection v1**: all supported scalars, record order, then `Summary.Value` order. No `--tags`
@@ -515,7 +530,9 @@ Optional package `packages/runevidence-tensorboard`; core verification is unchan
   and cannot carry over first-class values or locators. Nothing was written. Move the manifest
   aside, run init, then run runevidence migrate PATH --to 0.5 (unless the adapter writes 0.5
   itself) and reapply the first-class values and locators.
-  ``` (0.4 keeps its frozen text.)
+  ```
+
+  (0.4 keeps its frozen text.)
 - `rehash`: string-only succeeds; any object locator (jsonl, csv-cell, tensorboard) refuses
   `LOCATOR_REFRESH_UNSUPPORTED`.
 - Comparability/fingerprint/conditions refuse 0.5; `schema` stays file/docs-only.
@@ -548,7 +565,8 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
 5. §4.3 cap sentence: replace “A csv-cell-capped artifact emits at most one cap finding, alongside
    any hash/size or kind finding; no value is compared.” with “A capped artifact emits at most one
    cap finding per capped kind, alongside any hash/size or kind finding; no value is compared for
-   that kind, and other kinds on the same artifact still verify.”
+   that kind, and other kinds on the same artifact still verify. There is one cap finding per
+   eligible artifact and kind.”
 6. §4.3 table: after the row
 
    ```
@@ -572,8 +590,6 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
    ```
    | Recorded type / unsupported scalar / non-scalar | `locator-unsupported-value` (new) | error | 1 |
    ```
-
-   The “one per eligible artifact and kind” cardinality is appended to item 5's replacement text.
 7. §5.2 caps bullet: replace the exact v0.8 bullet
 
    > Caps: file 50 MiB per artifact; record 1 MiB, field 64 KiB, rows 1,000,000, columns 1,024 and
@@ -584,8 +600,8 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
    > BOM counts) and the record cap uses raw record bytes after BOM strip, excluding the
    > terminator.
 
-   with the same text plus “A TensorBoard target uses a 128 MiB file cap and a 16 MiB
-   16 MiB merged summary payload per Event; TensorBoard results and tag metadata are capped at 10,000 entries and
+   with the same text plus “A TensorBoard target uses a 128 MiB file cap and a 16 MiB merged
+   summary payload cap per Event; TensorBoard results and tag metadata are capped at 10,000 entries and
    16 MiB per manifest, counting only manifest-eligible entries (non-directory file whose
    basename contains `.tfevents`, a recorded sha256, and not volatile), without reading a file.”
 8. §5.4 comparator: replace “**Comparator:** 0.3 and 0.4 locators (string, `jsonl` and
@@ -669,6 +685,10 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
 25. Header/status: replace “# Verified value locators: design RFC (v0.8)” with “# Verified value
     locators: design RFC (v0.9)” and “Status: **v0.8 ERRATA FOR SLICE C.**” with “Status:
     **v0.9 ERRATA FOR SLICE C AND SLICE D.**”.
+26. §9 gate 6: replace “v1 refuses 0.2 and 0.3” with “v1 refuses 0.2, 0.3, 0.4 and 0.5”, and
+    “old readers reject 0.3” with “old readers reject 0.3, 0.4 and 0.5”.
+27. §4.2 race sentence: after “`artifact-changed` is the only race signal.” add “The
+    TensorBoard-only size-race rows also classify a file that grew past its cap as over-cap.”.
 
 ## 12. Verification plan
 
@@ -714,17 +734,17 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
 - **Oracle/fuzz**: checked-in real TensorBoard fixtures (legacy, `tensor_content`, packed/unpacked
   `float_val`/`double_val`, graph record) with provenance and hashes, plus a test-only writer;
   seeded framing/protobuf mutation fuzz over the event reader and `check_targeted_results` (graph,
-  conditions and claim passes are excluded and covered by their own tests). Its closed set is the
-  §7.3 codes and messages
-  (schema-invalid, dangling-reference, the slice-B artifact codes, locator-kind-mismatch,
-  locator-unverified, locator-no-digest, locator-unreadable, locator-mismatch,
-  locator-unsupported-value, result-value-mismatch, result-unverified, claim-unverified,
-  claim-at-risk, `no-digest`, `directory-locator-unsupported`, plus the cap/structural texts).
-  The event-file corpus cannot reach directory or dangling codes; the set is an upper bound and
-  every emitted finding must be a member. The reachable subset is also asserted exactly:
-  `directory-locator-unsupported`, `locator-kind-mismatch`, the TensorBoard cap,
-  `no-digest`, `locator-no-digest`, `locator-unverified`, `locator-unreadable`,
-  `locator-mismatch`, `locator-unsupported-value`, `result-value-mismatch`. No parser/OS text.
+  conditions and claim passes are excluded and covered by their own tests). **Seed corpora:**
+  (i) byte mutations of a valid event file where the recorded sha256 is recomputed for every
+  generated artifact, so no incidental hash finding; (ii) explicit seeds with a wrong recorded
+  digest and a wrong size; (iii) manifest variants — missing artifact, volatile, digestless,
+  directory artifact, csv-cell kind mismatch, 10,001-entry cap, wrong value, unsupported scalar,
+  non-scalar. The closed set is the §7.3 codes and messages; the **exact reachable subset** is
+  `directory-locator-unsupported`, `locator-kind-mismatch`, the TensorBoard cap, `no-digest`,
+  `locator-no-digest`, `locator-unverified`, `locator-unreadable`, `locator-mismatch`,
+  `locator-unsupported-value`, `result-value-mismatch`, `hash-mismatch`, `size-mismatch`.
+  Graph/dangling/claim/schema codes are outside this harness (upper-bound members only). Every
+  emitted finding must be a member; no parser/OS text.
 - **Benchmarks** (`ubuntu-latest`, 4 vCPU/16 GiB, Python 3.12): (a) 10,000 scalar events, 10
   results; (b) 1M events near 100 MiB, 10 results; (c) 127 MiB of minimal scalar records (~30 B).
   Wall ≤30 s (CRC ~7.5 s + decode ~8.6 s measured), `VmHWM − baseline` ≤300 MB, Linux-only with
