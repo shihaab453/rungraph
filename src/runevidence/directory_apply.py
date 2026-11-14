@@ -55,8 +55,8 @@ from .directory_authoring import (
     propose_rehash_directory,
 )
 from .edit import EditError
-from .manifest import LoadedManifest, dump_raw, load_raw, save_raw
-from .models import DIRECTORY_DIGEST_FORMAT, Artifact, Manifest
+from .manifest import LoadedManifest, dump_raw, load_raw, save_raw, validate_manifest
+from .models import DIRECTORY_DIGEST_FORMAT, Artifact
 
 _FIELDS = frozenset(f.name for f in dataclasses.fields(DirectoryProposal))
 _MEASURED = ("sha256", "size_bytes")
@@ -206,7 +206,7 @@ def _pristine(loaded: LoadedManifest) -> dict:
     same = isinstance(loaded.path, Path) and loaded.path.is_absolute() and type(loaded.source_bytes) is bytes
     try:
         pristine = load_raw(loaded) if same else None
-        same = same and Manifest.model_validate(copy.deepcopy(pristine)) == loaded.manifest
+        same = same and validate_manifest(copy.deepcopy(pristine)) == loaded.manifest
     except (ValueError, ValidationError, TypeError):  # JSONDecodeError and UnicodeDecodeError are ValueErrors
         same = False
     if not same:

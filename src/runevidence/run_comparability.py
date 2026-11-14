@@ -53,7 +53,11 @@ from . import _experimental_comparability_bridge as bridge
 from . import comparability
 from . import manifest
 from .manifest import ManifestLoadError
-from .models import SCHEMA_VERSION_0_3
+from .models import SCHEMA_VERSION_0_3, SCHEMA_VERSION_0_4
+
+# Comparability is defined on the 0.1/0.2 recorded-condition projections.
+# Both later schemas refuse rather than compare silently.
+_UNSUPPORTED_COMPARABILITY_SCHEMAS = (SCHEMA_VERSION_0_3, SCHEMA_VERSION_0_4)
 
 __all__ = [
     "APPLICATION_STATUS",
@@ -591,9 +595,9 @@ def compare_paths(
     except Exception:
         return _internal_error()
 
-    if baseline_loaded.manifest.schema_version == SCHEMA_VERSION_0_3:
+    if baseline_loaded.manifest.schema_version in _UNSUPPORTED_COMPARABILITY_SCHEMAS:
         return _error_outcome(UNSUPPORTED_VERSION, "baseline")
-    if target_loaded.manifest.schema_version == SCHEMA_VERSION_0_3:
+    if target_loaded.manifest.schema_version in _UNSUPPORTED_COMPARABILITY_SCHEMAS:
         return _error_outcome(UNSUPPORTED_VERSION, "target")
 
     try:
@@ -882,9 +886,9 @@ def preflight_paths(
     if isinstance(target_loaded, PreflightOutcome):
         return target_loaded
 
-    if baseline_loaded.manifest.schema_version == SCHEMA_VERSION_0_3:
+    if baseline_loaded.manifest.schema_version in _UNSUPPORTED_COMPARABILITY_SCHEMAS:
         return _preflight_failure(EXIT_UNAVAILABLE, UNSUPPORTED_VERSION, "baseline")
-    if target_loaded.manifest.schema_version == SCHEMA_VERSION_0_3:
+    if target_loaded.manifest.schema_version in _UNSUPPORTED_COMPARABILITY_SCHEMAS:
         return _preflight_failure(EXIT_UNAVAILABLE, UNSUPPORTED_VERSION, "target")
 
     if baseline_result_id is None:

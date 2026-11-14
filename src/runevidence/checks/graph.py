@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ..findings import Code, Finding, Severity
-from ..models import Manifest, RelationshipType as T
+from ..models import SCHEMA_VERSION_0_4, Manifest, RelationshipType as T
 
 ARTIFACT, RUN, RESULT, EVIDENCE, PROJECT = "artifact", "run", "result", "evidence", "project"
 
@@ -125,6 +125,14 @@ def check_graph(
     (missing, changed, value mismatch). Claims that rest on them are flagged."""
     kinds, findings = build_index(manifest)
     add = findings.append
+    # Only a 0.3/0.4 manifest can reach the unverified warning. A 0.4 source
+    # names its own version in the message; every earlier source keeps the
+    # delivered 0.3 bytes.
+    locator_schema = (
+        SCHEMA_VERSION_0_4
+        if manifest.schema_version == SCHEMA_VERSION_0_4
+        else "0.3"
+    )
 
     valid: list[Edge] = []
     for edge in collect_edges(manifest):
@@ -397,7 +405,7 @@ def check_graph(
                     severity=Severity.warning,
                     subject=ev.id,
                     message=(
-                        f"Claim {ev.id!r} cites only results with no locator in schema 0.3; "
+                        f"Claim {ev.id!r} cites only results with no locator in schema {locator_schema}; "
                         "their recorded values were not checked"
                     ),
                     hint="Add locators to the supporting results or cite verified evidence.",

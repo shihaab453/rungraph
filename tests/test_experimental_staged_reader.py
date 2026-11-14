@@ -453,8 +453,9 @@ def test_reader_is_private_read_only_and_unreferenced():
     tree_ = ast.parse(text)
     imports = sorted((node.module or "", tuple(a.name for a in node.names)) for node in ast.walk(tree_)
                      if isinstance(node, ast.ImportFrom) and node.level == 1)
-    assert imports == [("", ("_experimental_versioned_manifest",)), ("manifest", ("LoadedManifest",)),
-                       ("models", ("Manifest",))]
+    assert imports == [("", ("_experimental_versioned_manifest",)),
+                       ("manifest", ("LoadedManifest", "validate_manifest")),
+                       ("models", ("is_manifest",))]
     names = ({n.attr for n in ast.walk(tree_) if isinstance(n, ast.Attribute)}
              | {n.id for n in ast.walk(tree_) if isinstance(n, ast.Name)})
     assert "read_staged_manifest" in names

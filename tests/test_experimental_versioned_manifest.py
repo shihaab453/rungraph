@@ -338,7 +338,7 @@ def test_no_public_route_or_production_writer_reference():
     tree = ast.parse(module)
     imports = [node for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
                and node.module == "manifest"]
-    assert [[name.name for name in node.names] for node in imports] == [["LoadedManifest"]]
+    assert [[name.name for name in node.names] for node in imports] == [["LoadedManifest", "validate_manifest"]]
     assert not any(isinstance(node, ast.Attribute) and node.attr in ("save_raw", "save_manifest", "replace")
                    for node in ast.walk(tree))
     choices = next(action.choices for action in cli.build_parser()._actions

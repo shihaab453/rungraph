@@ -21,8 +21,8 @@ from pathlib import Path
 from typing import Literal
 
 from . import _experimental_versioned_manifest as _stage
-from .manifest import LoadedManifest
-from .models import Manifest
+from .manifest import LoadedManifest, validate_manifest
+from .models import is_manifest
 
 Reason = Literal["stale-source", "invalid-stage", "missing", "busy", "fatal"]
 _STAGE_REASONS: dict[str, Reason] = {"invalid": "invalid-stage", "missing": "missing", "busy": "busy",
@@ -106,9 +106,9 @@ def _source_signature(source: Path) -> tuple[int, ...]:
 
 def _view(readback: _stage.StagedReadback, source: Path) -> LoadedManifest:
     # Revalidate the exact BLOB with the loader's parser and existing model contract.
-    if type(readback.source_bytes) is not bytes or type(readback.manifest) is not Manifest:
+    if type(readback.source_bytes) is not bytes or not is_manifest(readback.manifest):
         raise StagedReadError("invalid-stage", "stage", "readback-type")
-    model = Manifest.model_validate(json.loads(readback.source_bytes.decode("utf-8")))
+    model = validate_manifest(json.loads(readback.source_bytes.decode("utf-8")))
     if model != readback.manifest:
         raise StagedReadError("invalid-stage", "stage", "readback-model")
     return LoadedManifest(manifest=readback.manifest, path=source, source_bytes=readback.source_bytes)

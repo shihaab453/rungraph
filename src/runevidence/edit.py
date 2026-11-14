@@ -25,7 +25,7 @@ from .checks.graph import check_graph
 from .checks.results import _MISSING, MAX_JSON_BYTES, resolve_pointer, values_match
 from .findings import Code
 from .hashing import sha256_file
-from .manifest import LoadedManifest, artifact_to_dict
+from .manifest import LoadedManifest, artifact_to_dict, validate_manifest
 from .models import Artifact, Manifest, is_own_file
 
 GLOB_CHARS = set("*?[")
@@ -291,7 +291,7 @@ def plan_rehash(
         plan.claims = sorted(
             {f.subject for f in check_graph(manifest, accepted) if f.code is Code.claim_at_risk and f.subject}
         )
-    Manifest.model_validate(raw)  # our own edit must leave a valid manifest
+    validate_manifest(raw)  # our own edit must leave a valid manifest
     return plan
 
 
@@ -441,7 +441,7 @@ def plan_add(
         art = Artifact(**art_fields)
         plan.added.append(artifact_to_dict(art, schema_version=manifest.schema_version))
     raw.setdefault("artifacts", []).extend(plan.added)
-    Manifest.model_validate(raw)  # our own edit must leave a valid manifest
+    validate_manifest(raw)  # our own edit must leave a valid manifest
     return plan
 
 

@@ -799,6 +799,56 @@ def test_schema_0_3_is_unsupported_for_conditions_authoring(tmp_path):
     assert names(folder) == [MANIFEST]
 
 
+def test_schema_0_4_uses_the_schema_0_4_unsupported_text(tmp_path):
+    # 0.4 loads (csv-cell slice C), but conditions authoring remains 0.2-only.
+    folder = tmp_path / CANARY_PATH
+    path = write_manifest(folder, base_doc(version="0.4"))
+    before = disk_bytes(path)
+    patch = write_patch(tmp_path, json.dumps({"evaluation_split": "test"}))
+
+    code, out, err = _run_cli_captured(
+        ["conditions", str(folder), "--run", "r1", "--patch", patch, "--json"]
+    )
+
+    assert (code, err) == (2, "")
+    assert_error(out, "UNSUPPORTED_VERSION")
+    assert disk_bytes(path) == before
+
+    text_code, text_out, text_err = _run_cli_captured(
+        ["conditions", str(folder), "--run", "r1", "--clear", "environment"]
+    )
+    assert (text_code, text_err) == (2, "")
+    assert text_out == (
+        "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
+        "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
+        "runevidence migrate PATH --to 0.2; schema 0.3 and 0.4 have no downgrade path. "
+        "Nothing was written.\n"
+    )
+    assert str(folder) not in text_out
+    assert disk_bytes(path) == before
+    assert names(folder) == [MANIFEST]
+
+
+def test_schema_0_3_conditions_text_is_byte_identical(tmp_path):
+    folder = tmp_path / CANARY_PATH
+    path = write_manifest(folder, base_doc(version="0.3"))
+    before = disk_bytes(path)
+
+    code, out, err = _run_cli_captured(
+        ["conditions", str(folder), "--run", "r1", "--clear", "environment"]
+    )
+
+    assert (code, err) == (2, "")
+    assert out == (
+        "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
+        "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
+        "runevidence migrate PATH --to 0.2; schema 0.3 has no downgrade path. "
+        "Nothing was written.\n"
+    )
+    assert disk_bytes(path) == before
+    assert names(folder) == [MANIFEST]
+
+
 def test_zero_run_matches_is_run_selection_invalid(tmp_path):
     folder = tmp_path / CANARY_PATH
     path = write_manifest(folder, base_doc())

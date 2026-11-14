@@ -855,5 +855,6 @@ def test_apply_module_imports_only_what_it_needs():
         ".directory_authoring.DirectoryAuthoringError", ".directory_authoring.DirectoryProposal",
         ".directory_authoring.propose_add_directory", ".directory_authoring.propose_rehash_directory",
         ".edit.EditError", ".manifest.LoadedManifest", ".manifest.dump_raw", ".manifest.load_raw",
-        ".manifest.save_raw", ".models.DIRECTORY_DIGEST_FORMAT", ".models.Artifact", ".models.Manifest",
+        ".manifest.save_raw", ".manifest.validate_manifest",
+        ".models.DIRECTORY_DIGEST_FORMAT", ".models.Artifact",
     }

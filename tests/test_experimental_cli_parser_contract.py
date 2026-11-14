@@ -111,24 +111,26 @@ HISTORICAL_READER_HASHES = (
     # M9-COMPARABILITY-STAGE3B-2C1 (2026-11-11) 25-route reader-set assertion;
     # superseded by the Stage 3d-3 conditions 26-route reader test on 2026-11-11.
     "aa7eeedadb7495b80a8c551683d759c3195a62d39a3a22025450d2d763bee360",
+    # Slice C phase 4a (2026-11-14): the schema 0.4 dispatcher wiring updates
+    # this reader test's import assertion; superseded by the current pin.
+    "b08c530cb51befc74d23a049f46a4d22a924fbb146233086408b5d5642d9c9a1",
 )
 HISTORICAL_READER_DIGEST_23 = (
     "cb614ec86203f3845fb54e0c1f92f5f2af0d0e3ea1b294d77392b49284e0dde3"
 )
 # ---- CURRENT PROSPECTIVE PINS: M51 locator slice A, 2026-11-12 ----
-# Exact reviewed 26-route CLI bytes in LF and CRLF checkout forms: the accepted
-# S6 snapshot plus migrate --to 0.3 (additive; no downgrade) and the unchanged
-# 26-route surface. No route was added, removed or reordered. Each pin is an
-# exact byte SHA-256. Nothing is normalized during checking. Static != plugin
-# safety.
+# Exact reviewed 26-route CLI bytes in LF and CRLF checkout forms. Slice C
+# phase 4a (2026-11-14) adds migrate --to 0.4, version-keyed conditions text and
+# the init 0.4 refusal; the 26-route surface is unchanged. Each pin is an exact
+# byte SHA-256. Nothing is normalized during checking. Static != plugin safety.
 CLI_HASH = frozenset({
-    "b7893e1781a8dbfc941d0ed645226507c514614da31ac70e45743a64120c85d3",  # LF
-    "b662c103824193a18a2166b8cb522c59c8333fb91f9a36c8fd4ae8dcbdcd0b0d",  # CRLF
+    "f58dc371cd3b55cc02ad35fb9efa092aa95f0c43245ee5ae05d9ef4a6da0344f",  # LF
+    "1e94d6739c05d3e510fc513c433291e71088445c61c4c8700ad4a33d675a94a1",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.
 # Exactly one LF digest string: never a collection, no CRLF or historical alternative.
-READER_HASH = "b08c530cb51befc74d23a049f46a4d22a924fbb146233086408b5d5642d9c9a1"
+READER_HASH = "e02e60c2f2a1c893c73d32e1d59b3f3ea566ffd2e577f56d060239691c6ee5c4"
 # Exact registration order. Any missing, extra, duplicated or reordered route fails.
 ROUTES = ("validate", "validate-batch", "inspect", "compare", "comparability", "leaderboard", "matrix", "run", "claim",
           "lineage", "impact", "coverage", "coverage-gate", "fingerprint", "fingerprint-compare",
