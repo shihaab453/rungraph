@@ -488,6 +488,63 @@ def test_caller_all_and_entry_naming_the_same_field_keeps_it(json_mode):
     validate_manifest(data)
 
 
+def _nested_all_doc():
+    return {
+        "schema_version": "0.4",
+        "project": {"id": "p", "name": "P"},
+        "runs": [
+            {
+                "id": "r0",
+                "conditions": {
+                    "evaluation_protocol": {"protocol_id": "p1"},
+                    "source_revision": "abc",
+                },
+            },
+            {"id": "r1", "conditions": {}},
+        ],
+        "artifacts": [{"id": "a", "path": "metrics.csv"}],
+        "results": [],
+        "evidence": [],
+    }
+
+
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_nested_all_and_entry_merge_recursively(json_mode):
+    # __all__ excludes conditions.evaluation_protocol; entry 0 excludes
+    # conditions.source_revision. Both exclusions apply; one must not wipe the
+    # other. Plain pydantic drops both fields.
+    manifest = validate_manifest(_nested_all_doc())
+    data = _dump(
+        manifest,
+        json_mode,
+        exclude={
+            "runs": {
+                "__all__": {"conditions": {"evaluation_protocol": True}},
+                0: {"conditions": {"source_revision": True}},
+            }
+        },
+    )
+    assert [run["id"] for run in data["runs"]] == ["r0", "r1"]
+    assert "evaluation_protocol" not in data["runs"][0]["conditions"]
+    assert "source_revision" not in data["runs"][0]["conditions"]
+    validate_manifest(data)
+
+
+@pytest.mark.parametrize("sub", [None, False])
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_none_or_false_leaf_under_all_does_not_crash(sub, json_mode):
+    # A None/False leaf selects nothing. Copying it into a per-entry spec would
+    # duplicate the key under __all__ and the entry, which pydantic rejects.
+    manifest = validate_manifest(_nested_all_doc())
+    data = _dump(
+        manifest,
+        json_mode,
+        exclude={"runs": {"__all__": {"conditions": sub}}},
+    )
+    assert [run["id"] for run in data["runs"]] == ["r0", "r1"]
+    validate_manifest(data)
+
+
 def test_large_uniform_list_dumps_without_unset_members():
     # 2000 entries is enough to expose the quadratic 2.6 tree without making
     # the test itself a memory probe. The shape assertion is the regression

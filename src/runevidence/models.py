@@ -259,7 +259,13 @@ def _merge_exclude(caller: Any, presence: Any) -> Any:
 def _spec_as_dict(spec: Any) -> dict[Any, Any] | None:
     """A caller field/index spec as a dict, or None when it is not partial."""
     if isinstance(spec, dict):
-        return dict(spec)
+        # None/False select nothing; keeping them would duplicate a leaf under
+        # __all__ and the entry, which pydantic rejects.
+        return {
+            key: value
+            for key, value in spec.items()
+            if value is not None and value is not False
+        }
     if isinstance(spec, (set, frozenset)):
         return {key: True for key in spec}
     return None
@@ -275,6 +281,43 @@ def _caller_all_base(left_all: Any) -> Any:
     return as_dict if as_dict is not None else {}
 
 
+def _merge_all_entry(base: Any, entry: Any) -> Any:
+    """Merge a caller entry into ``__all__`` the way pydantic does.
+
+    The entry wins on a leaf it names, but a nested dict merges recursively:
+    excluding ``conditions.evaluation_protocol`` under ``__all__`` and
+    ``conditions.source_revision`` on one entry keeps both exclusions.
+    """
+    if entry is True or entry is Ellipsis:
+        return True
+    if entry is None or entry is False:
+        return base
+    if base is _MISSING:
+        return entry
+    if isinstance(base, dict) and isinstance(entry, dict):
+        out = dict(base)
+        for key, value in entry.items():
+            out[key] = (
+                _merge_all_entry(out[key], value) if key in out else value
+            )
+        return out
+    if isinstance(base, (set, frozenset)) and isinstance(entry, dict):
+        out = {key: True for key in base}
+        for key, value in entry.items():
+            out[key] = (
+                _merge_all_entry(out[key], value) if key in out else value
+            )
+        return out
+    if isinstance(base, dict) and isinstance(entry, (set, frozenset)):
+        out = dict(base)
+        for key in entry:
+            out[key] = True
+        return out
+    if isinstance(base, (set, frozenset)) and isinstance(entry, (set, frozenset)):
+        return set(base) | set(entry)
+    return entry
+
+
 def _caller_entry(left_all: Any, entry: Any) -> Any:
     """One caller entry with ``__all__`` applied; the entry wins on its keys."""
     if entry is None or entry is False:
@@ -285,8 +328,12 @@ def _caller_entry(left_all: Any, entry: Any) -> Any:
     entry_dict = _spec_as_dict(entry)
     if entry_dict is None:
         return entry
-    base.update(entry_dict)
-    return base
+    if not isinstance(base, dict):
+        return entry
+    out = dict(base)
+    for key, value in entry_dict.items():
+        out[key] = _merge_all_entry(out[key], value) if key in out else value
+    return out
 
 
 def _merge_exclude_values(left: Any, right: Any) -> Any:
@@ -333,9 +380,19 @@ def _merge_exclude_values(left: Any, right: Any) -> Any:
         right_all = right.get("__all__", _MISSING)
         merged: dict[Any, Any] = {}
         if left_all is not _MISSING or right_all is not _MISSING:
+            left_spec = (
+                _spec_as_dict(left_all)
+                if isinstance(left_all, dict)
+                else left_all
+            )
+            right_spec = (
+                _spec_as_dict(right_all)
+                if isinstance(right_all, dict)
+                else right_all
+            )
             combined = _merge_exclude_values(
-                left_all if left_all is not _MISSING else None,
-                right_all if right_all is not _MISSING else None,
+                left_spec if left_spec is not _MISSING else None,
+                right_spec if right_spec is not _MISSING else None,
             )
             if combined is not None and combined is not False:
                 merged["__all__"] = combined
