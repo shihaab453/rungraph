@@ -5,7 +5,7 @@ Stage 2b acceptance evidence is recorded in
 `docs/comparability-stage2b-pin-refresh.md`.
 Date: 2026-11-11.
 Supersedes the Stage 2 sketch in `docs/comparability-integration-rfc.md` v0.2.
-Panel: two independent GPT-6.1 Sol reviews (Claude usage exhausted). Both returned
+Panel: two independent reviews (a third seat's usage was exhausted). Both returned
 REQUIRE CHANGES; this document incorporates every blocking condition.
 
 ## 1. Decision

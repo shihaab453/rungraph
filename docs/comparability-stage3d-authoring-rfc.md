@@ -7,7 +7,7 @@ conditions authoring RFC
 v0.3](https://github.com/shihaab453/rungraph/blob/main/docs/comparability-stage3d3-conditions-rfc.md);
 3d-4 (preflight) remains deferred. The contract text below is unchanged.
 
-Revision: v0.4 (2026-11-11). Changelog: closes the Sol A blocker by specifying the
+Revision: v0.4 (2026-11-11). Changelog: closes review blocker A by specifying the
 `save_raw` commit/cleanup invariant (Option A), making a committed replacement whose only
 later error is cleanup a success, and aligning the failure contract, stage table,
 envelope/exit text, 3d-2 file scope and regression tests. All v0.3 corrections remain.

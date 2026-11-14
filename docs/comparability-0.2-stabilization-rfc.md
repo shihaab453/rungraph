@@ -204,7 +204,7 @@ Re-run `examples/comparability-recorded`, `examples/comparability-recorded-0.2`,
 
 ## 11. Gates
 
-1. This RFC accepted by Sol + Opus.
+1. This RFC accepted by the review panel.
 2. Traceability table complete; every clause has named evidence, including CLI-level rows
    12 and 13 and the preflight/verdict agreement row.
 3. Preflight golden output, caps/truncation, both-or-neither, unknown IDs, exit matrix
