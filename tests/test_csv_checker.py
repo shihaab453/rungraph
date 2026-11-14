@@ -599,3 +599,16 @@ def test_capped_artifact_propagates_claim_risk(tmp_path):
     assert at_risk.severity.value == "error"
     # One cap finding only: no per-result locator finding accompanies it.
     assert not [finding for finding in report.findings if finding.subject.startswith("r")]
+
+
+def test_0_4_directory_hint_names_csv(tmp_path):
+    _write(
+        tmp_path,
+        [_result(locator=_cell(1, 1, "v"))],
+        [_artifact(path="data", artifact_type="directory")],
+    )
+    report = _report(tmp_path)
+    finding = _finding(report, "directory-locator-unsupported")
+    assert finding.hint == (
+        "Point the result at a single JSON, JSONL or CSV file artifact, or drop the locator."
+    )
