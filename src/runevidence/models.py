@@ -259,16 +259,33 @@ def _merge_exclude(caller: Any, presence: Any) -> Any:
 def _spec_as_dict(spec: Any) -> dict[Any, Any] | None:
     """A caller field/index spec as a dict, or None when it is not partial."""
     if isinstance(spec, dict):
-        # None/False select nothing; keeping them would duplicate a leaf under
-        # __all__ and the entry, which pydantic rejects.
-        return {
-            key: value
-            for key, value in spec.items()
-            if value is not None and value is not False
-        }
+        return dict(spec)
     if isinstance(spec, (set, frozenset)):
         return {key: True for key in spec}
     return None
+
+
+_DROP = object()
+
+
+def _strip_none_false(spec: Any) -> Any:
+    """Remove None/False leaves from an ``__all__`` spec, recursively.
+
+    Those leaves select nothing. If an entry or the presence tree carries the
+    same path, leaving them under ``__all__`` makes pydantic reject the
+    duplicate key. Explicit entries are never stripped: there None/False means
+    "keep this key" and overrides ``__all__``.
+    """
+    if spec is None or spec is False:
+        return _DROP
+    if isinstance(spec, dict):
+        out: dict[Any, Any] = {}
+        for key, value in spec.items():
+            cleaned = _strip_none_false(value)
+            if cleaned is not _DROP:
+                out[key] = cleaned
+        return out
+    return spec
 
 
 def _caller_all_base(left_all: Any) -> Any:
@@ -278,7 +295,10 @@ def _caller_all_base(left_all: Any) -> Any:
     if left_all is True or left_all is Ellipsis:
         return {}
     as_dict = _spec_as_dict(left_all)
-    return as_dict if as_dict is not None else {}
+    if as_dict is None:
+        return {}
+    cleaned = _strip_none_false(as_dict)
+    return cleaned if isinstance(cleaned, dict) else {}
 
 
 def _merge_all_entry(base: Any, entry: Any) -> Any:
@@ -291,7 +311,9 @@ def _merge_all_entry(base: Any, entry: Any) -> Any:
     if entry is True or entry is Ellipsis:
         return True
     if entry is None or entry is False:
-        return base
+        # The entry names this key and keeps it. Returning the value (rather
+        # than dropping the key) is what makes pydantic override __all__.
+        return entry
     if base is _MISSING:
         return entry
     if isinstance(base, dict) and isinstance(entry, dict):
@@ -321,6 +343,8 @@ def _merge_all_entry(base: Any, entry: Any) -> Any:
 def _caller_entry(left_all: Any, entry: Any) -> Any:
     """One caller entry with ``__all__`` applied; the entry wins on its keys."""
     if entry is None or entry is False:
+        # An explicit None/False entry keeps the entry; it names no field, so
+        # __all__ still applies to fields the entry does not override.
         return _caller_all_base(left_all)
     if entry is True or entry is Ellipsis:
         return True
@@ -381,7 +405,7 @@ def _merge_exclude_values(left: Any, right: Any) -> Any:
         merged: dict[Any, Any] = {}
         if left_all is not _MISSING or right_all is not _MISSING:
             left_spec = (
-                _spec_as_dict(left_all)
+                _strip_none_false(left_all)
                 if isinstance(left_all, dict)
                 else left_all
             )
@@ -409,6 +433,10 @@ def _merge_exclude_values(left: Any, right: Any) -> Any:
                 presence_rule = right_all
             if caller_entry is _MISSING:
                 base = _caller_all_base(left_all)
+            elif left_all is _MISSING or left_all is None or left_all is False:
+                # No __all__ here: keep the caller's leaf exactly, including
+                # None/False (which mean "keep") and nested dicts.
+                base = caller_entry
             else:
                 base = _caller_entry(left_all, caller_entry)
             if presence_rule is _MISSING:

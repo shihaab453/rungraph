@@ -542,6 +542,50 @@ def test_none_or_false_leaf_under_all_does_not_crash(sub, json_mode):
         exclude={"runs": {"__all__": {"conditions": sub}}},
     )
     assert [run["id"] for run in data["runs"]] == ["r0", "r1"]
+    # A None/False leaf selects nothing: conditions stay, with the nested
+    # fields the run supplied.
+    assert data["runs"][0]["conditions"]["evaluation_protocol"] == {
+        "protocol_id": "p1"
+    }
+    assert data["runs"][0]["conditions"]["source_revision"] == "abc"
+    assert data["runs"][1]["conditions"] == {}
+    validate_manifest(data)
+
+
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_explicit_none_entry_in_whitelist_retains_it(json_mode):
+    # Under __all__: True an explicit None entry keeps that entry (pydantic
+    # semantics); the presence merge must not drop it.
+    manifest = validate_manifest(_mixed_runs_doc())
+    data = _dump(
+        manifest,
+        json_mode,
+        exclude={"runs": {"__all__": True, 1: None}},
+    )
+    assert [run["id"] for run in data["runs"]] == ["r1"]
+    validate_manifest(data)
+
+
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_entry_false_leaf_overrides_all_and_keeps_the_field(json_mode):
+    # The entry names `name` and sets False, so it wins over __all__ and the
+    # field is kept on that entry only.
+    manifest = validate_manifest(_mixed_runs_doc())
+    data = _dump(
+        manifest,
+        json_mode,
+        exclude={
+            "runs": {
+                "__all__": {"name", "params"},
+                1: {"name": False},
+            }
+        },
+    )
+    assert [run["id"] for run in data["runs"]] == ["r0", "r1"]
+    assert "name" not in data["runs"][0]
+    assert data["runs"][1]["name"] is None
+    assert "params" not in data["runs"][0]
+    assert "params" not in data["runs"][1]
     validate_manifest(data)
 
 
