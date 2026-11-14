@@ -242,7 +242,9 @@ def test_0_5_locator_diagnostics(
     )
     assert _issue_category(error["type"]) == category
 
-    path = write_doc(tmp_path, document, f"{name}.json")
+    # Windows rejects "*" in a filename, and several diagnostic ids contain
+    # "2**63"/"2**31"; each parametrization has its own tmp_path.
+    path = write_doc(tmp_path, document, "diagnostic.json")
     with pytest.raises(ManifestLoadError) as load_error:
         load_manifest(path)
     (finding,) = load_error.value.findings
