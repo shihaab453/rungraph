@@ -145,7 +145,7 @@ file as missing **and** points at where it is now:
 `hint: A file matching it exists at 'data/train.csv'; update the path to that.`
 The same warning and relocation hint apply to that drive spelling in a
 locator-less 0.1/0.2 manifest even on Linux: it is still read relative to the
-manifest folder, never the current directory. An artifact named by a 0.3
+manifest folder, never the current directory. An artifact named by a 0.3 or 0.4
 locator is read through the protected snapshot instead, which reports
 `missing-file` and never opens a lookalike file it was not told about.
 
@@ -581,7 +581,7 @@ absent locator in 0.3 is `result-unverified` (warning). CSV/`csv-cell` is not
 part of slice B; schema 0.4 adds it (see below). Schemas 0.1 and 0.2 are
 unchanged. See [docs/schema-0.3-locators.md](docs/schema-0.3-locators.md).
 
-Only artifacts named by a 0.3 locator use the protected snapshot. All other
+Only artifacts named by a 0.3 or 0.4 locator use the protected snapshot. All other
 artifacts, including every artifact in a 0.1 or 0.2 manifest, are hashed with an
 ordinary open that follows symbolic links after a separate containment check,
 so a concurrent swap of a parent directory can make validate hash, and report
@@ -823,7 +823,7 @@ only the supplied run ID and field names.
 | `locator-mismatch` | error | A 0.3 line/pointer or a 0.4 row/column/header is blank, out of range, or absent. For `csv-cell`, a selected header must match the parsed header at that column. |
 | `locator-unreadable` | error | The protected read failed (permission or other errno), or the snapshot/selected value does not satisfy the strict profile (encoding, duplicate keys, overflow, CSV dialect, caps, parse). |
 | `locator-unreadable` (csv-cell cap) | error | A 0.4 manifest exceeds the csv-cell eligibility limits (10,000 `csv-cell` results or 16 MiB of `header` metadata). One finding per eligible artifact; no cell is read. |
-| `locator-unsupported-value` | error | A 0.3 locator resolves to an array or object, not a scalar; or a 0.4 `csv-cell` result records a string, boolean or null instead of a number. |
+| `locator-unsupported-value` | error | A 0.3 or 0.4 locator resolves to an array or object, not a scalar; or a 0.4 `csv-cell` result records a string, boolean or null instead of a number. |
 | `artifact-changed` | error | The protected snapshot identity changed before or during the read, or a parent component was no longer the verified directory. |
 | `locator-no-digest` | error | A result locates a value in an artifact with no recorded sha256. |
 | `locator-unverified` | error | A result locates a value in a volatile artifact. |
