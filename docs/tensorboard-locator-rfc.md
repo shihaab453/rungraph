@@ -1,9 +1,17 @@
-# TensorBoard scalar locators — slice D design RFC (v0.9)
+# TensorBoard scalar locators — slice D design RFC (v0.10)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A design gate and an owner schema-admission decision (D2) are required before any code.
 
-## 0. Changes in v0.9 (round-8 findings)
+## 0. Changes in v0.10 (round-9 findings)
+
+- **Erratum 24**: the inserted text ends “…cross-field rule)” without a period, so the parent's
+  own period closes the sentence; no `..`.
+- **Wording**: §5.1 counts only the winning summary occurrences after the last other `what`
+  member; §5.2 says a losing member is never checked against the 16 MiB cap.
+- **Vectors**: removed the duplicated 15 MiB / `file_version` / 15 MiB and 15+15 entries.
+
+## 0.1 Changes in v0.9 (round-8 findings)
 
 - **Race vectors**: fstat 140/EOF 140 is over-cap again; the EOF == cap boundary is fstat 140/EOF
   128 → artifact-changed; fstat 140/EOF 141 is over-cap.
@@ -12,7 +20,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
 - **Errata**: item 24 quotes `not-a-file` without the final period (no stray “.;”), item 17 keeps
   case-insensitivity for all kinds, item 27 says “whose read ends past its cap”.
 
-## 0.1 Changes in v0.8 (round-7 findings)
+## 0.2 Changes in v0.8 (round-7 findings)
 
 - **Fuzz harness**: entry point is `check_files` with the targeted callback; `missing-file`,
   `hash-mismatch` and `size-mismatch` are in the exact reachable subset; corpus (i) recomputes
@@ -23,7 +31,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
   artifact-changed) are pinned.
 - **Changelog headings** renumbered.
 
-## 0.2 Changes in v0.7 (round-6 findings)
+## 0.3 Changes in v0.7 (round-6 findings)
 
 - **Fixed-id reservation**: `tb-*` ids are reserved in `used` before generic allocation; generic
   slugs suffix on any collision; only fixed-vs-fixed collisions are `AdapterError`.
@@ -37,7 +45,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
   over-cap. One short-read wording; `checks/files.py` scoped to TensorBoard-raised snapshots.
 - **Hints/fence**: the `claim-at-risk` cap hint is listed; the INIT note is outside the fence.
 
-## 0.3 Changes in v0.6 (round-5 findings)
+## 0.4 Changes in v0.6 (round-5 findings)
 
 - **Comparator scope**: parent errata cover 0.5 string/jsonl/csv-cell at 1e-9/1e-12; TensorBoard
   floats use 1e-6/1e-9 with abs 1e-12.
@@ -56,7 +64,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
   and the v0.9 header/status; gate 13 is gate 8.
 - **Table/step**: artifact `no-digest` row; step 8 includes unsupported selection; per-key flags.
 
-## 0.4 Changes in v0.5 (round-4 findings)
+## 0.5 Changes in v0.5 (round-4 findings)
 
 - **O(1) Event scanning**: the reader tracks the last non-`summary` member offset and the sum of
   summary payload bytes after it; no slice list. The 16 MiB cap is the sum of merged summary
@@ -76,7 +84,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
 - **Checklist**: correct modules (`manifest.py`, `locator_profiles.py`, `run_fingerprint.py`) and
   the `checks/files.py` row.
 
-## 0.5 Changes from v0.3 (round-3 findings)
+## 0.6 Changes from v0.3 (round-3 findings)
 
 - **Scalar classification is exclusive** and has an ordered selection table; a no-member or
   no-encoding value is classified; non-scalar uses `locator-unsupported-value` (parent §4.3).
@@ -251,8 +259,8 @@ Profiles receive `bytes` or `bytearray`, never a `memoryview`; a short read is t
 - Truncated length/data, CRC mismatch, or trailing bytes after the last record are structural
   refusals. A record length over the remaining bytes is a structural refusal.
 - The file cap is checked before parsing; there is no per-record byte cap. The 16 MiB cap applies
-  to the **merged** `summary` payload of one Event (the sum of its `summary` occurrences, which
-  merge); it is what bounds decoding.
+  to the **merged** `summary` payload of one Event (the winning `summary` occurrences after the
+  last other `what` member); it is what bounds decoding.
 - CRC32C is a table-driven core implementation; the benchmark records its cost.
 
 ### 5.2 Protobuf subset
@@ -268,7 +276,8 @@ Depth is bounded by the fixed schema (Event→Summary→Value→TensorProto→Te
 - `Event`: `wall_time` (1) ignored; `step` (2, int64; absent = 0); `what` is a oneof
   (`file_version` 3, `graph_def` 4, `summary` 5, `log_message` 6, `session_log` 7,
   `tagged_run_metadata` 8, `meta_graph_def` 9). `file_version` is not validated. Different
-  members replace; the losing member is skipped and never decoded or size-checked. If a
+  members replace; the losing member is skipped, never decoded and never checked against the
+  16 MiB cap. If a
   `summary` member is later replaced by another `what` field, its bytes are not decoded and the
   16 MiB summary cap applies only to the winning summary. In O(1) state the reader tracks the
   offset of the last non-`summary` `what` member and the sum of `summary` lengths after it, then
@@ -702,7 +711,7 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
     `.ndjson`/`.tsv` refused); directory artifact behavior with the flag on and off;
     `not-a-file`” (without its final period) with the same text plus “; a 0.5 matrix
     (Manifest05/Result05 round-trip, tensorboard tag/step/occurrence and range errors, 0.5
-    string/jsonl/csv-cell carry-over, and the 0.5 `artifact_id` cross-field rule).”
+    string/jsonl/csv-cell carry-over, and the 0.5 `artifact_id` cross-field rule)”
 25. Header/status: replace “# Verified value locators: design RFC (v0.8)” with “# Verified value
     locators: design RFC (v0.9)” and “Status: **v0.8 ERRATA FOR SLICE C.**” with “Status:
     **v0.9 ERRATA FOR SLICE C AND SLICE D.**”.
@@ -735,9 +744,8 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
   with nothing between is refused; 17 MiB then `graph_def` is accepted (losing summary); T1
   `tensor{dtype=DT_FLOAT, tensor_content=4B}` then T2
   `tensor{tensor_shape=[1]}` (no dtype/content) keeps DT_FLOAT and the 4 bytes; duplicate
-  `tag`/`Dim.size`/`tensor_content` last-wins; two adjacent merged `summary` fields of 15 MiB each exceed the 16 MiB
-  merged cap; a 15 MiB summary, then `file_version`, then a 15 MiB summary are accepted (only the
-  last 15 MiB counts). A 16 MiB summary of ~8.4M empty Values and one with ~1.6M tagged scalars
+  `tag`/`Dim.size`/`tensor_content` last-wins. A 16 MiB summary of ~8.4M empty Values and one
+  with ~1.6M tagged scalars
   must verify inside the asserted ≤300 MB budget (no value cap).
 - **Snapshot races**: fstat 10,000,000 then EOF 10,000,300 → `artifact-changed`; EOF 9,999,700 →
   `artifact-changed`; fstat 100 MiB then EOF 129 MiB → over-cap; fstat 140 MiB then EOF 100 MiB →
