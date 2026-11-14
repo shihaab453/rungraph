@@ -1,11 +1,13 @@
-# CSV cell locators (`csv-cell`) — slice C design RFC (v0.28)
+# CSV cell locators (`csv-cell`) — slice C design RFC (v0.29)
 
 Status: **DESIGN PROPOSAL, REVISED AFTER FIFTEEN DESIGN PANEL ROUNDS AND A FINAL CONSISTENCY PASS. NOTHING IMPLEMENTED.
 NOTHING AUTHORIZED BY THIS DOCUMENT.** Acceptance authorizes only a separate implementation gate
 and the owner's schema-admission decision.
 
-## 0. Changes in v0.28 (post-acceptance editorial)
+## 0. Changes in v0.29 (editorial)
 
+- **Parent version corrected**: the parent contract (v0.7) is reissued as **v0.8**, not the
+  slice-C revision number; every reference now says v0.8.
 - **The parent §5.2 bullet is quoted** (`Caps: file 50 MiB, …`) and replaced wholesale, keeping `file 50 MiB per artifact` and the units line, while making only the two
   eligibility caps per manifest.
 - **Hint rules are pinned per finding**: reused `locator-no-digest`/`locator-unverified`/
@@ -74,7 +76,7 @@ and the owner's schema-admission decision.
 - **§4.2 erratum** also states that a nonvolatile digestless artifact still compares size.
 - **0.4 schema `$defs`/title named**: root `Manifest04`, `Result04`, `JsonlLocator`,
   `CsvCellLocator`.
-- **Implementation brief** refreshed (parent v0.28, manifest-eligible, hashing still happens on
+- **Implementation brief** refreshed (parent v0.8, manifest-eligible, hashing still happens on
   the capped path).
 
 ## 0.3 Changes retained from v0.9 (round-8 findings)
@@ -643,10 +645,10 @@ reused and is imprecise for a resource cap; this limitation is documented and ve
   `roots` rows as well as `nodes`, even though human lineage currently prints only node details); positive assertions for permitted
   `Finding.path`; a 0.4 golden vector with a header distinct from names/values/paths.
 
-### 9.1 v0.28 errata (authorized by §16)
+### 9.1 Parent v0.8 errata (authorized by §16)
 
 The parent document is **`docs/verified-value-locators-rfc.md`** (currently v0.7, hash
-`f04ecfc8…`), reissued as **v0.28**. It carries replacement text for:
+`f04ecfc8…`), reissued as **v0.8**. It carries replacement text for:
 - §6: display `csv-cell:<row>,<column>`, no header;
 - §7: findings never echo the header assertion for `csv-cell`;
 - §3.1/§4 table/§8: unknown kind = `schema-invalid`, no `locator-unknown-kind`; the §8 migration
@@ -1048,7 +1050,7 @@ Relative to RFC 4180 and to the stdlib `csv` reader, the profile deliberately:
 ## 16. What acceptance authorizes
 
 Acceptance authorizes only a separate implementation gate for schema 0.4 + `csv-cell` under these
-rules, plus the **`docs/verified-value-locators-rfc.md`** v0.7→v0.28 errata (display §6/§7;
+rules, plus the **`docs/verified-value-locators-rfc.md`** v0.7→v0.8 errata (display §6/§7;
 unknown-kind §3.1/§4/§8; over-cap §4.1/§9; §4.2 restoration; §4.3 `size-mismatch` row, capped and
 once-per-artifact sentences, broken-set addition and the `Absent locator`/`Directory artifact
 locator` row widening; §4.1 snapshot scope and over-cap clause; §4.2 step 4; §5.2 caps; §5.4
