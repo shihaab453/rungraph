@@ -2,8 +2,8 @@
 
 Status: ACCEPTED WITH CHANGES — Stage 1 not yet implemented.
 Date: 2026-11-10.
-Supersedes: v0.1 draft (same day, reviewed by two independent GPT-6.1 Sol reviewers;
-Claude was rate-limited). This revision incorporates every blocking change.
+Supersedes: v0.1 draft (same day, reviewed independently by two reviewers;
+a third review seat was rate-limited). This revision incorporates every blocking change.
 Scope: RunGraph / RunEvidence, Boat Box working tree.
 
 Related: `src/runevidence/comparability.py` (PC26 experimental core, mode 0444),

@@ -51,7 +51,7 @@ and the owner's schema-admission decision.
   integer and `001` are in the refusal list.
 - **Batch**: no new batch feature; existing batch readers accept 0.4 only through the dispatcher.
 
-## 0.2 Changes retained from v0.10 (round-9 Sol/Opus/Gemini findings)
+## 0.2 Changes retained from v0.10 (round-9 review findings)
 
 - **Error-aware walker**: `_issue_location(loc, *, root_model=None, error_type="")` resolves the
   root at call time, keeps the delivered one-argument test calls, and appends `/kind` only for

@@ -567,7 +567,7 @@ def test_targeted_no_digest_size_mismatch_is_reported_and_broken(tmp_path):
     doc["artifacts"][0]["size_bytes"] = 999
     (root / "runevidence.json").write_text(dump_manifest(Manifest.model_validate(doc)))
     report = _report(root)
-    # Opus 1: the size check still runs before no-digest is returned, and its
+    # Review 1: the size check still runs before no-digest is returned, and its
     # error keeps the claim at risk.
     assert "size-mismatch" in _codes(report)
     assert "locator-no-digest" in _codes(report)

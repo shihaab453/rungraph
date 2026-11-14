@@ -352,7 +352,7 @@ def test_in_root_dotdot_spelling_is_a_distinct_refusal(tmp_path):
 
 @skip_if_no_symlinks
 def test_in_root_dotdot_with_symlinked_sub_is_not_normalised(tmp_path):
-    """Opus counterexample: `sub -> deep/inner` makes normalisation lie.
+    """Review counterexample: `sub -> deep/inner` makes normalisation lie.
 
     The kernel opens `deep/x.jsonl` for `sub/../x.jsonl`; normpath would pick
     root `x.jsonl`, a different file with a different value. The reader must
@@ -380,7 +380,7 @@ def test_in_root_dotdot_with_symlinked_sub_is_not_normalised(tmp_path):
 
 # ---------------------------------------------------------------- leaf alias dotdot
 #
-# Round-4 blocker (Sol, Opus, foreman): `..` in a leaf-alias target, or in an
+# Round-4 blocker (review panel, foreman): `..` in a leaf-alias target, or in an
 # absolute artifact spelling, was popped lexically. When a component before the
 # `..` is a link, the kernel opens a different file than the normalised
 # spelling names, so the reader verified the wrong bytes. All three spellings
@@ -944,7 +944,7 @@ def test_refusal_paths_release_the_snapshot_before_the_next_artifact(tmp_path, m
 
 # ------------------------------------------------- host-absolute alias targets
 #
-# Round-5 blocker (Sol, Opus): `_is_absolute` used Windows syntax, so on POSIX
+# Round-5 blocker (review panel): `_is_absolute` used Windows syntax, so on POSIX
 # a drive/UNC-shaped link target was classified absolute and sent to
 # `os.path.relpath`, which resolves it against the process cwd. The kernel
 # reads a relative target against the link's own directory, so validation
@@ -1163,7 +1163,7 @@ def test_unc_artifact_spelling_is_normalised_and_never_read_literally(tmp_path, 
 
 # --------------------------------------- legacy Windows-absolute diagnostics
 #
-# Round-6 blocker (Opus): after absoluteness followed the host, a Windows-
+# Round-6 blocker (review): after absoluteness followed the host, a Windows-
 # written 0.1/0.2 manifest lost the `absolute-path` warning and the
 # "(folder looks relocated)" hint. Resolution must stay host-native -- never
 # Path(raw) or the cwd -- but the legacy diagnostics must still recognise a
