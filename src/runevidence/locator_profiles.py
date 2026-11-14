@@ -389,15 +389,24 @@ def display_locator(locator: Any, *, limit: int = 200) -> str:
     The ``#`` separator is part of the fixed prefix. Delimiter characters
     inside the user-supplied pointer are escaped so the rendered form cannot
     be confused with that prefix. A ``csv-cell`` locator is rendered as
-    ``csv-cell:<row>,<column>``: numbers only, never the recorded header."""
+    ``csv-cell:<row>,<column>``: numbers only, never the recorded header. A
+    ``tensorboard`` locator is rendered as
+    ``tensorboard:step=<step>,occurrence=<n>``: never the recorded tag."""
     if type(locator) is str:
         prefix, payload = "json#", locator
     elif isinstance(locator, dict):
         if locator.get("kind") == "csv-cell":
             return f"csv-cell:{locator.get('row')},{locator.get('column')}"
+        if locator.get("kind") == "tensorboard":
+            return (
+                f"tensorboard:step={locator.get('step')},"
+                f"occurrence={locator.get('occurrence')}"
+            )
         prefix, payload = f"jsonl:{locator.get('line')}#", str(locator.get('pointer', ''))
     elif getattr(locator, "kind", None) == "csv-cell":
         return f"csv-cell:{locator.row},{locator.column}"
+    elif getattr(locator, "kind", None) == "tensorboard":
+        return f"tensorboard:step={locator.step},occurrence={locator.occurrence}"
     else:
         prefix, payload = f"jsonl:{locator.line}#", str(locator.pointer)
     escaped = json.dumps(payload, ensure_ascii=True)[1:-1]

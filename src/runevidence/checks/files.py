@@ -160,6 +160,12 @@ _LEAF_FLAGS = (
 _MAX_SYMLINK_DEPTH = 40
 _READ_CHUNK = 1024 * 1024
 
+# Raised snapshot cap for artifacts targeted by a kind-eligible TensorBoard
+# locator (RFC sections 5 and 6). The delivered 50 MiB cap lives in
+# ``locator_profiles.MAX_FILE_BYTES`` and stays the default for every other
+# artifact, including 0.5 string/jsonl/csv-cell targets.
+TENSORBOARD_MAX_FILE_BYTES = 128 * 1024 * 1024
+
 
 def _dir_fd_supported() -> bool:
     try:
@@ -1105,10 +1111,20 @@ def _targeted_failure(
 
 
 def check_artifact(
-    art: Artifact, root: Path, index: _TreeIndex, out: FileCheckResult, *, targeted: bool = False
+    art: Artifact,
+    root: Path,
+    index: _TreeIndex,
+    out: FileCheckResult,
+    *,
+    targeted: bool = False,
+    tensorboard_raised: bool = False,
 ) -> TargetCheck:
     """The one artifact-level check. ``targeted`` chooses the protected
-    snapshot instead of a streaming hash; every other rule is identical."""
+    snapshot instead of a streaming hash; every other rule is identical.
+
+    ``tensorboard_raised`` selects the 128 MiB cap and the TensorBoard-only
+    fstat sizing/race rules. It is set only when a kind-eligible 0.5
+    tensorboard locator targets this artifact."""
     target = _prepare_target(art, root, index, out, targeted=targeted)
     if target is None:
         return TargetCheck(art.id, "reference-failed")
@@ -1127,7 +1143,12 @@ def check_artifact(
             # because its root prefix could not be removed.
             shape = _shape_problem(art.path) if path_state == "refused-path" else None
             return _targeted_failure(art, out, path_state, shape=shape)
-        read = _read_snapshot_parts(root, parts)
+        read = _read_snapshot_parts(
+            root,
+            parts,
+            cap=TENSORBOARD_MAX_FILE_BYTES if tensorboard_raised else MAX_FILE_BYTES,
+            tensorboard_raised=tensorboard_raised,
+        )
         if read.state not in ("ok", "over-cap"):
             shape = _shape_problem(art.path) if read.state == "refused-path" else None
             return _targeted_failure(art, out, read.state, shape=shape)
@@ -1257,7 +1278,7 @@ def check_artifact(
 class Snapshot:
     """Bounded bytes and digest read through one protected descriptor."""
 
-    data: Optional[bytes]
+    data: Optional[bytes | bytearray]
     digest: str
     size: int
     over_cap: bool
@@ -1278,7 +1299,13 @@ class TargetCheck:
     snapshot: Optional[Snapshot] = None
 
 
-def _read_snapshot_parts(root: Path, parts: Optional[tuple[str, ...]]) -> SnapshotRead:
+def _read_snapshot_parts(
+    root: Path,
+    parts: Optional[tuple[str, ...]],
+    *,
+    cap: Optional[int] = None,
+    tensorboard_raised: bool = False,
+) -> SnapshotRead:
     """One protected read of ``parts`` under ``root``.
 
     Containment is enforced by the descriptor walk alone. There is deliberately
@@ -1287,9 +1314,16 @@ def _read_snapshot_parts(root: Path, parts: Optional[tuple[str, ...]]) -> Snapsh
     change. ``parts is None`` means the path shape itself is refused (``..``,
     absolute, empty or NUL components) and gets its own state, never a race.
     A leaf link whose target cannot be resolved on shape gets ``refused-alias``
-    from the walk, also never a race."""
+    from the walk, also never a race.
+
+    The delivered read-to-EOF behavior is used for every artifact except one
+    raised by a kind-eligible TensorBoard locator. That branch sizes from
+    ``os.fstat`` on the already-open descriptor, allocates once, truncates a
+    short read in place and applies the RFC section 5 race table. An over-cap
+    file is stream-hashed without retaining a snapshot."""
     if parts is None:
         return SnapshotRead("refused-path")
+    limit = MAX_FILE_BYTES if cap is None else cap
     opened = _open_protected(root, parts)
     if opened.state != "ok":
         return SnapshotRead(opened.state)
@@ -1304,6 +1338,9 @@ def _read_snapshot_parts(root: Path, parts: Optional[tuple[str, ...]]) -> Snapsh
         if _identity(current) != _identity(opened.before):
             return SnapshotRead("changed")
 
+        if tensorboard_raised:
+            return _read_tensorboard_snapshot(opened, current, limit)
+
         digest = hashlib.sha256()
         buffer = bytearray()
         total = 0
@@ -1316,7 +1353,7 @@ def _read_snapshot_parts(root: Path, parts: Optional[tuple[str, ...]]) -> Snapsh
             if not chunk:
                 break
             total += len(chunk)
-            if total > MAX_FILE_BYTES:
+            if total > limit:
                 over_cap = True
                 buffer.clear()
             elif not over_cap:
@@ -1339,6 +1376,81 @@ def _read_snapshot_parts(root: Path, parts: Optional[tuple[str, ...]]) -> Snapsh
         return SnapshotRead("over-cap" if over_cap else "ok", snapshot)
     finally:
         _close_protected(opened)
+
+
+def _read_tensorboard_snapshot(
+    opened: _Protected, current: os.stat_result, limit: int
+) -> SnapshotRead:
+    """The TensorBoard-raised read (RFC sections 5 and 6).
+
+    ``current`` is the fstat taken on the opened protected descriptor. The
+    pre-read size decides the allocation: at most the cap, never the actual
+    file path. EOF is the running total, so a concurrent grow or shrink is
+    classified from the same bytes that were hashed. An over-cap file keeps no
+    snapshot but is still fully stream-hashed for the artifact checks."""
+    assert opened.fd is not None and opened.before is not None
+    fstat_size = current.st_size
+    digest = hashlib.sha256()
+    total = 0
+    buffer: Optional[bytearray] = None
+    over_cap = False
+    if fstat_size <= limit:
+        # Allocate once from the descriptor's own size; never from a path stat
+        # and never above the cap.
+        buffer = bytearray(fstat_size)
+    while True:
+        try:
+            chunk = os.read(opened.fd, _READ_CHUNK)
+        except OSError:
+            return SnapshotRead("unreadable")
+        if not chunk:
+            break
+        start = total
+        total += len(chunk)
+        digest.update(chunk)
+        if buffer is not None:
+            if total <= fstat_size:
+                buffer[start:total] = chunk
+            else:
+                # Growth beyond the fstat size is artifact-changed, or over-cap
+                # if it passes the cap; neither path needs the retained bytes.
+                buffer = None
+        if total > limit:
+            over_cap = True
+            buffer = None
+
+    try:
+        after = _post_read_stat(opened)
+    except OSError as exc:
+        return SnapshotRead("changed" if _errno_state(exc) == "missing" else "unreadable")
+    if after is not None and _identity(after) != _identity(opened.before):
+        return SnapshotRead("changed")
+
+    if fstat_size <= limit:
+        if total > limit:
+            state = "over-cap"
+        elif total != fstat_size:
+            state = "changed"
+        else:
+            state = "ok"
+    else:
+        # fstat over the cap: only a read that also ends past the cap is
+        # over-cap; everything at or below the cap is a shrink race.
+        state = "over-cap" if total > limit else "changed"
+
+    if state == "changed":
+        return SnapshotRead("changed")
+    if state == "over-cap":
+        return SnapshotRead(
+            "over-cap",
+            Snapshot(data=None, digest=digest.hexdigest(), size=total, over_cap=True),
+        )
+    assert buffer is not None
+    del buffer[total:]
+    return SnapshotRead(
+        "ok",
+        Snapshot(data=buffer, digest=digest.hexdigest(), size=total, over_cap=False),
+    )
 
 
 def _read_snapshot(target: Path, root: Path) -> SnapshotRead:
@@ -1439,6 +1551,7 @@ def check_files(
     enable_directory_artifacts: bool = False,
     targeted_ids: Optional[set[str]] = None,
     on_targeted=None,
+    tensorboard_snapshot_ids: Optional[set[str]] = None,
 ) -> FileCheckResult:
     """Check every artifact through one path.
 
@@ -1446,12 +1559,16 @@ def check_files(
     instead of a streaming hash. ``on_targeted`` is called immediately after
     that artifact's check so its locators consume the snapshot and then let it
     be released before the next artifact is read (peak memory is one
-    snapshot)."""
+    snapshot). ``tensorboard_snapshot_ids`` raises the snapshot cap to 128 MiB
+    and selects the TensorBoard-only sizing rules for exactly those artifacts;
+    the caller computes the set from the 0.5 locators and the basename
+    predicate so this module never re-reads the model."""
     root = loaded.root
     index = _TreeIndex(root)
     out = FileCheckResult()
     covered: set[str] = set()
     targeted_ids = targeted_ids or set()
+    tensorboard_snapshot_ids = tensorboard_snapshot_ids or set()
     for art in loaded.manifest.artifacts:
         targeted = art.id in targeted_ids
         state: Optional[TargetCheck] = None
@@ -1466,7 +1583,14 @@ def check_files(
             if targeted:
                 state = TargetCheck(art.id, "directory")
         else:
-            state = check_artifact(art, root, index, out, targeted=targeted)
+            state = check_artifact(
+                art,
+                root,
+                index,
+                out,
+                targeted=targeted,
+                tensorboard_raised=targeted and art.id in tensorboard_snapshot_ids,
+            )
         if targeted and on_targeted is not None:
             on_targeted(art, state, out)
         # Drop the state (and its snapshot) before reading the next artifact.

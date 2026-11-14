@@ -11,12 +11,18 @@ from ..manifest import LoadedManifest
 from ..models import (
     SCHEMA_VERSION_0_3,
     SCHEMA_VERSION_0_4,
+    SCHEMA_VERSION_0_5,
     CsvCellLocator,
+    TensorboardLocator,
 )
 from .conditions import check_conditions
 from .files import check_files
 from .graph import check_graph
-from .results import check_results, check_targeted_results
+from .results import (
+    _tensorboard_path_matches,
+    check_results,
+    check_targeted_results,
+)
 
 __all__ = ["Report", "run_checks"]
 
@@ -31,7 +37,15 @@ EXIT_INVALID = 2
 CSV_CELL_MAX_ENTRIES = 10_000
 CSV_CELL_MAX_HEADER_BYTES = 16 * 1024 * 1024
 
-_LOCATOR_SCHEMAS = frozenset({SCHEMA_VERSION_0_3, SCHEMA_VERSION_0_4})
+# Per-manifest TensorBoard eligibility caps (RFC section 6). The same
+# manifest-eligible predicate applies: a non-directory artifact whose basename
+# contains ".tfevents", with a recorded sha256 and not volatile.
+TENSORBOARD_MAX_ENTRIES = 10_000
+TENSORBOARD_MAX_TAG_BYTES = 16 * 1024 * 1024
+
+_LOCATOR_SCHEMAS = frozenset(
+    {SCHEMA_VERSION_0_3, SCHEMA_VERSION_0_4, SCHEMA_VERSION_0_5}
+)
 
 
 def _csv_cell_cap(
@@ -39,12 +53,12 @@ def _csv_cell_cap(
 ) -> tuple[bool, frozenset[str]]:
     """Classify csv-cell eligibility without reads; emit nothing.
 
-    Returns ``(capped, eligible_artifact_ids)``. Only schema 0.4 can carry a
-    csv-cell locator, so every earlier schema is uncapped with no eligible
-    artifacts. Header metadata is the UTF-8 byte length of each eligible
-    locator's recorded header.
+    Returns ``(capped, eligible_artifact_ids)``. Only schema 0.4 and 0.5 can
+    carry a csv-cell locator, so every earlier schema is uncapped with no
+    eligible artifacts. Header metadata is the UTF-8 byte length of each
+    eligible locator's recorded header.
     """
-    if manifest.schema_version != SCHEMA_VERSION_0_4:
+    if manifest.schema_version not in (SCHEMA_VERSION_0_4, SCHEMA_VERSION_0_5):
         return False, frozenset()
     eligible_artifacts = {
         artifact.id
@@ -71,6 +85,69 @@ def _csv_cell_cap(
         or header_bytes > CSV_CELL_MAX_HEADER_BYTES
     )
     return capped, frozenset(with_entries)
+
+
+def _tensorboard_cap(
+    manifest,
+) -> tuple[bool, frozenset[str]]:
+    """Classify TensorBoard eligibility without reads; emit nothing.
+
+    Returns ``(capped, eligible_artifact_ids)``. Only schema 0.5 can carry a
+    tensorboard locator. Tag metadata is the UTF-8 byte length of each eligible
+    locator's recorded tag.
+    """
+    if manifest.schema_version != SCHEMA_VERSION_0_5:
+        return False, frozenset()
+    eligible_artifacts = {
+        artifact.id
+        for artifact in manifest.artifacts
+        if artifact.artifact_type != "directory"
+        and _tensorboard_path_matches(artifact.path)
+        and artifact.sha256 is not None
+        and not artifact.volatile
+    }
+    entries = 0
+    tag_bytes = 0
+    with_entries: set[str] = set()
+    for result in manifest.results:
+        locator = result.locator
+        if not isinstance(locator, TensorboardLocator):
+            continue
+        if result.artifact_id not in eligible_artifacts:
+            continue
+        entries += 1
+        tag_bytes += len(locator.tag.encode("utf-8"))
+        with_entries.add(result.artifact_id)
+    capped = (
+        entries > TENSORBOARD_MAX_ENTRIES
+        or tag_bytes > TENSORBOARD_MAX_TAG_BYTES
+    )
+    return capped, frozenset(with_entries)
+
+
+def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
+    """Artifacts whose shared snapshot cap is raised to 128 MiB.
+
+    The raise applies only when a 0.5 tensorboard locator targets a
+    non-directory artifact whose basename contains ".tfevents". A
+    kind-mismatched locator never raises it, and runtime digest/volatile state
+    is irrelevant here (a directory is never read as a snapshot).
+    """
+    if manifest.schema_version != SCHEMA_VERSION_0_5:
+        return frozenset()
+    paths = {
+        artifact.id: artifact.path
+        for artifact in manifest.artifacts
+        if artifact.artifact_type != "directory"
+    }
+    return frozenset(
+        result.artifact_id
+        for result in manifest.results
+        if isinstance(result.locator, TensorboardLocator)
+        and result.artifact_id is not None
+        and result.artifact_id in paths
+        and _tensorboard_path_matches(paths[result.artifact_id])
+    )
 
 
 @dataclass
@@ -132,6 +209,8 @@ def run_checks(
 
     result_broken: set[str] = set(dangling_targeted)
     csv_cell_capped, csv_cell_eligible_artifacts = _csv_cell_cap(manifest)
+    tensorboard_capped, tensorboard_eligible_artifacts = _tensorboard_cap(manifest)
+    capped_artifacts: set[str] = set()
 
     def _targeted_callback(artifact, state, out) -> None:
         target_findings, target_broken, capped_artifact = check_targeted_results(
@@ -140,13 +219,17 @@ def run_checks(
             state,
             csv_cell_capped=csv_cell_capped,
             csv_cell_eligible=artifact.id in csv_cell_eligible_artifacts,
+            tensorboard_capped=tensorboard_capped,
+            tensorboard_eligible=artifact.id in tensorboard_eligible_artifacts,
         )
         out.findings.extend(target_findings)
         result_broken.update(target_broken)
         if capped_artifact:
             # A capped artifact is broken at the artifact level (RFC section 8),
-            # even though no per-result value finding was emitted.
+            # even though no per-result value finding was emitted. Other kinds
+            # on the same artifact may still have verified.
             out.broken.add(artifact.id)
+            capped_artifacts.add(artifact.id)
 
     files = check_files(
         loaded,
@@ -154,6 +237,7 @@ def run_checks(
         enable_directory_artifacts=enable_directory_artifacts,
         targeted_ids=targeted_ids,
         on_targeted=_targeted_callback,
+        tensorboard_snapshot_ids=_tensorboard_snapshot_ids(manifest),
     )
 
     result_findings, mismatched = check_results(
@@ -163,7 +247,10 @@ def run_checks(
         skip_result_ids=targeted_result_ids,
     )
     graph_findings = check_graph(
-        manifest, files.broken | mismatched | result_broken, unverified=unverified
+        manifest,
+        files.broken | mismatched | result_broken,
+        unverified=unverified,
+        capped=capped_artifacts,
     )
     condition_findings = check_conditions(loaded.manifest)
     findings = sorted(
