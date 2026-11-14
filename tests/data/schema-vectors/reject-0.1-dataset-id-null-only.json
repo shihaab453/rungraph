@@ -1,0 +1,47 @@
+{
+  "schema_version": "0.1",
+  "project": {
+    "id": "p",
+    "name": "P"
+  },
+  "runs": [
+    {
+      "id": "run-1",
+      "name": "Run"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "data",
+      "path": "data.csv",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size_bytes": 1,
+      "kind": "dataset",
+      "dataset_id": null
+    },
+    {
+      "id": "model",
+      "path": "model.bin",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "size_bytes": 1,
+      "kind": "checkpoint"
+    }
+  ],
+  "results": [
+    {
+      "id": "acc",
+      "run_id": "run-1",
+      "name": "accuracy",
+      "value": 1.0,
+      "artifact_id": "data"
+    }
+  ],
+  "evidence": [],
+  "relationships": [
+    {
+      "source": "data",
+      "target": "run-1",
+      "type": "input_to"
+    }
+  ]
+}

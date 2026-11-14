@@ -1,0 +1,49 @@
+{
+    "format":  "RunEvidence.directory/v1",
+    "generator":  "Independent PowerShell .NET SHA256 over explicit record hex, before prototype execution",
+    "vectors":  [
+                    {
+                        "name":  "empty",
+                        "layout":  [
+
+                                   ],
+                        "encoded_hex":  "52756e45766964656e63652e6469726563746f7279007631000000000000000000",
+                        "sha256":  "a89c8af59cf92b1da6ef9d207ebfd7ee4b822da644ffeb4e27c31ec1fe582000",
+                        "size_bytes":  0
+                    },
+                    {
+                        "name":  "one-file",
+                        "layout":  [
+                                       {
+                                           "type":  "F",
+                                           "path":  "a",
+                                           "content_hex":  "68656c6c6f"
+                                       }
+                                   ],
+                        "encoded_hex":  "52756e45766964656e63652e6469726563746f72790076310000000000000000014600000001612cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+                        "sha256":  "3f4d78a56ae55c44c6df07ede0864a244e7c77fed0a5a34d5ffa373657f9cf8b",
+                        "size_bytes":  5
+                    },
+                    {
+                        "name":  "nested-and-empty",
+                        "layout":  [
+                                       {
+                                           "type":  "D",
+                                           "path":  "empty"
+                                       },
+                                       {
+                                           "type":  "D",
+                                           "path":  "n"
+                                       },
+                                       {
+                                           "type":  "F",
+                                           "path":  "n/x.bin",
+                                           "content_hex":  "000102ff"
+                                       }
+                                   ],
+                        "encoded_hex":  "52756e45766964656e63652e6469726563746f72790076310000000000000000034400000005656d70747944000000016e46000000076e2f782e62696e3d1f57c984978ef98a18378c8166c1cb8ede02c03eeb6aee7e2f121dfeee3e56",
+                        "sha256":  "125e40ce9462e6df4c0def9add272d709098998ec9d56f69fa72ae213c07e344",
+                        "size_bytes":  4
+                    }
+                ]
+}

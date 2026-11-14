@@ -1,0 +1,52 @@
+{
+  "schema_version": "0.1",
+  "project": {
+    "id": "proj-stage3b1-b",
+    "name": "Stage 3b1 baseline"
+  },
+  "runs": [
+    {
+      "id": "run-stage3b1-b",
+      "name": "baseline run",
+      "metadata": {
+        "evaluation": {
+          "split": "test",
+          "protocol": {
+            "protocol_id": "legacy-protocol",
+            "version": 1
+          }
+        },
+        "source_revision": "legacy-rev"
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "dataset-stage3b1-b",
+      "path": "data/baseline.csv",
+      "kind": "dataset",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "results": [
+    {
+      "id": "res-stage3b1-b",
+      "run_id": "run-stage3b1-b",
+      "name": "accuracy",
+      "value": 0.9,
+      "metadata": {
+        "metric_definition": {
+          "definition_id": "accuracy-v1",
+          "higher_is_better": true
+        }
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "source": "dataset-stage3b1-b",
+      "target": "run-stage3b1-b",
+      "type": "input_to"
+    }
+  ]
+}

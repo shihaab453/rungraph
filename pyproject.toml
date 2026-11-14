@@ -31,7 +31,7 @@ Repository = "https://github.com/shihaab453/rungraph"
 Issues = "https://github.com/shihaab453/rungraph/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "jsonschema>=4"]
 
 [project.scripts]
 runevidence = "runevidence.cli:main"

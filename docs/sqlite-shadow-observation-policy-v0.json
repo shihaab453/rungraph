@@ -1,0 +1,139 @@
+{
+  "schema": "rungraph-private-shadow-observation-policy-v0",
+  "status": "STATIC_PROPOSAL_UNTESTED",
+  "warning": "Input fields are caller assertions. No native read, I/O, identity proof, atomicity or safety certification. REVIEW_ONLY never means safe to use stage. ABA cannot be ruled out by equality of two digests.",
+  "base_observation": {
+    "json_digest_before": "json-A",
+    "json_digest_after": "json-A",
+    "json_identity_before": "file-1",
+    "json_identity_after": "file-1",
+    "shadow_source_digest": "json-A",
+    "stage_revision": 1,
+    "stage_identity_before": "stage-1",
+    "stage_identity_after": "stage-1",
+    "stage_receipt_digest": "receipt-A",
+    "stage_verified": true,
+    "artifact_digest_before": "artifact-A",
+    "artifact_digest_after": "artifact-A"
+  },
+  "cases": [
+    {
+      "name": "stable_claims",
+      "changes": {},
+      "expected_status": "ELIGIBLE_FOR_SEPARATE_VALIDATION",
+      "expected_reason": "PROVISIONAL_CONSISTENCY_ONLY"
+    },
+    {
+      "name": "missing_json_digest",
+      "changes": {
+        "json_digest_before": null
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "MISSING_OR_INVALID_OBSERVATION"
+    },
+    {
+      "name": "missing_artifact_digest",
+      "changes": {
+        "artifact_digest_after": null
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "MISSING_OR_INVALID_OBSERVATION"
+    },
+    {
+      "name": "no_stage_receipt",
+      "changes": {
+        "stage_receipt_digest": ""
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "MISSING_OR_INVALID_OBSERVATION"
+    },
+    {
+      "name": "unsupported_revision",
+      "changes": {
+        "stage_revision": 2
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "UNSUPPORTED_STAGE_REVISION"
+    },
+    {
+      "name": "bool_is_not_revision",
+      "changes": {
+        "stage_revision": true
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "UNSUPPORTED_STAGE_REVISION"
+    },
+    {
+      "name": "unverified_stage",
+      "changes": {
+        "stage_verified": false
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "STAGE_NOT_VERIFIED"
+    },
+    {
+      "name": "unknown_stage_verification",
+      "changes": {
+        "stage_verified": null
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "STAGE_NOT_VERIFIED"
+    },
+    {
+      "name": "json_bytes_changed",
+      "changes": {
+        "json_digest_after": "json-B"
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "JSON_BYTES_CHANGED"
+    },
+    {
+      "name": "json_identity_changed",
+      "changes": {
+        "json_identity_after": "file-2"
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "JSON_IDENTITY_CHANGED"
+    },
+    {
+      "name": "stage_identity_changed",
+      "changes": {
+        "stage_identity_after": "stage-2"
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "STAGE_IDENTITY_CHANGED"
+    },
+    {
+      "name": "shadow_stale",
+      "changes": {
+        "shadow_source_digest": "json-old"
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "SHADOW_SOURCE_DIVERGED"
+    },
+    {
+      "name": "artifact_changed",
+      "changes": {
+        "artifact_digest_after": "artifact-B"
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "ARTIFACT_OBSERVATIONS_DIVERGED"
+    },
+    {
+      "name": "artifact_aba_undetectable",
+      "changes": {},
+      "expected_status": "ELIGIBLE_FOR_SEPARATE_VALIDATION",
+      "expected_reason": "PROVISIONAL_CONSISTENCY_ONLY"
+    },
+    {
+      "name": "multiple_errors_missing_wins",
+      "changes": {
+        "json_digest_before": null,
+        "stage_revision": 2,
+        "stage_verified": false
+      },
+      "expected_status": "REFUSE",
+      "expected_reason": "MISSING_OR_INVALID_OBSERVATION"
+    }
+  ]
+}

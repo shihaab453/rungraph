@@ -1,0 +1,634 @@
+{
+  "$defs": {
+    "Artifact": {
+      "additionalProperties": false,
+      "else": {
+        "properties": {
+          "digest_format": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "artifact_type": {
+            "const": "directory"
+          }
+        },
+        "required": [
+          "artifact_type"
+        ]
+      },
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path relative to the manifest's folder, using forward slashes.",
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "artifact_type": {
+          "default": "file",
+          "description": "What the path names on disk. Omitted means file. 'directory' records a folder checked with --directory-artifacts and authored with add --directory or rehash --directory.",
+          "enum": [
+            "file",
+            "directory"
+          ],
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "digest_format": {
+          "anyOf": [
+            {
+              "const": "runevidence-directory-v1",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How sha256 was computed for a directory. Required for directories, absent for files.",
+          "title": "Digest Format"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "size_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Bytes"
+        },
+        "volatile": {
+          "default": false,
+          "description": "Content is expected to change on every rerun (e.g. a log with timestamps). Only the file's existence is checked; sha256 and size_bytes are ignored.",
+          "title": "Volatile",
+          "type": "boolean"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Free-form label, e.g. dataset, config, checkpoint, metrics, log.",
+          "title": "Kind"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Run that produced this file.",
+          "title": "Run Id"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "dataset_id": {
+          "minLength": 1,
+          "type": "string",
+          "title": "Dataset Id",
+          "description": "Semantic dataset label (schema 0.2). Not an artifact ID; multiple artifacts may share it.",
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "then": {
+        "properties": {
+          "digest_format": {
+            "const": "runevidence-directory-v1"
+          }
+        },
+        "required": [
+          "digest_format"
+        ]
+      },
+      "title": "Artifact",
+      "type": "object"
+    },
+    "EvaluationProtocol": {
+      "additionalProperties": false,
+      "description": "A recorded evaluation protocol, resolved as a whole value.",
+      "properties": {
+        "protocol_id": {
+          "minLength": 1,
+          "title": "Protocol Id",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          ],
+          "title": "Version"
+        }
+      },
+      "required": [
+        "protocol_id"
+      ],
+      "title": "EvaluationProtocol",
+      "type": "object"
+    },
+    "EvidenceReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "claim": {
+          "description": "The statement being made, in plain words.",
+          "minLength": 1,
+          "title": "Claim",
+          "type": "string"
+        },
+        "supports": {
+          "description": "IDs of results, artifacts or runs backing the claim.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Supports",
+          "type": "array"
+        },
+        "contradicts": {
+          "description": "IDs of results, artifacts or runs that cut against it.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Contradicts",
+          "type": "array"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where the claim is made, e.g. 'README.md#results'.",
+          "title": "Source"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "claim"
+      ],
+      "title": "EvidenceReference",
+      "type": "object"
+    },
+    "MetricDefinition": {
+      "additionalProperties": false,
+      "description": "A recorded metric definition, resolved as a whole value.",
+      "properties": {
+        "definition_id": {
+          "minLength": 1,
+          "title": "Definition Id",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "higher_is_better": {
+          "type": "boolean",
+          "title": "Higher Is Better"
+        },
+        "averaging": {
+          "minLength": 1,
+          "type": "string",
+          "title": "Averaging",
+          "pattern": "\\S"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          ],
+          "title": "Version"
+        }
+      },
+      "required": [
+        "definition_id"
+      ],
+      "title": "MetricDefinition",
+      "type": "object"
+    },
+    "Project": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "Project",
+      "type": "object"
+    },
+    "Relationship": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/RelationshipType"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "type"
+      ],
+      "title": "Relationship",
+      "type": "object"
+    },
+    "RelationshipType": {
+      "enum": [
+        "produced_by",
+        "input_to",
+        "result_of",
+        "reported_in",
+        "derived_from",
+        "supports",
+        "contradicts"
+      ],
+      "title": "RelationshipType",
+      "type": "string"
+    },
+    "Result": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "run_id": {
+          "description": "Run this result belongs to.",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "name": {
+          "description": "What was measured, e.g. 'accuracy' or 'val_loss'.",
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "artifact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Artifact the value was read from (e.g. a metrics file).",
+          "title": "Artifact Id"
+        },
+        "locator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "RFC 6901 JSON Pointer into a .json artifact (e.g. '/eval/accuracy'). When set, the recorded value is compared against the file.",
+          "title": "Locator"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "metric_definition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "run_id",
+        "name"
+      ],
+      "title": "Result",
+      "type": "object"
+    },
+    "Run": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "params": {
+          "additionalProperties": true,
+          "description": "Hyperparameters or settings, free-form.",
+          "title": "Params",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "conditions": {
+          "$ref": "#/$defs/RunConditions"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Run",
+      "type": "object"
+    },
+    "RunConditions": {
+      "additionalProperties": false,
+      "description": "First-class recorded run conditions (schema 0.2).\n\nOmitted members fall back to legacy metadata. Explicit null means recorded\nUNKNOWN for the split/protocol/source_revision/environment dimensions;\nselector nulls and a null parent are invalid.",
+      "properties": {
+        "evaluation_split": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string",
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evaluation Split"
+        },
+        "evaluation_protocol": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvaluationProtocol"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evaluation_dataset_artifact_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "type": "string",
+          "title": "Evaluation Dataset Artifact Id"
+        },
+        "model_checkpoint_artifact_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "type": "string",
+          "title": "Model Checkpoint Artifact Id"
+        },
+        "source_revision": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string",
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Revision"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Environment"
+        }
+      },
+      "title": "RunConditions",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.2",
+      "default": "0.2",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "project": {
+      "$ref": "#/$defs/Project"
+    },
+    "runs": {
+      "items": {
+        "$ref": "#/$defs/Run"
+      },
+      "title": "Runs",
+      "type": "array"
+    },
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/Artifact"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "results": {
+      "items": {
+        "$ref": "#/$defs/Result"
+      },
+      "title": "Results",
+      "type": "array"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/EvidenceReference"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "relationships": {
+      "items": {
+        "$ref": "#/$defs/Relationship"
+      },
+      "title": "Relationships",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "project"
+  ],
+  "title": "Manifest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:runevidence:manifest:0.2"
+}

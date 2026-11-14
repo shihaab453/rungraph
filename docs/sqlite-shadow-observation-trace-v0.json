@@ -1,0 +1,316 @@
+{
+  "schema": "rungraph-private-claimed-trace-policy-v0",
+  "status": "STATIC_SPECIFICATION_UNTESTED",
+  "warning": "Only caller-provided claims; no authenticated time, ordinal, identity, receipt, file or native observation. A visible A-B-A is refused, an unobserved A-B-A remains undetectable. ELIGIBLE means only eligible for an entirely separate validation, never safe to stage/use or permission to write.",
+  "base_point": {
+    "ordinal": 0,
+    "json_digest": "json-A",
+    "json_identity": "json-id-1",
+    "shadow_source_digest": "json-A",
+    "stage_identity": "stage-id-1",
+    "stage_receipt_digest": "receipt-A",
+    "stage_revision": 1,
+    "stage_verified": true,
+    "artifact_digest": "artifact-A"
+  },
+  "default_point_count": 3,
+  "cases": [
+    {
+      "name": "stable_claimed_three_points",
+      "edits": [],
+      "expected_status": "ELIGIBLE_FOR_SEPARATE_VALIDATION",
+      "expected_reason": "PROVISIONAL_CLAIMED_TRACE_STABILITY_ONLY",
+      "meaning": "Claims agree, not a proof of stable filesystem state."
+    },
+    {
+      "name": "undisclosed_aba_indistinguishable",
+      "edits": [],
+      "expected_status": "ELIGIBLE_FOR_SEPARATE_VALIDATION",
+      "expected_reason": "PROVISIONAL_CLAIMED_TRACE_STABILITY_ONLY",
+      "meaning": "Hypothetical unobserved A-B-A between claims cannot be distinguished from stability."
+    },
+    {
+      "name": "observed_json_aba",
+      "edits": [
+        {
+          "point": 1,
+          "field": "json_digest",
+          "value": "json-B"
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "OBSERVED_JSON_BYTES_TRANSITION",
+      "meaning": "A-B-A claims are explicitly visible."
+    },
+    {
+      "name": "observed_artifact_aba",
+      "edits": [
+        {
+          "point": 1,
+          "field": "artifact_digest",
+          "value": "artifact-B"
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "OBSERVED_ARTIFACT_TRANSITION",
+      "meaning": "R9-like observed artifact mutation and restoration."
+    },
+    {
+      "name": "observed_stage_receipt_aba",
+      "edits": [
+        {
+          "point": 1,
+          "field": "stage_receipt_digest",
+          "value": "receipt-B"
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "OBSERVED_STAGE_RECEIPT_TRANSITION",
+      "meaning": "Receipt hash observations change, but no authenticity is established."
+    },
+    {
+      "name": "observed_json_identity_aba",
+      "edits": [
+        {
+          "point": 1,
+          "field": "json_identity",
+          "value": "json-id-2"
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "OBSERVED_JSON_IDENTITY_TRANSITION",
+      "meaning": "Identical JSON bytes may accompany identity change."
+    },
+    {
+      "name": "observed_stage_identity_aba",
+      "edits": [
+        {
+          "point": 1,
+          "field": "stage_identity",
+          "value": "stage-id-2"
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "OBSERVED_STAGE_IDENTITY_TRANSITION",
+      "meaning": ""
+    },
+    {
+      "name": "stale_shadow_at_intermediate",
+      "edits": [
+        {
+          "point": 1,
+          "field": "shadow_source_digest",
+          "value": "json-stale"
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "SHADOW_SOURCE_DIVERGED",
+      "meaning": "Source-to-shadow relation is only caller-supplied."
+    },
+    {
+      "name": "empty_receipt",
+      "edits": [
+        {
+          "point": 2,
+          "field": "stage_receipt_digest",
+          "value": ""
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "MISSING_OR_INVALID_OBSERVATION",
+      "meaning": ""
+    },
+    {
+      "name": "whitespace_artifact",
+      "edits": [
+        {
+          "point": 0,
+          "field": "artifact_digest",
+          "value": "  "
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "MISSING_OR_INVALID_OBSERVATION",
+      "meaning": ""
+    },
+    {
+      "name": "wrong_type_json",
+      "edits": [
+        {
+          "point": 1,
+          "field": "json_digest",
+          "value": 42
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "MISSING_OR_INVALID_OBSERVATION",
+      "meaning": ""
+    },
+    {
+      "name": "wrong_revision",
+      "edits": [
+        {
+          "point": 2,
+          "field": "stage_revision",
+          "value": 2
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "UNSUPPORTED_STAGE_REVISION",
+      "meaning": ""
+    },
+    {
+      "name": "bool_revision_rejected",
+      "edits": [
+        {
+          "point": 1,
+          "field": "stage_revision",
+          "value": true
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "UNSUPPORTED_STAGE_REVISION",
+      "meaning": ""
+    },
+    {
+      "name": "verification_false",
+      "edits": [
+        {
+          "point": 1,
+          "field": "stage_verified",
+          "value": false
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "STAGE_NOT_VERIFIED",
+      "meaning": ""
+    },
+    {
+      "name": "verification_nonbool",
+      "edits": [
+        {
+          "point": 2,
+          "field": "stage_verified",
+          "value": 1
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "STAGE_NOT_VERIFIED",
+      "meaning": ""
+    },
+    {
+      "name": "gap_in_ordinals",
+      "edits": [
+        {
+          "point": 2,
+          "field": "ordinal",
+          "value": 4
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "INVALID_ORDINAL_SEQUENCE",
+      "meaning": "Claimed ordinals are not authenticated by strict ordering."
+    },
+    {
+      "name": "duplicate_ordinal",
+      "edits": [
+        {
+          "point": 1,
+          "field": "ordinal",
+          "value": 0
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "INVALID_ORDINAL_SEQUENCE",
+      "meaning": ""
+    },
+    {
+      "name": "boolean_ordinal",
+      "edits": [
+        {
+          "point": 1,
+          "field": "ordinal",
+          "value": true
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "INVALID_ORDINAL_SEQUENCE",
+      "meaning": ""
+    },
+    {
+      "name": "missing_string_beats_revision",
+      "edits": [
+        {
+          "point": 0,
+          "field": "json_digest",
+          "value": null
+        },
+        {
+          "point": 2,
+          "field": "stage_revision",
+          "value": 2
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "MISSING_OR_INVALID_OBSERVATION",
+      "meaning": ""
+    },
+    {
+      "name": "json_transition_beats_shadow_divergence",
+      "edits": [
+        {
+          "point": 1,
+          "field": "json_digest",
+          "value": "json-B"
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "OBSERVED_JSON_BYTES_TRANSITION",
+      "meaning": ""
+    },
+    {
+      "name": "receipt_transition_beats_artifact_transition",
+      "edits": [
+        {
+          "point": 1,
+          "field": "stage_receipt_digest",
+          "value": "receipt-B"
+        },
+        {
+          "point": 2,
+          "field": "artifact_digest",
+          "value": "artifact-B"
+        }
+      ],
+      "expected_status": "REFUSE",
+      "expected_reason": "OBSERVED_STAGE_RECEIPT_TRANSITION",
+      "meaning": ""
+    }
+  ],
+  "shape_cases": [
+    {
+      "name": "two_points_insufficient",
+      "point_count": 2,
+      "expected_status": "REFUSE",
+      "expected_reason": "INVALID_TRACE_SHAPE"
+    },
+    {
+      "name": "empty_trace",
+      "point_count": 0,
+      "expected_status": "REFUSE",
+      "expected_reason": "INVALID_TRACE_SHAPE"
+    },
+    {
+      "name": "too_many_points",
+      "point_count": 33,
+      "expected_status": "REFUSE",
+      "expected_reason": "INVALID_TRACE_SHAPE"
+    },
+    {
+      "name": "four_stable_points",
+      "point_count": 4,
+      "expected_status": "ELIGIBLE_FOR_SEPARATE_VALIDATION",
+      "expected_reason": "PROVISIONAL_CLAIMED_TRACE_STABILITY_ONLY"
+    }
+  ]
+}

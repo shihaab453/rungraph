@@ -2,3 +2,6 @@
 # line endings on checkout (core.autocrlf), or every recorded sha256 breaks.
 examples/** -text
 tests/data/** -text
+# Schema artifacts are hashed byte-for-byte by tests/test_schema_freeze.py.
+# Keep them LF on every checkout (Windows core.autocrlf must not rewrite them).
+schema/** -text

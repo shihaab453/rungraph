@@ -1,0 +1,59 @@
+{
+  "schema_version": "0.2",
+  "project": {
+    "id": "proj-stage3b1-t",
+    "name": "Stage 3b1 target"
+  },
+  "runs": [
+    {
+      "id": "run-stage3b1-t",
+      "name": "target run",
+      "metadata": {
+        "evaluation": {
+          "split": "test",
+          "protocol": {
+            "protocol_id": "legacy-protocol",
+            "version": 1
+          }
+        },
+        "source_revision": "legacy-rev"
+      },
+      "conditions": {
+        "evaluation_split": "validation",
+        "evaluation_protocol": {
+          "protocol_id": "first-class-protocol",
+          "version": "v1"
+        },
+        "source_revision": "first-class-rev"
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "dataset-stage3b1-t",
+      "path": "data/target.csv",
+      "kind": "dataset",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dataset_id": "semantic-dataset"
+    }
+  ],
+  "results": [
+    {
+      "id": "res-stage3b1-t",
+      "run_id": "run-stage3b1-t",
+      "name": "accuracy",
+      "value": 0.9,
+      "metric_definition": {
+        "definition_id": "accuracy-v1",
+        "higher_is_better": true
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "source": "dataset-stage3b1-t",
+      "target": "run-stage3b1-t",
+      "type": "input_to"
+    }
+  ]
+}

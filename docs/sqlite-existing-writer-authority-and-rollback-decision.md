@@ -1,0 +1,46 @@
+# Synthetic existing-path writer: authority and rollback decision
+
+Status: **P7 persistence safety hold remains active**. This is bounded Windows synthetic evidence, not authorization to migrate, activate a public SQLite reader or writer, or modify real manifests. R10/R10R1 retain their original classifications; this report does not upgrade historical Git or permission evidence.
+
+## Observed R11 behavior
+
+Under the pinned Python guard, the existing-path `save_manifest` call wrote an invented JSON file in an owned Temp fixture. Python-call wrappers recorded a named temporary sibling, write, flush, fsync, close, `os.replace`, and missing-ok unlink. The synthetic source changed from 104 to 249 bytes and its inode changed to the temporary file's inode; the staged SQLite bytes and observed metadata stayed unchanged. The private reader refused with `stale-source`, `source`, `identity-before`: identity checking took precedence over comparing source bytes. Exact bytes, file metadata, temporary name and the path allowlist are in the trace. Observer hash reads are extra reads, and the wrapper sequence is not a native syscall trace. No replace failure or concurrency was injected.
+
+A separate clean existing file round-tripped through `save_manifest` and `load_manifest`; another staged source was independently overwritten while its DB remained unchanged and the reader refused the stale source. This shows successful calls in this sequential synthetic schedule, not atomic compare-and-swap or crash durability. An invalid object failed before a temporary file appeared. JSON, staged SQLite, and physical artifacts remain distinct authorities. `save_manifest` has no expected-source parameter. Source review shows `save_raw` performs an expected-byte check before replace, but that check is not an atomic CAS.
+
+The final focused suite reported 65 passing cases, including 62 inherited cases. The three valid SQLite samples independently reopened and passed internal integrity and source hash/length checks; each differed from live JSON. A deliberately corrupted copy was rejected, and observed source scratch inventories were unchanged by the read-only observer. No claim follows for all stores or actual native concurrency.
+
+**Deviation:** An inherited R7 focused test invoked CLI `rehash` and `add` in dry-run mode, with test writer sentinels enabled. The R11 handoff prohibited executing CLI edit routes. Those dry-run calls were executed twice as part of full focused runs before this conflict was identified. No actual CLI writer invocation is claimed, but the execution restriction was breached; do not classify R11 as an unqualified pass.
+
+## Read-only writer route closure
+
+| Route (source review only) | Authority and writes, locks, backup | Risk and separate authorization prerequisites |
+| --- | --- | --- |
+| `cli.cmd_init` → adapter discovery/extraction → `_backup_existing` when existing → `save_manifest` | JSON destination; forced overwrite can create a generation backup; existing-path replace has no expected-source guard or cooperative lock. | Review adapter and backup path closure, collisions and recovery; coordinate every writer and obtain separate authorization before any real use in a cutover. Neither forced init nor backup was executed in R11. |
+| `cli.cmd_rehash` / `cmd_add` → planners → `_finish_edit` → `save_raw` | Loaded JSON snapshot and artifact reads; dry run omits save; normal save stages a sibling, checks expected JSON bytes, then replaces. No shared SQLite CAS or cooperative lock. | Expected-byte check has an interposition window; review artifact consistency, all input paths, and cross-writer coordination. The inherited dry-run deviation above is the only R11 CLI edit execution. |
+| `directory_apply.apply_directory_proposal` → source check and rebuild → `save_raw` | JSON snapshot plus physical directory reinspection; no cooperative lock in this route; dry-run returns without saving. | Rebuild and source checks do not seal the tree or prevent another writer after comparison. Scanner, apply and filesystem paths require a separate guard review and authorization; R11 did not execute them as routes. |
+| `directory_cooperative_apply.apply_directory_proposal_cooperatively` → dry-run apply → exclusive sibling lock → recheck → apply → release | JSON and tree remain inputs; lock coordinates participants only, and cleanup depends on retained ownership. No backup or shared stage CAS. | Nonparticipants can bypass the lock, and interrupted lock ownership/recovery needs an explicit policy. Review lock identity, stale lock, error and cleanup semantics and authorize separately before real execution. |
+| Private stage `stage_validated_manifest` / `compare_and_update_stage` | Invented source bytes in a private synthetic SQLite store; revision CAS applies only to participating stage updates and does not write JSON or artifacts. | Source parity is advisory; stage CAS does not arbitrate legacy writers. A cutover needs a single defined authority, common coordination protocol, recovery and migration design. |
+
+The existing R10 tests directly exercise `save_raw` and new-path `save_manifest` on invented files; R11's new trace exercises existing-path `save_manifest`. Route descriptions above are source interpretation unless expressly identified as observed. E4 did not authorize invoking production routes.
+
+## Decision prerequisites
+
+Before any separately authorized cutover: close the complete writer and backup inventory; define the canonical authority and reconciliation of JSON, SQLite and physical artifacts; coordinate hostile and nonparticipating writers with a verified protocol; test crash interruption, recovery and rollback; characterize Windows ACL and owner behavior without assuming equivalence; specify backup restoration and acceptance criteria; and independently verify the bounded Git and filesystem preservation record. The historical 3,102 directory rows and earlier permission effects retain unknown-causation qualifications. No R11 observation resolves those gaps. A guarded smoke check imported the public core and both adapters, found no private modules loaded, and compared seven help outputs before and after adapter imports; it does not compare against an independently archived prior release. Power-loss testing, real manifests, ACL mutation and actual cross-process concurrency are outside this evidence.
+
+### D17-S1R6 writer-route reconciliation, 2026-11-08 (append-only; static assessment)
+The historical writer table remains preserved; its current completeness caveat is that `cmd_schema` with `-o FILE` writes/truncates a caller-selected schema output file (`src/runevidence/cli.py:846-854`). This is a pre-existing file writer, not a JSON-manifest or SQLite writer, and was omitted from the table. The public CLI now exposes 22 commands (seven original, fifteen added static-only JSON-reader/projection handlers). The prior seven-command help-path observation is historical and has not been rerun for all 22 routes. Installed adapter entry points can execute third-party import code and were not proven side-effect-free. JSON production authority and P7 HOLD remain unchanged.
+
+## Dated note — 2026-11-11 (overnight session): current source identities
+
+- Current `src/runevidence/cli.py` LF SHA-256 is `500148e36b7b08f2e24910c7dce6df8d6704322dff511d44618d8dbc60521ba2` with 23 parser routes including `validate-batch`; the exact tested bytes are covered by `tests/test_experimental_cli_parser_contract.py`.
+- Current `src/runevidence/manifest.py` SHA-256 is `a47494717308b5a73b65a161b81418e287b6e7c6e39c71bf4d6dc2f7b0e374fa`; duplicate-key and numeric-overflow rejection are retained, legacy `NaN`/`Infinity`/`-Infinity` are accepted only at `results[*].value`, and schema findings use privacy-safe pointers.
+- `src/runevidence/report.py` remains `1eb3fdc9236018c3d2c4ff02ee9c968cfbd602b085bdfe4592eb5cb6fa0df063` and `README.md` remains `692c007d83219aaee49048d10b2f17793560bf4379475f0dbcde8f6c32c655eb`.
+- This is an append-only dated current-state note, not a pin refresh; all historical text and prior gates remain as written, and no SQLite activation, B4 qualification, CLI runtime/plugin qualification or cutover is implied.
+
+## Dated note - 2026-11-11 (Stage 2b): comparability CLI and pins
+
+- Current `src/runevidence/cli.py` LF SHA-256 is `a4a4b921921f5e8fe1b04ca79d40e5dcffb2678e28ad5a0313ff6c3f25c3f147` (CRLF `83c2dbfa6cccbd9e5c505d2cef6d244901179caf67ba70054dc2dfde6b2d2d3a`) with 24 parser routes; `comparability` is registered directly after `compare`, and removing it recovers the exact prior 23-route sequence.
+- Reader test pin: `READER_HASH` is `582a27bca1dfe64e1d7aaf2c18376044511431b2c08cc270bbb6581cea604ecc`; the superseded 23-route reader digest `cb614ec86203f3845fb54e0c1f92f5f2af0d0e3ea1b294d77392b49284e0dde3` is preserved in the historical tuple.
+- `README.md` SHA-256 is `164e01cb976ca3770cd90521542e03dfb947c0fe2067288011f0d814bb606a06`. The controlled refresh and its proof packet are documented in `docs/comparability-stage2b-pin-refresh.md`.
+- Append-only note. No SQLite activation, B4 qualification, plugin/runtime qualification or cutover is implied; JSON remains production authority and P7 HOLD remains.

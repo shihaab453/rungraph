@@ -35,6 +35,12 @@ class EditError(Exception):
     """The edit cannot be made as asked; nothing was written."""
 
 
+class LocatorRefreshUnsupported(EditError):
+    """A rehash cannot refresh a manifest that carries an object locator."""
+
+    code = "LOCATOR_REFRESH_UNSUPPORTED"
+
+
 @dataclass
 class FileChange:
     id: str
@@ -194,6 +200,13 @@ def plan_rehash(
     False makes them hash-checked again, None keeps each one as it is."""
     manifest, root = loaded.manifest, loaded.root
     plan = RehashPlan()
+    if any(
+        res.locator is not None and type(res.locator) is not str
+        for res in manifest.results
+    ):
+        # Structured locators have no refresh semantics yet. Refuse the whole
+        # operation before any file is read or any raw document is edited.
+        raise LocatorRefreshUnsupported()
     unreadable: list[str] = []
     for i in indexes:
         art = manifest.artifacts[i]
@@ -315,7 +328,7 @@ def _reread_values(loaded: LoadedManifest, raw: dict, artifact_ids: set[str], pl
                 if path.stat().st_size > MAX_JSON_BYTES:
                     raise ValueError(f"file larger than {MAX_JSON_BYTES} bytes")
                 docs[art.id] = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError) as exc:
+            except (OSError, ValueError, RecursionError) as exc:
                 docs[art.id] = exc
         doc = docs[art.id]
         if isinstance(doc, Exception):
@@ -413,16 +426,20 @@ def plan_add(
             run = _nearest_run(manifest, rel)
             if run:
                 plan.inferred_runs[new_id] = run
-        art = Artifact(
-            id=new_id,
-            path=rel,
-            sha256=None if volatile else sha256_file(path),
-            size_bytes=None if volatile else path.stat().st_size,
-            volatile=volatile,
-            kind=kind,
-            run_id=run,
-        )
-        plan.added.append(artifact_to_dict(art))
+        art_fields: dict[str, Any] = {
+            "id": new_id,
+            "path": rel,
+            "sha256": None if volatile else sha256_file(path),
+            "size_bytes": None if volatile else path.stat().st_size,
+        }
+        if volatile:
+            art_fields["volatile"] = True
+        if kind is not None:
+            art_fields["kind"] = kind
+        if run is not None:
+            art_fields["run_id"] = run
+        art = Artifact(**art_fields)
+        plan.added.append(artifact_to_dict(art, schema_version=manifest.schema_version))
     raw.setdefault("artifacts", []).extend(plan.added)
     Manifest.model_validate(raw)  # our own edit must leave a valid manifest
     return plan
