@@ -119,13 +119,14 @@ HISTORICAL_READER_DIGEST_23 = (
     "cb614ec86203f3845fb54e0c1f92f5f2af0d0e3ea1b294d77392b49284e0dde3"
 )
 # ---- CURRENT PROSPECTIVE PINS: M51 locator slice A, 2026-11-12 ----
-# Exact reviewed 26-route CLI bytes in LF and CRLF checkout forms. Slice C
-# phase 4a (2026-11-14) adds migrate --to 0.4, version-keyed conditions text and
-# the init 0.4 refusal; the 26-route surface is unchanged. Each pin is an exact
-# byte SHA-256. Nothing is normalized during checking. Static != plugin safety.
+# Exact reviewed 26-route CLI bytes in LF and CRLF checkout forms. Slice D
+# phase 4a (2026-11-14) adds migrate --to 0.5, the init 0.5 refusal and the
+# version-keyed conditions 0.5 text; the 26-route surface is unchanged. Each
+# pin is an exact byte SHA-256. Nothing is normalized during checking. Static
+# != plugin safety.
 CLI_HASH = frozenset({
-    "f58dc371cd3b55cc02ad35fb9efa092aa95f0c43245ee5ae05d9ef4a6da0344f",  # LF
-    "1e94d6739c05d3e510fc513c433291e71088445c61c4c8700ad4a33d675a94a1",  # CRLF
+    "acfb857e1e1b0af5963036c4e848e356449f2b7f8fe97e38209675af559e9084",  # LF
+    "67ddbd0d38b65038163c107ec5e82cb4666f0788ed769af54bbd16d889ca283b",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.

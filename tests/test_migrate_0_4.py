@@ -322,34 +322,37 @@ def test_0_4_downgrade_text_is_fixed(tmp_path):
     assert_no_writes(folder, before)
 
 
-def test_unsupported_target_text_names_0_4(tmp_path):
+def test_unsupported_target_text_names_0_5(tmp_path):
     folder = tmp_path / "exp"
     path = write(folder, doc("0.2"))
     before = path.read_bytes()
 
-    code, out, err = run(["migrate", str(folder), "--to", "0.5"])
+    code, out, err = run(["migrate", str(folder), "--to", "0.6"])
 
     assert (code, err) == (2, "")
     assert out == (
-        "ERROR (UNSUPPORTED_TARGET): only --to 0.2, --to 0.3 or --to 0.4 is supported; "
-        "downgrade and other versions are not available. Nothing was written.\n"
+        "ERROR (UNSUPPORTED_TARGET): only --to 0.2, --to 0.3, --to 0.4 or --to 0.5 is "
+        "supported; downgrade and other versions are not available. Nothing was written.\n"
     )
     assert path.read_bytes() == before
 
 
-def test_migrate_help_and_to_help_name_0_4():
+def test_migrate_help_and_to_help_name_0_5():
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = cli.main(["migrate", "--help"])
     text = out.getvalue()
     assert (code, err.getvalue()) == (0, "")
-    assert "target schema version (0.2, 0.3 or 0.4)" in text
+    assert "target schema version (0.2, 0.3, 0.4 or 0.5)" in text
 
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = cli.main(["--help"])
     assert (code, err.getvalue()) == (0, "")
-    assert "declare an existing manifest as schema 0.2, 0.3 or 0.4" in out.getvalue()
+    # The top-level list wraps long command help; compare normalized whitespace.
+    assert "declare an existing manifest as schema 0.2, 0.3, 0.4 or 0.5" in " ".join(
+        out.getvalue().split()
+    )
 
 
 def test_lone_surrogate_in_a_0_3_string_locator_is_serialization_failed(tmp_path):
