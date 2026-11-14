@@ -28,6 +28,7 @@ from runevidence.models import (
     Artifact,
     EvidenceReference,
     Manifest,
+    Manifest04,
     Project,
     Relationship,
     Result,
@@ -135,6 +136,19 @@ def _loaded_0_3(tag: str, *, split: str = "test") -> LoadedManifest:
     manifest = manifest.model_copy(
         update={"schema_version": "0.3", "runs": [run]}
     )
+    return LoadedManifest(
+        manifest=manifest,
+        path=Path(f"/synthetic/{tag}/runevidence.json"),
+        source_bytes=b"",
+    )
+
+
+def _loaded_0_4(tag: str) -> LoadedManifest:
+    # A real Manifest04: the guard runs before any mapping, but the model type
+    # must match what load_manifest returns for a 0.4 source.
+    data = _make_manifest(tag).model_dump()
+    data["schema_version"] = "0.4"
+    manifest = Manifest04.model_validate(data)
     return LoadedManifest(
         manifest=manifest,
         path=Path(f"/synthetic/{tag}/runevidence.json"),
@@ -522,6 +536,29 @@ def test_0_3_target_is_refused(monkeypatch):
 
 def test_0_3_baseline_takes_precedence_when_both_are_0_3(monkeypatch):
     outcome = _compare(monkeypatch, _loaded_0_3("b"), _loaded_0_3("t"))
+    _assert_error(outcome, code=command.UNSUPPORTED_VERSION, side="baseline")
+    assert outcome.text == "ERROR UNSUPPORTED_VERSION (baseline) (exit 2)"
+
+
+def test_0_4_baseline_is_refused_before_comparison(monkeypatch):
+    baseline = _loaded_0_4("b")
+    target = _loaded("t")
+    outcome = _compare(monkeypatch, baseline, target)
+    _assert_error(outcome, code=command.UNSUPPORTED_VERSION, side="baseline")
+    assert outcome.text == "ERROR UNSUPPORTED_VERSION (baseline) (exit 2)"
+    assert "COMPARABLE_RECORDED_CONDITIONS" not in json.dumps(outcome.document)
+
+
+def test_0_4_target_is_refused(monkeypatch):
+    baseline, _ = _pair()
+    target = _loaded_0_4("t")
+    outcome = _compare(monkeypatch, baseline, target)
+    _assert_error(outcome, code=command.UNSUPPORTED_VERSION, side="target")
+    assert outcome.text == "ERROR UNSUPPORTED_VERSION (target) (exit 2)"
+
+
+def test_0_4_baseline_takes_precedence_when_both_are_0_4(monkeypatch):
+    outcome = _compare(monkeypatch, _loaded_0_4("b"), _loaded_0_4("t"))
     _assert_error(outcome, code=command.UNSUPPORTED_VERSION, side="baseline")
     assert outcome.text == "ERROR UNSUPPORTED_VERSION (baseline) (exit 2)"
 

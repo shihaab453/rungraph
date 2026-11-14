@@ -8,8 +8,10 @@ from pathlib import Path
 import pytest
 
 from runevidence.checks import run_checks
+from runevidence.checks.graph import check_graph
 from runevidence.findings import Code, Severity
 from runevidence.manifest import load_manifest
+from runevidence.models import Manifest, Manifest04
 
 MANIFEST = "runevidence.json"
 
@@ -320,3 +322,42 @@ def test_reported_in_keeps_every_distinct_valid_source(experiment, broken_source
     assert "baseline-log" in at_risk[0].message
     assert Code.conflicting_provenance not in {f.code for f in report.findings}
     assert Code.dangling_reference in {f.code for f in report.findings}
+
+
+def _claim_doc(version: str) -> dict:
+    return {
+        "schema_version": version,
+        "project": {"id": "p", "name": "P"},
+        "runs": [{"id": "run", "name": "Run"}],
+        "artifacts": [],
+        "results": [
+            {"id": "res", "run_id": "run", "name": "val", "value": 0.9}
+        ],
+        "evidence": [{"id": "claim", "claim": "c", "supports": ["res"]}],
+        "relationships": [],
+    }
+
+
+def test_claim_unverified_message_names_schema_0_4():
+    manifest = Manifest04.model_validate(_claim_doc("0.4"))
+
+    findings = check_graph(manifest, set(), unverified={"res"})
+
+    finding = next(f for f in findings if f.code is Code.claim_unverified)
+    assert finding.severity is Severity.warning
+    assert finding.message == (
+        "Claim 'claim' cites only results with no locator in schema 0.4; "
+        "their recorded values were not checked"
+    )
+
+
+def test_claim_unverified_message_keeps_schema_0_3_bytes():
+    manifest = Manifest.model_validate(_claim_doc("0.3"))
+
+    findings = check_graph(manifest, set(), unverified={"res"})
+
+    finding = next(f for f in findings if f.code is Code.claim_unverified)
+    assert finding.message == (
+        "Claim 'claim' cites only results with no locator in schema 0.3; "
+        "their recorded values were not checked"
+    )

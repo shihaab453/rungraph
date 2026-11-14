@@ -1803,10 +1803,20 @@ def test_schema_0_1_stdin_is_not_consumed(tmp_path):
     assert trap.reads == []
 
 
-def test_explicit_0_4_is_manifest_load_failed(tmp_path):
+def test_explicit_0_4_is_unsupported_version(tmp_path):
+    # 0.4 loads (csv-cell slice C phase 1), but conditions authoring remains
+    # 0.2-only. The version carrier selects the 0.4 command text.
     path = _write_doc(tmp_path / "exp", _base_doc(version="0.4"))
     patch = _write_patch(tmp_path, '{"evaluation_split": "test"}')
-    _expect("MANIFEST_LOAD_FAILED", lambda: _author(path, patch=patch))
+    error = _expect("UNSUPPORTED_VERSION", lambda: _author(path, patch=patch))
+    assert error.version == "0.4"
+
+
+def test_explicit_0_3_version_carrier_is_0_3(tmp_path):
+    path = _write_doc(tmp_path / "exp", _base_doc(version="0.3"))
+    patch = _write_patch(tmp_path, '{"evaluation_split": "test"}')
+    error = _expect("UNSUPPORTED_VERSION", lambda: _author(path, patch=patch))
+    assert error.version == "0.3"
 
 
 def test_explicit_0_3_is_unsupported_version(tmp_path):

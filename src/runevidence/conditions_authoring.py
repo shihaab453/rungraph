@@ -34,6 +34,7 @@ from .manifest import (
     dump_raw,
     load_manifest,
     save_raw,
+    validate_manifest,
 )
 from .migrate import (
     MigrationError,
@@ -106,10 +107,13 @@ class ConditionsError(Exception):
     and tracebacks never travel through this type.
     """
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, version: Optional[str] = None) -> None:
         if code not in CONDITIONS_ERROR_CODES:
             raise ValueError("unknown conditions error code")
         self.code = code
+        # The declared source schema, for version-keyed command text. It never
+        # carries a path, ID, field name or value.
+        self.version = version
         super().__init__("conditions update failed")
 
 
@@ -201,9 +205,11 @@ def _author_conditions(
         raise ConditionsError("MANIFEST_LOAD_FAILED") from None
 
     if loaded.manifest.schema_version != TARGET_VERSION:
-        # A 0.3 manifest loads (slice A) but conditions authoring is 0.2-only
-        # until its locator/comparability integration lands.
-        raise ConditionsError("UNSUPPORTED_VERSION")
+        # A 0.3 or 0.4 manifest loads but conditions authoring is 0.2-only.
+        # The version selects the fixed command text; it is not echoed alone.
+        raise ConditionsError(
+            "UNSUPPORTED_VERSION", version=loaded.manifest.schema_version
+        )
 
     run_index = _select_run(loaded.manifest, run_id)
 
@@ -492,7 +498,7 @@ def _build_candidate(
 
 def _validate_candidate(candidate: dict) -> Manifest:
     try:
-        manifest = Manifest.model_validate(candidate)
+        manifest = validate_manifest(candidate)
     except Exception:
         # The loaded source already validated, so the patch introduced the
         # invalidity. No partial repair and no write.

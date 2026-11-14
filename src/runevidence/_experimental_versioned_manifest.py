@@ -24,8 +24,8 @@ from typing import Literal
 
 from pydantic import ValidationError
 
-from .manifest import LoadedManifest
-from .models import Manifest
+from .manifest import LoadedManifest, validate_manifest
+from .models import Manifest, is_manifest
 
 MAX_SOURCE_BYTES = 256 * 1024
 MAX_DB_BYTES = 16 * 1024 * 1024
@@ -102,7 +102,7 @@ def _model(source: bytes) -> Manifest:
     if type(source) is not bytes or not 0 < len(source) <= MAX_SOURCE_BYTES:
         raise _invalid("Expected bounded nonempty exact source bytes")
     try:
-        return Manifest.model_validate(json.loads(source.decode("utf-8")))
+        return validate_manifest(json.loads(source.decode("utf-8")))
     except (ValueError, TypeError, RecursionError, ValidationError) as exc:
         raise _invalid("Source is not a supported UTF-8 Manifest") from exc
 
@@ -270,7 +270,7 @@ def stage_validated_manifest(loaded: LoadedManifest, *, scratch_parent: Path) ->
     The receipt freezes metadata, not the returned Pydantic model or OS state.
     """
     try:
-        if type(loaded) is not LoadedManifest or type(loaded.manifest) is not Manifest:
+        if type(loaded) is not LoadedManifest or not is_manifest(loaded.manifest):
             raise _invalid("Expected the actual LoadedManifest and Manifest")
         model = _model(loaded.source_bytes)
         if model != loaded.manifest:

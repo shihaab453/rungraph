@@ -15,8 +15,8 @@ from typing import Literal
 from .directory_plan import plan_directory_change
 from .directory_preview import DirectoryPreview
 from .edit import EditError
-from .manifest import LoadedManifest, load_raw
-from .models import Manifest
+from .manifest import LoadedManifest, load_raw, validate_manifest
+from .models import is_manifest
 
 MAX_REQUESTS = 8
 MAX_BATCH_JSON_BYTES = 1_048_576  # default json.dumps(asdict(review)), UTF-8
@@ -132,12 +132,12 @@ def _requests(requests: tuple[DirectoryChangeRequest, ...]) -> None:
 
 
 def _model(loaded: LoadedManifest) -> None:
-    if (type(loaded) is not LoadedManifest or type(loaded.manifest) is not Manifest
+    if (type(loaded) is not LoadedManifest or not is_manifest(loaded.manifest)
             or not isinstance(loaded.path, Path) or not loaded.path.is_absolute()
             or type(loaded.source_bytes) is not bytes):
         raise DirectoryBatchError("loaded-mismatch")
     try:
-        current = Manifest.model_validate(load_raw(loaded))
+        current = validate_manifest(load_raw(loaded))
     except (ValueError, TypeError):
         raise DirectoryBatchError("loaded-mismatch") from None
     if current != loaded.manifest:

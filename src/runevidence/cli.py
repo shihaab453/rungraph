@@ -862,6 +862,12 @@ INIT_0_3_REFUSAL = (
     "Move the manifest aside, run init, then runevidence migrate --to 0.3 and reapply the "
     "first-class values."
 )
+INIT_0_4_REFUSAL = (
+    "ERROR: the existing manifest declares schema 0.4. init --force would regenerate it as "
+    "schema 0.1 and cannot carry over first-class values or locators. Nothing was written. "
+    "Move the manifest aside, run init, then runevidence migrate --to 0.4 and reapply the "
+    "first-class values and locators."
+)
 
 
 def _declared_manifest_version(path: Path):
@@ -882,12 +888,17 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         print(f"ERROR: {out} already exists. Use --force to overwrite it.")
         return EXIT_INVALID
     declared = _declared_manifest_version(out) if out.exists() else None
-    if out.exists() and args.force and declared in ("0.2", "0.3"):
+    if out.exists() and args.force and declared in ("0.2", "0.3", "0.4"):
         # Refuse before adapter discovery, backup creation or any write: a raw
-        # 0.2/0.3 declaration means hand-entered data (or a would-be downgrade)
-        # is at risk. An unparseable manifest keeps the legacy
+        # 0.2/0.3/0.4 declaration means hand-entered data (or a would-be
+        # downgrade) is at risk. An unparseable manifest keeps the legacy
         # backup-and-replace path below.
-        print(INIT_0_3_REFUSAL if declared == "0.3" else INIT_0_2_REFUSAL)
+        if declared == "0.4":
+            print(INIT_0_4_REFUSAL)
+        elif declared == "0.3":
+            print(INIT_0_3_REFUSAL)
+        else:
+            print(INIT_0_2_REFUSAL)
         return EXIT_INVALID
     try:
         adapter = get_adapter(args.adapter)
@@ -947,8 +958,8 @@ _MIGRATE_ERROR_TEXT = {
         "Nothing was written."
     ),
     "UNSUPPORTED_TARGET": (
-        "ERROR (UNSUPPORTED_TARGET): only --to 0.2 or --to 0.3 is supported; "
-        "downgrade and other versions are not available. Nothing was written."
+        "ERROR (UNSUPPORTED_TARGET): only --to 0.2, --to 0.3 or --to 0.4 is "
+        "supported; downgrade and other versions are not available. Nothing was written."
     ),
     "RESERVED_PATH": (
         "ERROR (RESERVED_PATH): the target resolves to a backup name; choose the "
@@ -976,7 +987,7 @@ _MIGRATE_ERROR_TEXT = {
     ),
     "LOCATOR_MIGRATION_UNSUPPORTED": (
         "ERROR (LOCATOR_MIGRATION_UNSUPPORTED): the manifest contains a locator "
-        "that schema 0.3 cannot accept or verify. Nothing was written."
+        "that schema {version} cannot accept or verify. Nothing was written."
     ),
     "DOWNGRADE_UNSUPPORTED": (
         "ERROR (DOWNGRADE_UNSUPPORTED): downgrade is not supported. "
@@ -991,7 +1002,7 @@ _MIGRATE_ERROR_TEXT = {
 }
 
 
-def _migrate_failure(code: str, as_json: bool) -> int:
+def _migrate_failure(code: str, as_json: bool, *, target: str | None = None) -> int:
     """Emit exactly one fixed document for a refused migration."""
     if code not in _MIGRATE_ERROR_TEXT:
         # Defensive: a code outside the closed catalogue is never echoed.
@@ -1005,7 +1016,11 @@ def _migrate_failure(code: str, as_json: bool) -> int:
         }
         print(json.dumps(document, indent=2, ensure_ascii=True, allow_nan=False))
     else:
-        print(_MIGRATE_ERROR_TEXT[code])
+        if code == "LOCATOR_MIGRATION_UNSUPPORTED":
+            version = target if target in TARGET_VERSIONS else "0.3"
+            print(_MIGRATE_ERROR_TEXT[code].format(version=version))
+        else:
+            print(_MIGRATE_ERROR_TEXT[code])
     return EXIT_INVALID
 
 
@@ -1032,7 +1047,7 @@ def _migrate_result_document(result) -> dict:
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
-    """Declare an existing 0.1/0.2 manifest as 0.2 or 0.3 additively."""
+    """Declare an existing 0.1-0.3 manifest as 0.2, 0.3 or 0.4 additively."""
     if args.to not in TARGET_VERSIONS:
         return _migrate_failure("UNSUPPORTED_TARGET", args.json)
     if not args.dry_run and not _writer_target_folder_exists(args.path):
@@ -1041,7 +1056,7 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         try:
             migrate_manifest(args.path, dry_run=True, target_version=args.to)
         except MigrationError as exc:
-            return _migrate_failure(exc.code, args.json)
+            return _migrate_failure(exc.code, args.json, target=args.to)
         except Exception:
             return _migrate_failure("INTERNAL_ERROR", args.json)
         return _migrate_failure("LOCK_UNAVAILABLE", args.json)
@@ -1059,7 +1074,7 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     except _WriterLockUnavailable:
         return _migrate_failure("LOCK_UNAVAILABLE", args.json)
     except MigrationError as exc:
-        return _migrate_failure(exc.code, args.json)
+        return _migrate_failure(exc.code, args.json, target=args.to)
     except Exception:
         return _migrate_failure("INTERNAL_ERROR", args.json)
     resolved = _migrate_manifest_path(manifest_path)
@@ -1140,8 +1155,17 @@ _CONDITIONS_ERROR_TEXT = {
     "LOCK_UNAVAILABLE": LOCK_UNAVAILABLE_TEXT,
 }
 
+# Schema 0.4 has no downgrade path and the shared 0.3 sentence would name the
+# wrong version, so the source version selects one extra fixed line.
+_CONDITIONS_UNSUPPORTED_VERSION_0_4 = (
+    "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
+    "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
+    "runevidence migrate PATH --to 0.2; schema 0.3 and 0.4 have no downgrade path. "
+    "Nothing was written."
+)
 
-def _conditions_failure(code: str, as_json: bool) -> int:
+
+def _conditions_failure(code: str, as_json: bool, *, version: str | None = None) -> int:
     """Emit exactly one fixed document for a refused conditions update."""
     if code not in _CONDITIONS_ERROR_TEXT:
         # Defensive: a code outside the closed catalogue is never echoed.
@@ -1154,6 +1178,8 @@ def _conditions_failure(code: str, as_json: bool) -> int:
             "error": {"code": code},
         }
         print(json.dumps(document, indent=2, ensure_ascii=True, allow_nan=False))
+    elif code == "UNSUPPORTED_VERSION" and version == "0.4":
+        print(_CONDITIONS_UNSUPPORTED_VERSION_0_4)
     else:
         print(_CONDITIONS_ERROR_TEXT[code])
     return EXIT_INVALID
@@ -1227,7 +1253,7 @@ def cmd_conditions(args: argparse.Namespace) -> int:
                 dry_run=True,
             )
         except ConditionsError as exc:
-            return _conditions_failure(exc.code, args.json)
+            return _conditions_failure(exc.code, args.json, version=exc.version)
         except Exception:
             return _conditions_failure("INTERNAL_ERROR", args.json)
         return _conditions_failure("LOCK_UNAVAILABLE", args.json)
@@ -1249,7 +1275,7 @@ def cmd_conditions(args: argparse.Namespace) -> int:
     except _WriterLockUnavailable:
         return _conditions_failure("LOCK_UNAVAILABLE", args.json)
     except ConditionsError as exc:
-        return _conditions_failure(exc.code, args.json)
+        return _conditions_failure(exc.code, args.json, version=exc.version)
     except Exception:
         return _conditions_failure("INTERNAL_ERROR", args.json)
     resolved = _conditions_manifest_path(manifest_path)
@@ -2390,10 +2416,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "migrate",
-        help="declare an existing manifest as schema 0.2 or 0.3 without changing any recorded value (explicit, no inference)",
+        help="declare an existing manifest as schema 0.2, 0.3 or 0.4 without changing any recorded value (explicit, no inference)",
     )
     p.add_argument("path", type=Path, help=f"experiment folder (containing {MANIFEST_FILENAME}) or manifest file")
-    p.add_argument("--to", required=True, metavar="VERSION", help="target schema version (0.2 or 0.3)")
+    p.add_argument("--to", required=True, metavar="VERSION", help="target schema version (0.2, 0.3 or 0.4)")
     p.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
     p.add_argument("--json", action="store_true", help="machine-readable result")
     p.set_defaults(func=cmd_migrate)

@@ -1,4 +1,4 @@
-"""Explicit, value-preserving migration of a manifest to schema 0.2 or 0.3.
+"""Explicit, value-preserving migration of a manifest to schema 0.2, 0.3 or 0.4.
 
 The command layer owns argument parsing, output and exit codes. This module
 owns the migration contract: one validated load, independent decodes, a strict
@@ -31,6 +31,7 @@ from .manifest import (
     load_manifest,
     resolve_manifest_path,
     save_raw,
+    validate_manifest,
 )
 from .models import (
     BACKUP_FILENAME,
@@ -42,7 +43,8 @@ from .models import (
 SOURCE_VERSION = "0.1"
 TARGET_VERSION = "0.2"
 TARGET_VERSION_0_3 = "0.3"
-TARGET_VERSIONS = (TARGET_VERSION, TARGET_VERSION_0_3)
+TARGET_VERSION_0_4 = "0.4"
+TARGET_VERSIONS = (TARGET_VERSION, TARGET_VERSION_0_3, TARGET_VERSION_0_4)
 
 # The CLI adds INVALID_ARGUMENTS and UNSUPPORTED_TARGET before calling this
 # module; the core has exactly this closed set of outcomes.
@@ -175,13 +177,15 @@ def without_schema_version(obj: dict) -> dict:
 def migrate_manifest(
     path: Path, *, dry_run: bool = False, target_version: str = TARGET_VERSION
 ) -> MigrationResult:
-    """Declare an existing valid 0.1/0.2 manifest as 0.2 or 0.3 additively.
+    """Declare an existing valid 0.1-0.3 manifest as 0.2, 0.3 or 0.4 additively.
 
-    The only value changed is ``schema_version``. A 0.2-to-0.3 migration is
-    pre-checked for locators that 0.3 cannot accept or verify and refuses the
-    whole migration before any write. Refusals raise ``MigrationError`` with a
-    closed code; a successful real run has already replaced the manifest and a
-    dry run wrote nothing.
+    The only value changed is ``schema_version``. A 0.2-to-0.3 or 0.1/0.2-to-0.4
+    migration is pre-checked for locators the target cannot accept or verify
+    and refuses the whole migration before any write. A 0.3-to-0.4 migration is
+    a version-only bump (0.4 admits every 0.3 locator) and skips that
+    pre-check. Refusals raise ``MigrationError`` with a closed code; a
+    successful real run has already replaced the manifest and a dry run wrote
+    nothing.
     """
     try:
         return _migrate_manifest(
@@ -222,11 +226,22 @@ def _migrate_manifest(
         # The existing --to 0.2 path is additive from 0.1 only; no downgrade.
         if source_version != SOURCE_VERSION:
             raise MigrationError("DOWNGRADE_UNSUPPORTED")
-    else:
+    elif target_version == TARGET_VERSION_0_3:
         # --to 0.3 is additive from 0.1 or 0.2; a 0.3 source is a no-op above.
+        # A loaded 0.4 source is a downgrade, never an internal failure.
+        if source_version == TARGET_VERSION_0_4:
+            raise MigrationError("DOWNGRADE_UNSUPPORTED")
         if source_version not in (SOURCE_VERSION, TARGET_VERSION):
             raise MigrationError("INTERNAL_ERROR")
         _check_locator_migration(loaded.manifest)
+    else:
+        # --to 0.4 is additive from every earlier version. 0.1/0.2 keep the
+        # same manifest-only pre-check as 0.2->0.3; 0.3 is a version-only bump
+        # because 0.4 admits every locator 0.3 admits.
+        if source_version in (SOURCE_VERSION, TARGET_VERSION):
+            _check_locator_migration(loaded.manifest)
+        elif source_version != TARGET_VERSION_0_3:
+            raise MigrationError("INTERNAL_ERROR")
 
     # Two independent decodes: source_a is the immutable baseline, source_b
     # supplies every candidate value. Never share containers between them.
@@ -291,12 +306,14 @@ def _reject_reserved_target(target: Path) -> None:
 
 
 def _check_locator_migration(manifest: Manifest) -> None:
-    """Refuse the whole 0.3 migration when a locator cannot be safe there.
+    """Refuse a 0.1/0.2 -> 0.3 or 0.1/0.2 -> 0.4 migration when a locator
+    cannot be safe there.
 
     The check is purely manifest-level (no file read, no artifact I/O): a
     prefixed/invalid pointer, a locator without artifact_id, a string locator
-    on a non-``.json`` artifact, or a locator on a volatile/no-digest/directory
-    artifact. The refusal code is fixed and value-free.
+    on a non-``.json`` artifact (including a ``.csv`` file), or a locator on a
+    volatile/no-digest/directory artifact. The refusal code is fixed and
+    value-free. 0.3 sources skip this check because 0.4 is a superset.
     """
     artifacts = {artifact.id: artifact for artifact in manifest.artifacts}
     for result in manifest.results:
@@ -358,7 +375,7 @@ def _prove_preservation(
 
 def _validate_candidate(candidate: dict, target_version: str = TARGET_VERSION) -> None:
     try:
-        manifest = Manifest.model_validate(candidate)
+        manifest = validate_manifest(candidate)
     except Exception:
         raise MigrationError("INTERNAL_ERROR") from None
     if manifest.schema_version != target_version:

@@ -392,6 +392,61 @@ def test_forced_init_over_0_3_refuses_and_writes_nothing(tmp_path, capsys):
         assert canary not in out
 
 
+def test_forced_init_over_0_4_refuses_and_writes_nothing(tmp_path, capsys):
+    root = make_folder(tmp_path / "proj")
+    path = root / MANIFEST
+    doc = {
+        "schema_version": "0.4",
+        "project": {"id": "CANARY-PROJECT-ID", "name": "CANARY-PROJECT-NAME"},
+        "artifacts": [
+            {
+                "id": "canary-artifact-id",
+                "path": "canary-data.csv",
+                "sha256": "ab" * 32,
+                "size_bytes": 424242,
+            }
+        ],
+        "results": [
+            {
+                "id": "canary-result-id",
+                "run_id": "canary-run-id",
+                "name": "CANARY-METRIC-NAME",
+                "artifact_id": "canary-artifact-id",
+                "locator": {
+                    "kind": "csv-cell",
+                    "row": 41,
+                    "column": 4,
+                    "header": "CANARY-HEADER",
+                },
+            }
+        ],
+    }
+    path.write_text(
+        json.dumps(doc, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    old_0_4 = path.read_bytes()
+
+    assert main(["init", str(root), "--force"]) == 2
+    out = capsys.readouterr().out
+
+    assert out.endswith(cli.INIT_0_4_REFUSAL + "\n")
+    assert path.read_bytes() == old_0_4
+    assert backups(root) == {}
+    for canary in ("CANARY-PROJECT-ID", "CANARY-HEADER", "CANARY-METRIC-NAME"):
+        assert canary not in out
+
+
+def test_init_0_4_refusal_is_the_exact_rfc_text():
+    assert cli.INIT_0_4_REFUSAL == (
+        "ERROR: the existing manifest declares schema 0.4. init --force would regenerate it as "
+        "schema 0.1 and cannot carry over first-class values or locators. Nothing was written. "
+        "Move the manifest aside, run init, then runevidence migrate --to 0.4 and reapply the "
+        "first-class values and locators."
+    )
+
+
 def test_forced_init_over_empty_0_2_refuses_the_downgrade(tmp_path, capsys):
     root = make_folder(tmp_path / "proj")
     old_0_2 = write_schema_0_2(root, empty=True)

@@ -10,12 +10,20 @@ import stat
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import get_args, get_origin, Union
+from typing import Annotated, Any, get_args, get_origin, Union
 
 from pydantic import BaseModel, ValidationError
 
 from .findings import Code, Finding, Severity
-from .models import MANIFEST_FILENAME, Artifact, Manifest
+from .models import (
+    MANIFEST_FILENAME,
+    SCHEMA_VERSION_0_4,
+    Artifact,
+    CsvCellLocator,
+    JsonlLocator,
+    Manifest,
+    Manifest04,
+)
 
 
 class ManifestLoadError(Exception):
@@ -49,27 +57,72 @@ _VALUE_ERRORS = frozenset({
 def _issue_category(error_type: str) -> str:
     if error_type == "missing":
         return "missing_required"
+    if error_type == "union_tag_not_found":
+        return "missing_required"
     if error_type in _TYPE_ERRORS:
         return "invalid_type"
+    if error_type == "union_tag_invalid":
+        return "invalid_value"
     if error_type in _VALUE_ERRORS:
         return "invalid_value"
     return "other_validation"
 
 
-def _issue_location(loc: tuple) -> str | None:
-    """Return a safe pointer, including the field ancestor of a scalar union error."""
-    annotation = Manifest
-    parts = []
-    for index, part in enumerate(loc):
-        # Optional fields have one non-None type. A multi-option union adds a
-        # branch label; accept only a label naming one of its own options.
+_LOCATOR_TAGS: dict[str, type[BaseModel]] = {
+    "jsonl": JsonlLocator,
+    "csv-cell": CsvCellLocator,
+}
+
+
+def _unwrap_annotation(annotation: Any) -> Any:
+    """Look through ``Annotated`` and a single-option ``Optional``."""
+    while True:
+        if get_origin(annotation) is Annotated:
+            annotation = get_args(annotation)[0]
+            continue
         if get_origin(annotation) is Union:
             options = [a for a in get_args(annotation) if a is not type(None)]
             if len(options) == 1:
                 annotation = options[0]
-            else:
-                if not isinstance(part, str):
-                    return None
+                continue
+        return annotation
+
+
+def _issue_location(
+    loc: tuple,
+    *,
+    root_model: type[BaseModel] | None = None,
+    error_type: str = "",
+) -> str | None:
+    """Return a safe pointer, including the field ancestor of a scalar union error."""
+    # Resolve the version-specific root at call time: a default argument would
+    # capture the class and defeat a monkeypatched root.
+    if root_model is None:
+        root_model = Manifest
+    annotation: Any = root_model
+    parts = []
+    for index, part in enumerate(loc):
+        annotation = _unwrap_annotation(annotation)
+        # Optional fields have one non-None type. A multi-option union adds a
+        # branch label; accept only a label naming one of its own options.
+        if get_origin(annotation) is Union:
+            options = [a for a in get_args(annotation) if a is not type(None)]
+            if isinstance(part, str):
+                # A discriminated-union tag names the branch model directly;
+                # map it before generic branch-label matching (the raw tag is
+                # not a class name and would otherwise lose the location).
+                tagged = _LOCATOR_TAGS.get(part)
+                if tagged is not None and tagged in options:
+                    annotation = tagged
+                    continue
+                # pydantic may leave its internal union label in `loc`.
+                if (
+                    part.startswith("tagged-union[")
+                    and part.endswith("]")
+                    and JsonlLocator in options
+                    and CsvCellLocator in options
+                ):
+                    continue
                 match = next(
                     (a for a in options if isinstance(a, type) and a.__name__ == part),
                     None,
@@ -81,6 +134,7 @@ def _issue_location(loc: tuple) -> str | None:
                     return "".join("/" + component for component in parts)
                 annotation = match
                 continue
+            return None
         if get_origin(annotation) is list and type(part) is int and part >= 0:
             annotation = get_args(annotation)[0]
             parts.append(str(part))
@@ -91,6 +145,10 @@ def _issue_location(loc: tuple) -> str | None:
             parts.append(part.replace("~", "~0").replace("/", "~1"))
         else:
             return None
+    # The raw location of a missing/invalid discriminator is the same as a
+    # value_error on the locator field; only the error type distinguishes them.
+    if error_type in ("union_tag_invalid", "union_tag_not_found"):
+        parts.append("kind")
     return "".join("/" + part for part in parts)
 
 
@@ -210,6 +268,24 @@ def _is_resolution_loop(exc: RuntimeError) -> bool:
     )
 
 
+def validate_manifest(raw: object) -> Manifest:
+    """Validate decoded manifest data with the model its version requires.
+
+    Only ``schema_version == "0.4"`` dispatches to ``Manifest04``; every other
+    value keeps the historical base-model behavior (including its refusals).
+    """
+    if isinstance(raw, dict) and raw.get("schema_version") == SCHEMA_VERSION_0_4:
+        return Manifest04.model_validate(raw)
+    return Manifest.model_validate(raw)
+
+
+def _root_model_for(raw: object) -> type[BaseModel]:
+    """The model whose fields an error location should be resolved against."""
+    if isinstance(raw, dict) and raw.get("schema_version") == SCHEMA_VERSION_0_4:
+        return Manifest04
+    return Manifest
+
+
 def load_manifest(target: Path) -> LoadedManifest:
     path = Path(target)
     try:
@@ -258,7 +334,7 @@ def parse_manifest_source(path: Path, source_bytes: bytes) -> LoadedManifest:
     except (ValueError, RecursionError) as exc:
         raise _unreadable(path, exc) from exc
     try:
-        manifest = Manifest.model_validate(raw)
+        manifest = validate_manifest(raw)
     except RecursionError as exc:
         raise ManifestLoadError(
             [
@@ -271,15 +347,20 @@ def parse_manifest_source(path: Path, source_bytes: bytes) -> LoadedManifest:
             ]
         ) from exc
     except ValidationError as exc:
+        root_model = _root_model_for(raw)
         raise ManifestLoadError(
             [
                 _SchemaFinding(
                     code=Code.schema_invalid,
                     severity=Severity.error,
-                    message=_schema_message(err['type'], err['loc']),
+                    message=_schema_message(
+                        err['type'], err['loc'], root_model=root_model
+                    ),
                     path=str(path),
                     issue_category=_issue_category(err['type']),
-                    issue_location=_issue_location(err['loc']),
+                    issue_location=_issue_location(
+                        err['loc'], root_model=root_model, error_type=err['type']
+                    ),
                 )
                 for err in exc.errors()
             ]
@@ -287,10 +368,15 @@ def parse_manifest_source(path: Path, source_bytes: bytes) -> LoadedManifest:
     return LoadedManifest(manifest=manifest, path=path, source_bytes=source_bytes)
 
 
-def _schema_message(error_type: str, loc: tuple) -> str:
+def _schema_message(
+    error_type: str,
+    loc: tuple,
+    *,
+    root_model: type[BaseModel] | None = None,
+) -> str:
     """Describe a validation error using only controlled, safe information."""
     category = _issue_category(error_type).replace("_", " ")
-    location = _issue_location(loc)
+    location = _issue_location(loc, root_model=root_model, error_type=error_type)
     where = f" at {location}" if location else ""
     return f"Manifest schema validation failed{where}: {category}"
 
@@ -303,7 +389,7 @@ def artifact_to_dict(artifact: Artifact, schema_version: str = "0.1") -> dict:
     ``digest_format`` are omitted). ``dataset_id`` is 0.2+ and is emitted only
     when it was supplied; an omitted label stays omitted.
     """
-    if schema_version not in ("0.1", "0.2", "0.3"):
+    if schema_version not in ("0.1", "0.2", "0.3", "0.4"):
         raise ValueError(f"unsupported schema version {schema_version!r}")
     data = artifact.model_dump(mode="json", exclude_defaults=False)
     # Written only when set, so manifests from before the field existed

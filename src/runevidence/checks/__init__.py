@@ -8,6 +8,11 @@ from pathlib import Path
 
 from ..findings import Finding, Severity
 from ..manifest import LoadedManifest
+from ..models import (
+    SCHEMA_VERSION_0_3,
+    SCHEMA_VERSION_0_4,
+    CsvCellLocator,
+)
 from .conditions import check_conditions
 from .files import check_files
 from .graph import check_graph
@@ -18,6 +23,54 @@ __all__ = ["Report", "run_checks"]
 EXIT_OK = 0
 EXIT_FINDINGS = 1
 EXIT_INVALID = 2
+
+# Per-manifest csv-cell eligibility caps (RFC section 5.3). Counted without
+# reading an artifact: a manifest-eligible entry is a csv-cell locator on an
+# existing non-directory artifact whose path ends ".csv", with a recorded
+# sha256 and not volatile. Runtime file states do not reduce the count.
+CSV_CELL_MAX_ENTRIES = 10_000
+CSV_CELL_MAX_HEADER_BYTES = 16 * 1024 * 1024
+
+_LOCATOR_SCHEMAS = frozenset({SCHEMA_VERSION_0_3, SCHEMA_VERSION_0_4})
+
+
+def _csv_cell_cap(
+    manifest,
+) -> tuple[bool, frozenset[str]]:
+    """Classify csv-cell eligibility without reads; emit nothing.
+
+    Returns ``(capped, eligible_artifact_ids)``. Only schema 0.4 can carry a
+    csv-cell locator, so every earlier schema is uncapped with no eligible
+    artifacts. Header metadata is the UTF-8 byte length of each eligible
+    locator's recorded header.
+    """
+    if manifest.schema_version != SCHEMA_VERSION_0_4:
+        return False, frozenset()
+    eligible_artifacts = {
+        artifact.id
+        for artifact in manifest.artifacts
+        if artifact.artifact_type != "directory"
+        and artifact.path.replace("\\", "/").lower().endswith(".csv")
+        and artifact.sha256 is not None
+        and not artifact.volatile
+    }
+    entries = 0
+    header_bytes = 0
+    with_entries: set[str] = set()
+    for result in manifest.results:
+        locator = result.locator
+        if not isinstance(locator, CsvCellLocator):
+            continue
+        if result.artifact_id not in eligible_artifacts:
+            continue
+        entries += 1
+        header_bytes += len(locator.header.encode("utf-8"))
+        with_entries.add(result.artifact_id)
+    capped = (
+        entries > CSV_CELL_MAX_ENTRIES
+        or header_bytes > CSV_CELL_MAX_HEADER_BYTES
+    )
+    return capped, frozenset(with_entries)
 
 
 @dataclass
@@ -52,37 +105,48 @@ def run_checks(
     ``--directory-artifacts`` on ``validate`` and ``inspect``. It scans
     recorded folders and never writes or authors a directory artifact."""
     manifest = loaded.manifest
-    is_0_3 = manifest.schema_version == "0.3"
+    has_locators = manifest.schema_version in _LOCATOR_SCHEMAS
     artifact_ids = {artifact.id for artifact in manifest.artifacts}
     targeted_ids = {
         result.artifact_id
         for result in manifest.results
-        if is_0_3 and result.locator is not None and result.artifact_id is not None
+        if has_locators and result.locator is not None and result.artifact_id is not None
     }
     targeted_result_ids = {
         result.id
         for result in manifest.results
-        if is_0_3 and result.locator is not None
+        if has_locators and result.locator is not None
     }
     unverified = {
         result.id
         for result in manifest.results
-        if is_0_3 and result.locator is None
+        if has_locators and result.locator is None
     }
     dangling_targeted = {
         result.id
         for result in manifest.results
-        if is_0_3
+        if has_locators
         and result.locator is not None
         and result.artifact_id not in artifact_ids
     }
 
     result_broken: set[str] = set(dangling_targeted)
+    csv_cell_capped, csv_cell_eligible_artifacts = _csv_cell_cap(manifest)
 
     def _targeted_callback(artifact, state, out) -> None:
-        target_findings, target_broken = check_targeted_results(manifest, artifact, state)
+        target_findings, target_broken, capped_artifact = check_targeted_results(
+            manifest,
+            artifact,
+            state,
+            csv_cell_capped=csv_cell_capped,
+            csv_cell_eligible=artifact.id in csv_cell_eligible_artifacts,
+        )
         out.findings.extend(target_findings)
         result_broken.update(target_broken)
+        if capped_artifact:
+            # A capped artifact is broken at the artifact level (RFC section 8),
+            # even though no per-result value finding was emitted.
+            out.broken.add(artifact.id)
 
     files = check_files(
         loaded,

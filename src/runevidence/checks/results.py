@@ -2,8 +2,9 @@
 
 Only JSON artifacts are read by the legacy path. Schema 0.3 adds one strict
 JSON whole-document profile for string locators and one strict JSONL line
-profile for object locators. The bytes come from the single protected snapshot
-made by the file check, never from a second read.
+profile for object locators; schema 0.4 adds the strict RFC 4180-derived CSV
+cell profile. The bytes come from the single protected snapshot made by the
+file check, never from a second read.
 """
 
 from __future__ import annotations
@@ -25,11 +26,28 @@ from ..locator_profiles import (
     display_locator,
     parse_json_document,
 )
-from ..models import Manifest, SCHEMA_VERSION_0_3
+from ..models import (
+    SCHEMA_VERSION_0_3,
+    SCHEMA_VERSION_0_4,
+    CsvCellLocator,
+    JsonlLocator,
+    Manifest,
+)
+from .csv import (
+    CsvNotNumeric,
+    CsvNumberOverflow,
+    CsvProfile,
+    CsvProfileError,
+)
 
 MAX_JSON_BYTES = 50 * 1024 * 1024
 _MISSING = object()
 _INDEX = re.compile(r"0|[1-9][0-9]*")
+CSV_CELL_CAP_MESSAGE = (
+    "the manifest exceeds the csv-cell verification limit (10,000 entries or "
+    "16 MiB of header metadata); no CSV cell was read"
+)
+CSV_PROFILE_HINT = "the CSV artifact does not satisfy the strict csv-cell profile"
 
 
 def _is_index(token: str, size: int) -> bool:
@@ -85,7 +103,17 @@ def _extension_matches(artifact_path: str, locator: Any) -> bool:
     lowered = artifact_path.replace("\\", "/").lower()
     if type(locator) is str:
         return lowered.endswith(".json")
+    if isinstance(locator, CsvCellLocator):
+        return lowered.endswith(".csv")
     return lowered.endswith(".jsonl")
+
+
+def _expected_extension(locator: Any) -> str:
+    if type(locator) is str:
+        return ".json"
+    if isinstance(locator, CsvCellLocator):
+        return ".csv"
+    return ".jsonl"
 
 
 def _locator_finding(
@@ -261,17 +289,115 @@ def _check_one_targeted(
     return findings, False
 
 
+def _check_one_csv_cell(
+    result, artifact_path: str, locator: CsvCellLocator, profile: CsvProfile | None
+) -> tuple[list[Finding], bool]:
+    """Selection, type, numeric parse and comparison for one csv-cell result.
+
+    Selection order is fixed by RFC section 6.2 step 8 (row, then column, then
+    header), before the recorded-type and cell-parse stages. ``profile`` is
+    ``None`` when the whole file was structurally refused; every csv-cell result
+    on that artifact then gets the same fixed finding.
+    """
+    findings: list[Finding] = []
+    if profile is None:
+        finding = _value_error(
+            result, artifact_path, locator,
+            Code.locator_unreadable,
+            "could not be read under the strict profile",
+        )
+        findings.append(finding.model_copy(update={"hint": CSV_PROFILE_HINT}))
+        return findings, True
+
+    if locator.row < 1 or locator.row > profile.row_count:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_mismatch, "was not found",
+            )
+        )
+        return findings, True
+    if locator.column < 1 or locator.column > profile.column_count:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_mismatch, "was not selectable",
+            )
+        )
+        return findings, True
+    if profile.header[locator.column - 1] != locator.header:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_mismatch,
+                "selected header does not match the header at this column",
+            )
+        )
+        return findings, True
+
+    if type(result.value) is bool or type(result.value) not in (int, float):
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unsupported_value, "selects an unsupported value",
+            )
+        )
+        return findings, True
+
+    try:
+        actual = profile.number(locator.row, locator.column)
+    except (CsvNotNumeric, CsvNumberOverflow):
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unreadable,
+                "selected cell is not a number under the csv-cell profile",
+            )
+        )
+        return findings, True
+    except CsvProfileError:
+        # The whole-file pass already validated the bytes; this is defense in
+        # depth for a cell decode that cannot be represented, never parser text.
+        finding = _value_error(
+            result, artifact_path, locator,
+            Code.locator_unreadable,
+            "could not be read under the strict profile",
+        )
+        findings.append(finding.model_copy(update={"hint": CSV_PROFILE_HINT}))
+        return findings, True
+
+    if not compare_values(result.value, actual):
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.result_value_mismatch, "does not match the recorded value",
+            )
+        )
+        return findings, True
+    return findings, False
+
+
 def check_targeted_results(
-    manifest: Manifest, artifact, target_check
-) -> tuple[list[Finding], set[str]]:
-    """Validate and verify every 0.3 locator on one targeted artifact."""
+    manifest: Manifest,
+    artifact,
+    target_check,
+    *,
+    csv_cell_capped: bool = False,
+    csv_cell_eligible: bool = False,
+) -> tuple[list[Finding], set[str], bool]:
+    """Validate and verify every 0.3/0.4 locator on one targeted artifact."""
     findings: list[Finding] = []
     broken: set[str] = set()
     results = _targeted_results(manifest, artifact.id)
     if not results:
-        return findings, broken
+        return findings, broken, False
 
     if target_check.state == "directory":
+        directory_hint = (
+            "Point the result at a single JSON, JSONL or CSV file artifact, or drop the locator."
+            if manifest.schema_version == SCHEMA_VERSION_0_4
+            else "Point the result at a single JSON/JSONL file artifact, or drop the locator."
+        )
         for result in results:
             findings.append(
                 _locator_finding(
@@ -282,14 +408,14 @@ def check_targeted_results(
                         f"result {result.id!r} locator {display_locator(result.locator)} "
                         f"targets a directory artifact {artifact.path!r}"
                     ),
-                    hint="Point the result at a single JSON/JSONL file artifact, or drop the locator.",
+                    hint=directory_hint,
                 )
             )
             broken.add(result.id)
-        return findings, broken
+        return findings, broken, False
 
     if target_check.state in ("missing", "reference-failed"):
-        return findings, broken
+        return findings, broken, False
 
     if target_check.state in (
         "unreadable",
@@ -304,13 +430,13 @@ def check_targeted_results(
         # shape is not a kind mismatch, and asking for a ".jsonl artifact"
         # there would name the wrong defect. Nothing was read, so no locator
         # finding may replace the artifact-level refusal.
-        return findings, broken
+        return findings, broken, False
 
     # Reference checks precede digest/volatile state and content reading.
     kind_broken: set[str] = set()
     for result in results:
         if not _extension_matches(artifact.path, result.locator):
-            expected = ".json" if type(result.locator) is str else ".jsonl"
+            expected = _expected_extension(result.locator)
             findings.append(
                 _locator_finding(
                     Code.locator_kind_mismatch,
@@ -324,6 +450,29 @@ def check_targeted_results(
             )
             broken.add(result.id)
             kind_broken.add(result.id)
+
+    # Capped path (RFC section 6.3): on a manifest over either eligibility
+    # limit, an eligible artifact in state ok/over-cap gets exactly one
+    # artifact-level cap finding and no cell is read. The kind findings above
+    # stay additive for non-csv-cell locators; missing/path/refused states
+    # returned before this point and get no cap.
+    if (
+        csv_cell_capped
+        and csv_cell_eligible
+        and target_check.state in ("ok", "over-cap")
+    ):
+        findings.append(
+            Finding(
+                code=Code.locator_unreadable,
+                severity=Severity.error,
+                subject=artifact.id,
+                path=artifact.path,
+                message=CSV_CELL_CAP_MESSAGE,
+                hint=None,
+            )
+        )
+        return findings, broken, True
+
     usable = [result for result in results if result.id not in kind_broken]
     # ``edit.plan_rehash`` refuses the whole manifest when any object locator
     # exists, not only one on this artifact, so both no-digest branches use the
@@ -357,7 +506,7 @@ def check_targeted_results(
                     hint=no_digest_hint,
                 )
             )
-        return findings, broken
+        return findings, broken, False
 
     if target_check.state == "no-digest":
         for result in usable:
@@ -368,7 +517,7 @@ def check_targeted_results(
                 ).model_copy(update={"hint": no_digest_hint})
             )
             broken.add(result.id)
-        return findings, broken
+        return findings, broken, False
 
     if target_check.state == "volatile":
         for result in usable:
@@ -381,7 +530,7 @@ def check_targeted_results(
                 )
             )
             broken.add(result.id)
-        return findings, broken
+        return findings, broken, False
 
     if target_check.state == "over-cap":
         for result in usable:
@@ -392,35 +541,58 @@ def check_targeted_results(
                 )
             )
             broken.add(result.id)
-        return findings, broken
+        return findings, broken, False
 
     if target_check.state != "ok" or target_check.snapshot is None:
-        return findings, broken
+        return findings, broken, False
 
     data = target_check.snapshot.data
     if data is None:
-        return findings, broken
+        return findings, broken, False
     values = _LocatorValues(data)
+    # The JSONL pre-scan accepts only JsonlLocator entries: a csv-cell has no
+    # ``line`` and is routed to the CSV pass below instead.
     selected_lines = [
         result.locator.line
         for result in usable
-        if not isinstance(result.locator, str)
+        if isinstance(result.locator, JsonlLocator)
     ]
     if selected_lines:
         # One forward scan records every requested line's offset before any
         # value is read; distinct selections are not O(results x file size).
         values.request_lines(selected_lines)
+    csv_results = [
+        result for result in usable if isinstance(result.locator, CsvCellLocator)
+    ]
+    csv_profile: CsvProfile | None = None
+    if csv_results:
+        try:
+            # One strict whole-file pass per artifact, retaining only the
+            # requested data-row offsets and the parsed header.
+            csv_profile = CsvProfile(
+                data, rows=[result.locator.row for result in csv_results]
+            )
+        except CsvProfileError:
+            # Structural refusal affects only csv-cell results; jsonl/string
+            # results on the same artifact still compare normally.
+            csv_profile = None
     for result in usable:
-        result_findings, failed = _check_one_targeted(
-            result, artifact.path, result.locator, values
-        )
+        if isinstance(result.locator, CsvCellLocator):
+            result_findings, failed = _check_one_csv_cell(
+                result, artifact.path, result.locator, csv_profile
+            )
+        else:
+            result_findings, failed = _check_one_targeted(
+                result, artifact.path, result.locator, values
+            )
         findings.extend(result_findings)
         if failed:
             broken.add(result.id)
     # Drop the snapshot wrapper before returning so its bytes are released as
     # soon as this artifact's locators are done.
+    del csv_profile
     del values
-    return findings, broken
+    return findings, broken, False
 
 
 def check_results(
@@ -445,7 +617,10 @@ def check_results(
         {a.id for a in manifest.artifacts if a.artifact_type == "directory"} if enable_directory_artifacts else set()
     )
     skip = skip_result_ids or set()
-    is_0_3 = manifest.schema_version == SCHEMA_VERSION_0_3
+    has_locators = manifest.schema_version in (
+        SCHEMA_VERSION_0_3,
+        SCHEMA_VERSION_0_4,
+    )
 
     def unverifiable(res_id: str, msg: str) -> None:
         findings.append(
@@ -457,23 +632,23 @@ def check_results(
         if res.id in skip:
             continue
         if res.locator is None:
-            if is_0_3:
+            if has_locators:
                 findings.append(
                     Finding(
                         code=Code.result_unverified,
                         severity=Severity.warning,
                         subject=res.id,
                         message=(
-                            f"result {res.id!r} has no locator in schema 0.3; "
-                            "its recorded value was not checked"
+                            f"result {res.id!r} has no locator in schema "
+                            f"{manifest.schema_version}; its recorded value was not checked"
                         ),
                     )
                 )
             continue
-        if is_0_3:
-            # Any 0.3 locator is handled through check_targeted_results so it
-            # shares the file check's snapshot. Direct callers that do not skip
-            # it still get a total, fixed outcome rather than a crash.
+        if has_locators:
+            # Any 0.3/0.4 locator is handled through check_targeted_results so
+            # it shares the file check's snapshot. Direct callers that do not
+            # skip it still get a total, fixed outcome rather than a crash.
             findings.append(
                 _value_error(
                     res, paths_by_id.get(res.artifact_id, ""), res.locator,

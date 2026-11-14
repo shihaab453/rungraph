@@ -50,7 +50,7 @@ from . import directory_scanner
 from .directory_hashing import DEFAULT_LIMITS, DirectoryDigest, DirectoryRecordError, check_member_path
 from .directory_scanner import DirectoryScanError
 from .edit import EditError, _key, _on_disk
-from .manifest import LoadedManifest, artifact_to_dict, dump_raw
+from .manifest import LoadedManifest, artifact_to_dict, dump_raw, validate_manifest
 from .models import DIRECTORY_DIGEST_FORMAT, Artifact, Manifest
 
 
@@ -222,7 +222,7 @@ def _validated_copy(raw: dict) -> tuple[dict, Manifest]:
         raise DirectoryAuthoringError("invalid-manifest", f"Manifest JSON must be an object, got {type(raw).__name__}")
     proposed = copy.deepcopy(raw)
     try:
-        return proposed, Manifest.model_validate(proposed)
+        return proposed, validate_manifest(proposed)
     except ValidationError as exc:
         raise DirectoryAuthoringError("invalid-manifest", f"Manifest JSON is not a valid manifest: {exc}") from None
 
@@ -329,7 +329,7 @@ def _finish(
     operation, proposed, entry, old_sha256, old_size, digest, changed, linked, claims, overlapping,
     *, add_kind: Optional[str], add_run_id: Optional[str],
 ) -> DirectoryProposal:
-    Manifest.model_validate(proposed)  # our own edit must leave a valid manifest
+    validate_manifest(proposed)  # our own edit must leave a valid manifest
     dump_raw(proposed)  # and one that can be written as JSON
     notes = []
     if overlapping:

@@ -17,8 +17,8 @@ from pydantic import ValidationError
 from .directory_plan import plan_directory_change
 from .directory_preview import DirectoryPreview
 from .edit import EditError
-from .manifest import LoadedManifest, load_raw
-from .models import Manifest
+from .manifest import LoadedManifest, load_raw, validate_manifest
+from .models import Manifest, is_manifest
 
 MAX_DIRECTORIES = 16
 MAX_AUDIT_JSON_BYTES = 1_048_576  # default json.dumps(asdict(report)), UTF-8
@@ -129,12 +129,12 @@ def audit_recorded_directories(loaded: LoadedManifest) -> DirectoryAudit:
 def _model(loaded: LoadedManifest) -> Manifest:
     # Importing the writer's private helpers would expand protected importer
     # lists. Use the ordinary parsed model and source-byte contract directly.
-    if (type(loaded) is not LoadedManifest or type(loaded.manifest) is not Manifest
+    if (type(loaded) is not LoadedManifest or not is_manifest(loaded.manifest)
             or not isinstance(loaded.path, Path) or not loaded.path.is_absolute()
             or type(loaded.source_bytes) is not bytes):
         raise DirectoryAuditError("loaded-mismatch")
     try:
-        current = Manifest.model_validate(load_raw(loaded))
+        current = validate_manifest(load_raw(loaded))
     except (ValueError, TypeError, ValidationError):
         raise DirectoryAuditError("loaded-mismatch") from None
     if current != loaded.manifest:

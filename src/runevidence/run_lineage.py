@@ -11,7 +11,7 @@ import json
 from typing import Any
 
 from .models import Manifest, RelationshipType as T, locator_to_json
-from .run_claim import ClaimDetailsError, claim_details, _json_safe
+from .run_claim import ClaimDetailsError, claim_details, _display_row, _json_safe
 
 
 class LineageError(ValueError):
@@ -248,19 +248,24 @@ def format_claim_lineage(data: dict[str, Any]) -> str:
 
     lines = [f"Manifest: {shown(data['manifest'])}",
              f"Claim: {shown(data['claim']['id'])}: {shown(data['claim']['text'])}"]
+    # Display copies cover both the direct roots and every upstream node; the
+    # recorded data stays untouched for --json.
+    roots = {stance: [_display_row(row) for row in data["roots"][stance]]
+             for stance in ("supports", "contradicts")}
+    nodes = [_display_row(node) for node in data["nodes"]]
     for stance in ("supports", "contradicts"):
-        rows = data["roots"][stance]
+        rows = roots[stance]
         lines.append(f"\n{stance.capitalize()} ({len(rows)} direct recorded associations):")
         for row in rows[:15]:
             lines.append(f"  {shown(row['id'])}: {row['status']} ({shown(row['kind'])})")
         if len(rows) > 15:
             lines.append(f"  and {len(rows) - 15} more roots (use --json)")
     lines.append(f"\nUpstream nodes: {data['summary']['nodes']}, dependencies: {data['summary']['dependencies']}")
-    for node in data["nodes"][:25]:
+    for node in nodes[:25]:
         detail = f" {shown(node['details'])}" if "details" in node else ""
         lines.append(f"  {shown(node['id'])}: {node['status']} ({shown(node['kind'])}){detail}")
-    if len(data["nodes"]) > 25:
-        lines.append(f"  and {len(data['nodes']) - 25} more nodes (use --json)")
+    if len(nodes) > 25:
+        lines.append(f"  and {len(nodes) - 25} more nodes (use --json)")
     lines.append("\nRecorded dependency edges:")
     for edge in data["edges"][:50]:
         suffix = " [input_to reversed]" if edge["manifest_direction"] == "reversed" else ""

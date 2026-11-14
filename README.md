@@ -145,7 +145,7 @@ file as missing **and** points at where it is now:
 `hint: A file matching it exists at 'data/train.csv'; update the path to that.`
 The same warning and relocation hint apply to that drive spelling in a
 locator-less 0.1/0.2 manifest even on Linux: it is still read relative to the
-manifest folder, never the current directory. An artifact named by a 0.3
+manifest folder, never the current directory. An artifact named by a 0.3 or 0.4
 locator is read through the protected snapshot instead, which reports
 `missing-file` and never opens a lookalike file it was not told about.
 
@@ -293,7 +293,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence inspect PATH` | Summarize the manifest, then run every check, also listing files the manifest does not track. |
 | `runevidence comparability BASELINE TARGET --baseline-result ID --target-result ID [--json]` | Experimental read-only comparison of five mandatory recorded conditions across two manifests (no artifact checks; exit `0` comparable, `1` different, `2` unavailable). `--preflight` is a text-only read-only readiness listing/pair check (no JSON; exit `0` list/ready, `1` not ready, `2` load/unknown/invalid). See [Comparability (verdict CLI experimental)](#comparability-verdict-cli-experimental). |
 | `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`, `--volatile GLOB`). With `--force`, the old manifest is kept as a backup, because a fresh scan does not carry over hand-written results and claims. See [Backups from `init --force`](#backups-from-init---force). |
-| `runevidence migrate PATH --to 0.2 [--dry-run] [--json]` | Declare an existing valid manifest as 0.2 without changing any recorded value. Exits `0` on success, no-op or dry run; `2` on refusal or failure. There is no inference. See [Migrating a manifest to 0.2](#migrating-a-manifest-to-02). |
+| `runevidence migrate PATH --to 0.2\|0.3\|0.4 [--dry-run] [--json]` | Declare an existing valid manifest as the chosen schema without changing any recorded value. Exits `0` on success, no-op or dry run; `2` on refusal or failure. There is no inference and no downgrade. See [Migrating a manifest to 0.2](#migrating-a-manifest-to-02) and [Schema 0.4 CSV cell locators](#schema-04-csv-cell-locators-slice-c). |
 | `runevidence conditions PATH --run RUN_ID [--patch FILE\|-] [--clear FIELD]... [--dry-run] [--json]` | Set or clear recorded run conditions on a 0.2 manifest from a local JSON patch; no condition values on the command line. Exits `0` on success, no-op or dry run; `2` on refusal or failure. See [Authoring run conditions](#authoring-run-conditions). |
 | `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read values only for supported, resolvable scalar JSON-located results in changed files (`--volatile`, `--no-volatile`, `--dry-run`). `--directory` re-records one exact directory artifact ID. |
 | `runevidence add PATH FILE...` | Track new files or folders without re-running `init` (`--id`, `--kind`, `--run`, `--no-run`, `--volatile`, `--dry-run`). `add PATH DIR --directory --id ID` records one folder as a directory artifact. |
@@ -529,7 +529,7 @@ scheme; see [Migrating a manifest to 0.2](#migrating-a-manifest-to-02).
 | `project` | What the folder is about | `id`, `name`, `description`, `tags` |
 | `runs` | Executions of any kind | `id`, `name`, `started_at`, `params` |
 | `artifacts` | Files on disk | `id`, `path` (relative, forward slashes), `sha256`, `size_bytes`, `volatile` (existence only), `kind`, `run_id` (producer) |
-| `results` | Named values a run produced | `id`, `run_id`, `name`, `value`, `artifact_id`, `locator` (JSON Pointer, or a 0.3 structured locator) |
+| `results` | Named values a run produced | `id`, `run_id`, `name`, `value`, `artifact_id`, `locator` (JSON Pointer, or a 0.3/0.4 structured locator) |
 | `evidence` | Claims in plain words | `id`, `claim`, `supports`, `contradicts`, `source` |
 | `relationships` | Extra typed edges | `source`, `target`, `type`: `produced_by`, `input_to`, `result_of`, `reported_in`, `derived_from`, `supports`, `contradicts` |
 
@@ -578,14 +578,71 @@ a time with no-follow directory descriptors, and the strict JSONL and
 whole-document JSON profiles reject invalid encodings, duplicates, overflow and
 excessive nesting. `validate`/`inspect` report fixed locator codes, and an
 absent locator in 0.3 is `result-unverified` (warning). CSV/`csv-cell` is not
-implemented; it is a later slice C, not slice B. Schemas 0.1 and 0.2 are
+part of slice B; schema 0.4 adds it (see below). Schemas 0.1 and 0.2 are
 unchanged. See [docs/schema-0.3-locators.md](docs/schema-0.3-locators.md).
 
-Only artifacts named by a 0.3 locator use the protected snapshot. All other
+Only artifacts named by a 0.3 or 0.4 locator use the protected snapshot. All other
 artifacts, including every artifact in a 0.1 or 0.2 manifest, are hashed with an
 ordinary open that follows symbolic links after a separate containment check,
 so a concurrent swap of a parent directory can make validate hash, and report
 the digest and size of, a file outside the folder.
+
+### Schema 0.4 CSV cell locators (slice C)
+
+Schema 0.4 is an explicit opt-in that adds one locator kind, `csv-cell`, to the
+0.3 string and `jsonl` forms. A result can locate one numeric cell in a `.csv`
+artifact:
+
+```json
+{
+  "id": "rmse",
+  "run_id": "tuned",
+  "name": "val_rmse",
+  "value": 0.5,
+  "artifact_id": "metrics",
+  "locator": {"kind": "csv-cell", "row": 41, "column": 4, "header": "val_rmse"}
+}
+```
+
+`row` is one-based over data records (row 1 is the first record after the
+header; the header is never selectable), `column` is one-based over the parsed
+header, and `header` is the required exact parsed-header assertion at that
+column (`1` to `65,536` code points; at most `65,536` UTF-8 bytes at runtime).
+`kind` and extension must agree: `csv-cell` needs a `.csv` path, case
+insensitively. Any non-null 0.4 locator requires `artifact_id`. Unknown kinds,
+bad ranges, an empty header, a lone surrogate, and a non-string/non-object
+locator are `schema-invalid` load refusals (exit `2`).
+
+The verifier is strict and POSIX-first: a comma-only RFC 4180-derived profile
+with no sniffing, parsed records, LF/CRLF terminators (a bare CR is refused
+anywhere), quoted-field rules, no blank-boundary or ragged records, UTF-8 with
+one leading BOM stripped, and an ASCII-only numeric grammar. It never uses the
+stdlib `csv` module, never splits on Unicode line boundaries, and reads the
+artifact once through the slice-B protected snapshot. Structural caps are per
+artifact: 50 MiB file, 1 MiB record, 64 KiB field, 1,024 columns, 1,000,000 data
+rows and 10,000,000 cells. Two eligibility caps are per manifest and counted
+without reading files: 10,000 `csv-cell` results and 16 MiB of total `header`
+metadata; a capped manifest emits one `locator-unreadable` cap finding per
+eligible artifact, marks it broken, and reads no cell. Outcomes reuse the
+existing locator codes (`locator-kind-mismatch`, `locator-mismatch`,
+`locator-unreadable`, `locator-unsupported-value`,
+`result-value-mismatch`) plus `directory-locator-unsupported`,
+`result-unverified` (warning), `claim-unverified` and `claim-at-risk`.
+
+Human output shows a csv-cell as `csv-cell:<row>,<column>` and never the
+recorded header; `--json` keeps the structured locator including `header`. A
+finding never includes cell text, header text, raw row text, OS error text or
+parser exception text. 0.3 human output is byte-identical. Use
+`runevidence migrate PATH --to 0.4` to opt in: 0.1/0.2 sources run the
+manifest-only locator precheck before any write
+(`LOCATOR_MIGRATION_UNSUPPORTED`), and 0.3 sources get a version-only bump.
+There is no downgrade (`DOWNGRADE_UNSUPPORTED`). A 0.4-capable `init --force`
+refuses an existing 0.4 manifest before writing (`INIT_0_4_REFUSAL`); a
+pre-0.4 binary does not know 0.4 and instead backs it up and replaces it with
+0.1, so keep 0.4 manifests away from older builds. The `schema` command still
+prints 0.1; the 0.4 schema is `schema/runevidence-0.4.schema.json`. Schemas
+0.1/0.2/0.3 are unchanged and 0.3 still refuses `csv-cell`. See
+[docs/schema-0.4-csv-cell.md](docs/schema-0.4-csv-cell.md).
 
 ### Migrating a manifest to 0.2
 
@@ -594,8 +651,9 @@ runevidence migrate PATH --to 0.2 [--dry-run] [--json]
 ```
 
 `migrate` declares an existing valid manifest as 0.2. It is a stable authoring
-path. It is explicit: nothing infers 0.2 from field presence, and `--to 0.2`
-and `--to 0.3` are the only supported targets (this section covers 0.2).
+path. It is explicit: nothing infers 0.2 from field presence, and `--to 0.2`,
+`--to 0.3` and `--to 0.4` are the only supported targets (this section covers
+0.2; 0.4 adds csv-cell and is described above).
 The only value it changes is the top-level `schema_version`, which is written
 first; every other decoded value, type, presence and object-key order is
 preserved, apart from the canonical writer's normalization of number spelling
@@ -612,22 +670,24 @@ generation is reused only when it is a regular non-symlink file, not the
 manifest or an alias of it, with identical bytes and POSIX permission bits no
 wider than the manifest's; otherwise the next generation is created. A dry
 run still loads, proves preservation and performs the stale read, but writes
-nothing and does not enumerate backups. An already-0.2 manifest is a
-successful no-op (exit `0`, no backup, no write).
+nothing and does not enumerate backups. A manifest that already declares the
+requested target is a successful no-op (exit `0`, no backup, no write).
 
-`init --force` refuses a manifest that declares schema 0.2 or 0.3, valid or
-not, before adapter discovery, backup or save; nothing is written. It prints a
-fixed value-free message telling you to move the manifest aside, run `init`,
-then `migrate --to 0.2` (or `--to 0.3`) and reapply the first-class values from
-the moved file.
+`init --force` refuses a manifest that declares schema 0.2, 0.3 or 0.4, valid
+or not, before adapter discovery, backup or save; nothing is written. It prints
+a fixed value-free message telling you to move the manifest aside, run `init`,
+then `migrate --to 0.2` (or `--to 0.3` / `--to 0.4`) and reapply the
+first-class values from the moved file.
 A manifest whose raw JSON does not parse keeps the older backup-then-regenerate
-path, because no 0.2/0.3 declaration can be read from it.
+path, because no 0.2/0.3/0.4 declaration can be read from it. A pre-0.4 binary
+does not recognize 0.4 and therefore backs the manifest up and replaces it with
+0.1; that older-build behavior is a documented limitation, not a 0.4 refusal.
 
 Exit `0` means the manifest was migrated, would be migrated, or already
-declared the requested target version (`--to 0.2` or `--to 0.3`). Exit `2`
-means this command did not replace the manifest; another writer may have
-changed it, a source locator made 0.3 unsafe, or the requested change was a
-downgrade. Output names one closed code:
+declared the requested target version (`--to 0.2`, `--to 0.3` or `--to 0.4`).
+Exit `2` means this command did not replace the manifest; another writer may
+have changed it, a source locator made 0.3 or 0.4 unsafe, or the requested
+change was a downgrade. Output names one closed code:
 `RESERVED_PATH`, `MANIFEST_LOAD_FAILED`, `SERIALIZATION_FAILED`,
 `READ_FAILED`, `STALE_MANIFEST`, `WRITE_FAILED`,
 `LOCATOR_MIGRATION_UNSUPPORTED`, `DOWNGRADE_UNSUPPORTED`, `INTERNAL_ERROR`, or
@@ -738,7 +798,7 @@ only the supplied run ID and field names.
 | `missing-file` | error | Artifact path does not exist (with a hint if the file seems to have moved). |
 | `not-a-file` | error | Path is a folder, not a file. |
 | `hash-mismatch` | error | File bytes differ from the recorded sha256. |
-| `size-mismatch` | error | No digest recorded, but the size changed. |
+| `size-mismatch` | error | Recorded size differs, with a matching digest or with no recorded digest. Emitted once per artifact. |
 | `path-escapes-root` | error | Path leaves the experiment folder (`../`). |
 | `absolute-path` | warning | Path will break when the folder moves. |
 | `non-posix-path` | warning | Backslashes; use `/` so it works on every OS. |
@@ -759,16 +819,17 @@ only the supplied run ID and field names.
 | `claim-at-risk` | error | A claim depends on a result, file or run input that is missing or changed. Lineage is followed upstream (`derived_from`, `input_to`, producing runs), so raw data two steps back counts; indirect causes are shown as `id (via ...)`. |
 | `result-value-mismatch` | error | Recorded value differs from the value at its locator in the file. Numbers match within a small tolerance (relative 1e-9); an integer too large to convert to a float is compared exactly instead. `NaN` matches `NaN`, so a diverged run can be recorded faithfully. |
 | `result-unverifiable` | warning | A legacy 0.1/0.2 locator cannot be checked (not JSON, cannot be parsed, not found, no artifact). |
-| `locator-kind-mismatch` | error | A 0.3 locator targets the wrong artifact extension (`string` needs `.json`, `jsonl` needs `.jsonl`). |
-| `locator-mismatch` | error | A 0.3 line/pointer is blank, out of range, or absent. |
-| `locator-unreadable` | error | The protected read failed (permission or other errno), or the snapshot/selected value does not satisfy the strict profile (encoding, duplicate keys, overflow, caps, parse). |
-| `locator-unsupported-value` | error | A 0.3 locator resolves to an array or object, not a scalar. |
+| `locator-kind-mismatch` | error | A 0.3/0.4 locator targets the wrong artifact extension (`string` needs `.json`, `jsonl` needs `.jsonl`, `csv-cell` needs `.csv`). |
+| `locator-mismatch` | error | A 0.3 line/pointer or a 0.4 row/column/header is blank, out of range, or absent. For `csv-cell`, a selected header must match the parsed header at that column. |
+| `locator-unreadable` | error | The protected read failed (permission or other errno), or the snapshot/selected value does not satisfy the strict profile (encoding, duplicate keys, overflow, CSV dialect, caps, parse). |
+| `locator-unreadable` (csv-cell cap) | error | A 0.4 manifest exceeds the csv-cell eligibility limits (10,000 `csv-cell` results or 16 MiB of `header` metadata). One finding per eligible artifact; no cell is read. |
+| `locator-unsupported-value` | error | A 0.3 or 0.4 locator resolves to an array or object, not a scalar; or a 0.4 `csv-cell` result records a string, boolean or null instead of a number. |
 | `artifact-changed` | error | The protected snapshot identity changed before or during the read, or a parent component was no longer the verified directory. |
 | `locator-no-digest` | error | A result locates a value in an artifact with no recorded sha256. |
 | `locator-unverified` | error | A result locates a value in a volatile artifact. |
-| `result-unverified` | warning | A 0.3 result has no locator, so its value was not checked. |
-| `claim-unverified` | warning | A claim cites only 0.3 results with no locator. |
-| `locator-verifier-unavailable` | error | Defensive code for an unimplemented locator kind; `jsonl` is implemented. |
+| `result-unverified` | warning | A 0.3 or 0.4 result has no locator, so its value was not checked. |
+| `claim-unverified` | warning | A claim cites only 0.3 or 0.4 results with no locator. |
+| `locator-verifier-unavailable` | error | Defensive code for an unimplemented locator kind; `jsonl` and `csv-cell` are implemented. |
 
 Directory findings appear only with `validate --directory-artifacts` or
 `inspect --directory-artifacts`:
@@ -780,7 +841,7 @@ Directory findings appear only with `validate --directory-artifacts` or
 | `directory-no-digest` | warning | No directory digest is recorded, so changes cannot be detected. |
 | `directory-unsafe` | error | The root or a member breaks the scanner policy, including an unsupported platform or filesystem. |
 | `directory-unreadable` / `directory-unstable` / `directory-limit-exceeded` / `directory-path-collision` | error | The scan could not read a stable, bounded tree. |
-| `directory-locator-unsupported` | error | A result uses a JSON locator on a directory artifact. |
+| `directory-locator-unsupported` | error | A result uses a locator on a directory artifact. |
 
 ### Recording a directory (`add --directory` / `rehash --directory`)
 
@@ -1008,6 +1069,17 @@ Read these before relying on a green `validate` for anything important.
   artifact's bytes plus its decoded text (about twice the file size) while that
   artifact is checked; snapshots are released before the next artifact is
   read.
+- **CSV cells (schema 0.4).** The `csv-cell` verifier is strict and
+  numeric-only: it refuses non-RFC dialects, blank-boundary and ragged
+  records, bare CR, NUL, invalid UTF-8, non-numeric cells, and recorded
+  string/boolean/null values. Real writers' `nan`, `inf`, `-inf` and empty
+  cells therefore cannot be verified. Structural caps are 50 MiB per file,
+  1 MiB per record, 64 KiB per field, 1,024 columns, 1,000,000 data rows and
+  10,000,000 cells per artifact; the per-manifest eligibility caps are 10,000
+  `csv-cell` results and 16 MiB of total `header` metadata. A capped artifact
+  is marked broken, so `claim-at-risk` still says "missing or changed", which
+  is imprecise for a resource cap. There are no column aggregates, delimiter
+  sniffing, or semicolon/TAB dialects.
 - **Bounded input.** Folder scans never follow symbolic links or Windows
   junctions out of the folder, and the MLflow adapter enters each physical
   folder once, so link loops cannot make a scan repeat itself. Hydra
@@ -1055,8 +1127,10 @@ deferred for now: JSON remains the authority, and the
 records why. [Locator slice B](https://github.com/shihaab453/rungraph/blob/main/docs/verified-value-locators-rfc.md)
 is delivered (2026-11-13): schema 0.3 verifies string JSON pointers and structured JSONL
 locators through one protected snapshot, with strict profiles, fixed findings
-and claim propagation. CSV (`csv-cell`) is the pending slice C, not slice B;
-TensorBoard, other adapters and cross-run lineage remain later work.
+and claim propagation. Slice C is delivered (2026-11-14): schema 0.4 adds
+verified numeric `csv-cell` locators under a strict CSV profile, with privacy
+and a documented migration path, without changing 0.1/0.2/0.3. TensorBoard,
+other adapters and cross-run lineage remain later work.
 
 ## Development
 
