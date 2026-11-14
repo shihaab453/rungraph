@@ -1,9 +1,20 @@
-# TensorBoard scalar locators — slice D design RFC (v0.7)
+# TensorBoard scalar locators — slice D design RFC (v0.8)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A design gate and an owner schema-admission decision (D2) are required before any code.
 
-## 0. Changes in v0.7 (round-6 findings)
+## 0. Changes in v0.8 (round-7 findings)
+
+- **Fuzz harness**: entry point is `check_files` with the targeted callback; `missing-file`,
+  `hash-mismatch` and `size-mismatch` are in the exact reachable subset; corpus (i) recomputes
+  size as well as digest; `no-digest` uses a digestless + wrong-kind-only seed; "missing artifact"
+  means a missing file, not a dangling id.
+- **Errata**: item 26 uses the semicolon-anchored gate-6 clause so it is unique after item 22.
+- **Vectors**: boundary races (fstat ≤ cap/EOF > cap → over-cap; fstat > cap/EOF == cap →
+  artifact-changed) are pinned.
+- **Changelog headings** renumbered.
+
+## 0.1 Changes in v0.7 (round-6 findings)
 
 - **Fixed-id reservation**: `tb-*` ids are reserved in `used` before generic allocation; generic
   slugs suffix on any collision; only fixed-vs-fixed collisions are `AdapterError`.
@@ -17,7 +28,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
   over-cap. One short-read wording; `checks/files.py` scoped to TensorBoard-raised snapshots.
 - **Hints/fence**: the `claim-at-risk` cap hint is listed; the INIT note is outside the fence.
 
-## 0.1 Changes in v0.6 (round-5 findings)
+## 0.2 Changes in v0.6 (round-5 findings)
 
 - **Comparator scope**: parent errata cover 0.5 string/jsonl/csv-cell at 1e-9/1e-12; TensorBoard
   floats use 1e-6/1e-9 with abs 1e-12.
@@ -36,7 +47,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
   and the v0.9 header/status; gate 13 is gate 8.
 - **Table/step**: artifact `no-digest` row; step 8 includes unsupported selection; per-key flags.
 
-## 0.1 Changes in v0.5 (round-4 findings)
+## 0.3 Changes in v0.5 (round-4 findings)
 
 - **O(1) Event scanning**: the reader tracks the last non-`summary` member offset and the sum of
   summary payload bytes after it; no slice list. The 16 MiB cap is the sum of merged summary
@@ -56,7 +67,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
 - **Checklist**: correct modules (`manifest.py`, `locator_profiles.py`, `run_fingerprint.py`) and
   the `checks/files.py` row.
 
-## 0.1 Changes from v0.3 (round-3 findings)
+## 0.4 Changes from v0.3 (round-3 findings)
 
 - **Scalar classification is exclusive** and has an ordered selection table; a no-member or
   no-encoding value is classified; non-scalar uses `locator-unsupported-value` (parent §4.3).
@@ -686,7 +697,7 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
     locators: design RFC (v0.9)” and “Status: **v0.8 ERRATA FOR SLICE C.**” with “Status:
     **v0.9 ERRATA FOR SLICE C AND SLICE D.**”.
 26. §9 gate 6: replace “v1 refuses 0.2 and 0.3” with “v1 refuses 0.2, 0.3, 0.4 and 0.5”, and
-    “old readers reject 0.3” with “old readers reject 0.3, 0.4 and 0.5”.
+    “old readers reject 0.3;” (with its semicolon) with “old readers reject 0.3, 0.4 and 0.5;”.
 27. §4.2 race sentence: after “`artifact-changed` is the only race signal.” add “The
     TensorBoard-only size-race rows also classify a file that grew past its cap as over-cap.”.
 
@@ -718,8 +729,9 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
   last 15 MiB counts). A 16 MiB summary of ~8.4M empty Values and one with ~1.6M tagged scalars
   must verify inside the asserted ≤300 MB budget (no value cap).
 - **Snapshot races**: fstat 10,000,000 then EOF 10,000,300 → `artifact-changed`; EOF 9,999,700 →
-  `artifact-changed`; fstat 140 MiB then EOF 100 MiB → `artifact-changed`; fstat 140 MiB then
-  EOF 140 MiB → over-cap; a 0.4 manifest keeps the delivered read-to-EOF behavior.
+  `artifact-changed`; fstat 100 MiB then EOF 129 MiB → over-cap; fstat 140 MiB then EOF 100 MiB →
+  `artifact-changed`; fstat 140 MiB then EOF 140 MiB → `artifact-changed`; fstat 140 MiB then
+  EOF 141 MiB → over-cap; a 0.4 manifest keeps the delivered read-to-EOF behavior.
 - **Caps/memory**: 50/128 MiB; 16 MiB merged summary; 10,000/10,001 and 16 MiB tag edges; 4.4M
   minimal scalar records in 127 MiB; a 16 MiB summary of ~8.4M empty Values and one of ~1.6M
   tagged scalars, both asserted inside the ≤300 MB budget; multiple occurrences; many unrequested
@@ -733,13 +745,16 @@ replacement exactly (whitespace-normalized; items apply in order). Docs tests pi
   result ids.
 - **Oracle/fuzz**: checked-in real TensorBoard fixtures (legacy, `tensor_content`, packed/unpacked
   `float_val`/`double_val`, graph record) with provenance and hashes, plus a test-only writer;
-  seeded framing/protobuf mutation fuzz over the event reader and `check_targeted_results` (graph,
-  conditions and claim passes are excluded and covered by their own tests). **Seed corpora:**
-  (i) byte mutations of a valid event file where the recorded sha256 is recomputed for every
-  generated artifact, so no incidental hash finding; (ii) explicit seeds with a wrong recorded
-  digest and a wrong size; (iii) manifest variants — missing artifact, volatile, digestless,
-  directory artifact, csv-cell kind mismatch, 10,001-entry cap, wrong value, unsupported scalar,
-  non-scalar. The closed set is the §7.3 codes and messages; the **exact reachable subset** is
+  seeded framing/protobuf mutation fuzz over **`check_files` with the targeted callback** (which
+  invokes `check_targeted_results`); graph, conditions and claim passes are excluded and covered
+  by their own tests. Because the file-check stage is included, `missing-file`, `hash-mismatch`
+  and `size-mismatch` are reachable. **Seed corpora:** (i) byte mutations of a valid event file
+  where the recorded sha256 *and* size are recomputed for every generated artifact, so no
+  incidental hash/size finding; (ii) explicit seeds with a wrong recorded digest and a wrong size;
+  (iii) manifest variants — a missing file on disk (not a dangling id), volatile, digestless,
+  digestless with only a wrong-kind locator (for `no-digest`), directory artifact, csv-cell kind
+  mismatch, 10,001-entry cap, wrong value, unsupported scalar, non-scalar. The closed set is the
+  §7.3 codes and messages; the **exact reachable subset** is `missing-file`,
   `directory-locator-unsupported`, `locator-kind-mismatch`, the TensorBoard cap, `no-digest`,
   `locator-no-digest`, `locator-unverified`, `locator-unreadable`, `locator-mismatch`,
   `locator-unsupported-value`, `result-value-mismatch`, `hash-mismatch`, `size-mismatch`.
