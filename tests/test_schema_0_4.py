@@ -518,3 +518,27 @@ def test_artifact_to_dict_accepts_0_4():
     artifact = Artifact(id="a", path="metrics.csv", dataset_id="toy-v1")
     data = artifact_to_dict(artifact, schema_version="0.4")
     assert data["dataset_id"] == "toy-v1"
+
+
+def test_0_4_non_null_locator_requires_artifact_id():
+    for missing in ("absent", "null"):
+        document = doc(locator=csv_cell())
+        if missing == "absent":
+            document["results"][0].pop("artifact_id")
+        else:
+            document["results"][0]["artifact_id"] = None
+        with pytest.raises(ValidationError) as caught:
+            Manifest04.model_validate(document)
+        assert "requires artifact_id" in str(caught.value)
+
+
+def test_0_4_invalid_string_pointer_is_a_field_error():
+    document = doc(locator="~bad")
+    with pytest.raises(ValidationError) as caught:
+        Manifest04.model_validate(document)
+    (error,) = caught.value.errors()
+    assert error["type"] == "value_error"
+    assert (
+        _issue_location(error["loc"], root_model=Manifest04, error_type=error["type"])
+        == "/results/0/locator"
+    )
