@@ -9,11 +9,39 @@ import json
 import math
 from typing import Any
 
+from .locator_profiles import display_locator
 from .models import Manifest, RelationshipType, locator_to_json
 
 
 class ClaimDetailsError(ValueError):
     """Claim selection or the recorded object namespace is ambiguous."""
+
+
+def _display_details(details: dict[str, Any]) -> dict[str, Any]:
+    """A human-display copy of one target/node ``details`` mapping.
+
+    A 0.4 ``csv-cell`` locator is shown as ``csv-cell:<row>,<column>`` so the
+    recorded ``header`` never reaches the terminal. Every other locator form
+    (0.3 strings and ``jsonl`` objects) stays exactly as recorded, which keeps
+    the 0.3 human bytes unchanged. The caller's data is never mutated; this
+    returns a shallow copy only when the locator is actually replaced.
+    """
+    locator = details.get("locator")
+    if (
+        isinstance(locator, dict) and locator.get("kind") == "csv-cell"
+    ) or getattr(locator, "kind", None) == "csv-cell":
+        return {**details, "locator": display_locator(locator)}
+    return details
+
+
+def _display_row(row: dict[str, Any]) -> dict[str, Any]:
+    """A human-display copy of one target/node row, with a safe locator copy."""
+    details = row.get("details")
+    if isinstance(details, dict):
+        displayed = _display_details(details)
+        if displayed is not details:
+            return {**row, "details": displayed}
+    return row
 
 
 def _index(manifest: Manifest) -> dict[str, tuple[str, Any]]:
@@ -165,6 +193,7 @@ def format_claim_details(data: dict[str, Any]) -> str:
         items = data[stance]
         lines.append(f"\n{heading} ({len(items)} recorded targets):")
         for item in items[:20]:
+            item = _display_row(item)
             desc = f"  {shown(item['id'])}: {item['status']} ({shown(item['kind'])}) via {shown(item['via'])}"
             if "details" in item:
                 desc += f" {shown(item['details'])}"
