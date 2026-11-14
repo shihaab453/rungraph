@@ -1,9 +1,16 @@
-# TensorBoard scalar locators — slice D design RFC (v0.10)
+# TensorBoard scalar locators — slice D design RFC (v0.11)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A design gate and an owner schema-admission decision (D2) are required before any code.
 
-## 0. Changes in v0.10 (round-9 findings)
+## 0. Changes in v0.11 (post-acceptance editorial)
+
+- **§6 cap unit**: names the winning `summary` occurrence payload bytes after the last other
+  `what` member, matching §5.1/§5.2.
+- The duplicated tag/Dim.size/tensor_content vector was already removed; the 8.4M/1.6M budget
+  vector stays cross-referenced by design.
+
+## 0.1 Changes in v0.10 (round-9 findings)
 
 - **Erratum 24**: the inserted text ends “…cross-field rule)” without a period, so the parent's
   own period closes the sentence; no `..`.
@@ -11,7 +18,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
   member; §5.2 says a losing member is never checked against the 16 MiB cap.
 - **Vectors**: removed the duplicated 15 MiB / `file_version` / 15 MiB and 15+15 entries.
 
-## 0.1 Changes in v0.9 (round-8 findings)
+## 0.2 Changes in v0.9 (round-8 findings)
 
 - **Race vectors**: fstat 140/EOF 140 is over-cap again; the EOF == cap boundary is fstat 140/EOF
   128 → artifact-changed; fstat 140/EOF 141 is over-cap.
@@ -20,7 +27,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
 - **Errata**: item 24 quotes `not-a-file` without the final period (no stray “.;”), item 17 keeps
   case-insensitivity for all kinds, item 27 says “whose read ends past its cap”.
 
-## 0.2 Changes in v0.8 (round-7 findings)
+## 0.3 Changes in v0.8 (round-7 findings)
 
 - **Fuzz harness**: entry point is `check_files` with the targeted callback; `missing-file`,
   `hash-mismatch` and `size-mismatch` are in the exact reachable subset; corpus (i) recomputes
@@ -31,7 +38,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
   artifact-changed) are pinned.
 - **Changelog headings** renumbered.
 
-## 0.3 Changes in v0.7 (round-6 findings)
+## 0.4 Changes in v0.7 (round-6 findings)
 
 - **Fixed-id reservation**: `tb-*` ids are reserved in `used` before generic allocation; generic
   slugs suffix on any collision; only fixed-vs-fixed collisions are `AdapterError`.
@@ -45,7 +52,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
   over-cap. One short-read wording; `checks/files.py` scoped to TensorBoard-raised snapshots.
 - **Hints/fence**: the `claim-at-risk` cap hint is listed; the INIT note is outside the fence.
 
-## 0.4 Changes in v0.6 (round-5 findings)
+## 0.5 Changes in v0.6 (round-5 findings)
 
 - **Comparator scope**: parent errata cover 0.5 string/jsonl/csv-cell at 1e-9/1e-12; TensorBoard
   floats use 1e-6/1e-9 with abs 1e-12.
@@ -64,7 +71,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
   and the v0.9 header/status; gate 13 is gate 8.
 - **Table/step**: artifact `no-digest` row; step 8 includes unsupported selection; per-key flags.
 
-## 0.5 Changes in v0.5 (round-4 findings)
+## 0.6 Changes in v0.5 (round-4 findings)
 
 - **O(1) Event scanning**: the reader tracks the last non-`summary` member offset and the sum of
   summary payload bytes after it; no slice list. The 16 MiB cap is the sum of merged summary
@@ -84,7 +91,7 @@ A design gate and an owner schema-admission decision (D2) are required before an
 - **Checklist**: correct modules (`manifest.py`, `locator_profiles.py`, `run_fingerprint.py`) and
   the `checks/files.py` row.
 
-## 0.6 Changes from v0.3 (round-3 findings)
+## 0.7 Changes from v0.3 (round-3 findings)
 
 - **Scalar classification is exclusive** and has an ordered selection table; a no-member or
   no-encoding value is classified; non-scalar uses `locator-unsupported-value` (parent §4.3).
@@ -364,7 +371,7 @@ Per-artifact structural caps (per-result `locator-unreadable`):
 |---|---|---|
 | file (json/jsonl/csv) | raw bytes | 50 MiB |
 | file (tensorboard) | raw bytes | 128 MiB |
-| merged `summary` payload per Event | sum of `summary` occurrence payload bytes | 16 MiB (larger refuses the file structurally) |
+| merged `summary` payload per Event | winning `summary` occurrence payload bytes after the last other `what` member | 16 MiB (larger refuses the file structurally) |
 
 The locator `tag` cap is load-time only; event tags are byte-compared with no runtime cap.
 
