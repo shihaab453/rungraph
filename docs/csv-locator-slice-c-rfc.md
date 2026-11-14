@@ -1,11 +1,14 @@
-# CSV cell locators (`csv-cell`) — slice C design RFC (v0.29)
+# CSV cell locators (`csv-cell`) — slice C design RFC (v0.30)
 
 Status: **DESIGN PROPOSAL, REVISED AFTER FIFTEEN DESIGN PANEL ROUNDS AND A FINAL CONSISTENCY PASS. NOTHING IMPLEMENTED.
 NOTHING AUTHORIZED BY THIS DOCUMENT.** Acceptance authorizes only a separate implementation gate
 and the owner's schema-admission decision.
 
-## 0. Changes in v0.29 (editorial)
+## 0. Changes in v0.30 (errata applied)
 
+- **Parent reissued**: `docs/verified-value-locators-rfc.md` is now v0.8
+  (`3a2fee0f779b382490a712a3e5c52a818de9035d90f7d21337442f8b83bb246d`); the pre-errata v0.7 was
+  `f04ecfc8…`.
 - **Parent version corrected**: the parent contract (v0.7) is reissued as **v0.8**, not the
   slice-C revision number; every reference now says v0.8.
 - **The parent §5.2 bullet is quoted** (`Caps: file 50 MiB, …`) and replaced wholesale, keeping `file 50 MiB per artifact` and the units line, while making only the two
@@ -647,8 +650,9 @@ reused and is imprecise for a resource cap; this limitation is documented and ve
 
 ### 9.1 Parent v0.8 errata (authorized by §16)
 
-The parent document is **`docs/verified-value-locators-rfc.md`** (currently v0.7, hash
-`f04ecfc8…`), reissued as **v0.8**. It carries replacement text for:
+The parent document is **`docs/verified-value-locators-rfc.md`**, reissued as **v0.8**
+(`3a2fee0f779b382490a712a3e5c52a818de9035d90f7d21337442f8b83bb246d`; pre-errata v0.7 was
+`f04ecfc8…`). It carries replacement text for:
 - §6: display `csv-cell:<row>,<column>`, no header;
 - §7: findings never echo the header assertion for `csv-cell`;
 - §3.1/§4 table/§8: unknown kind = `schema-invalid`, no `locator-unknown-kind`; the §8 migration
