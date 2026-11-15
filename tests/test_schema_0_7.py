@@ -10,7 +10,7 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from runevidence.manifest import load_manifest, validate_manifest
-from runevidence.migrate import migrate_manifest
+from runevidence.migrate import MigrationError, migrate_manifest
 from runevidence.run_comparability import _UNSUPPORTED_COMPARABILITY_SCHEMAS
 from runevidence.models import (
     HistogramValue,
@@ -179,8 +179,6 @@ def test_schema_07_is_unsupported_by_comparability():
 def test_migrate_07_to_06_is_a_downgrade(tmp_path):
     path = tmp_path / "runevidence.json"
     path.write_text(json.dumps(document07()), encoding="utf-8")
-    from runevidence.migrate import MigrationError
-
     with pytest.raises(MigrationError) as excinfo:
         migrate_manifest(path, target_version="0.6")
     assert excinfo.value.code == "DOWNGRADE_UNSUPPORTED"

@@ -1401,18 +1401,18 @@ def _iter_winning_values_07(data):
 
 
 def iter_supported_histograms(data):
-    for tag_start, tag_end, step, kind, _simple, _tensor, ranges in _iter_winning_values_07(
+    for tag_start, tag_end, step, kind, _simple, _tensor, hist in _iter_winning_values_07(
         data
     ):
-        if kind != 5 or not ranges.present or ranges.value is None:
+        if kind != 5 or not hist.present or hist.value is None:
             continue
         yield HistogramRecord(
-            tag=_tag_bytes(data, tag_start, tag_end), step=step, value=ranges.value
+            tag=_tag_bytes(data, tag_start, tag_end), step=step, value=hist.value
         )
 
 
 def iter_supported_summaries_07(data):
-    for tag_start, tag_end, step, kind, simple_value, tensor, ranges in _iter_winning_values_07(
+    for tag_start, tag_end, step, kind, simple_value, tensor, hist in _iter_winning_values_07(
         data
     ):
         category, value, float32 = _classify(data, kind, simple_value, tensor)
@@ -1428,11 +1428,11 @@ def iter_supported_summaries_07(data):
             yield StringRecord(
                 tag=_tag_bytes(data, tag_start, tag_end), step=step, value=raw
             )
-        if kind == 5 and ranges.present and ranges.value is not None:
+        if kind == 5 and hist.present and hist.value is not None:
             yield HistogramRecord(
                 tag=_tag_bytes(data, tag_start, tag_end),
                 step=step,
-                value=ranges.value,
+                value=hist.value,
             )
 
 
@@ -1444,7 +1444,7 @@ def scan_tensorboard_07(data, scalar_requests, string_requests, histogram_reques
     if not scalar_states and not string_states and not hist_states:
         return {}, {}, {}
 
-    for tag_start, tag_end, step, kind, simple_value, tensor, ranges in _iter_winning_values_07(
+    for tag_start, tag_end, step, kind, simple_value, tensor, hist in _iter_winning_values_07(
         data
     ):
         tag_length = 0 if tag_start < 0 else tag_end - tag_start
@@ -1492,16 +1492,14 @@ def scan_tensorboard_07(data, scalar_requests, string_requests, histogram_reques
             if by_step is not None:
                 hist_state = by_step.get(step)
         if hist_state is not None:
-            if kind == 5 and ranges.present:
-                if ranges.value is not None:
+            if kind == 5 and hist.present:
+                if hist.value is not None:
                     occurrence = hist_state.supported
                     hist_state.supported += 1
                     if occurrence in hist_state.wanted:
-                        hist_state.values[occurrence] = ranges.value
+                        hist_state.values[occurrence] = hist.value
                 else:
                     hist_state.unsupported = True
-            elif kind == 5:
-                hist_state.non_scalar = True
             else:
                 hist_state.non_scalar = True
 
