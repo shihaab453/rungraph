@@ -1,11 +1,19 @@
-# TensorBoard histograms — design RFC (v0.3)
+# TensorBoard histograms — design RFC (v0.6)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.7 admission decision are required before any code.
 Schema 0.1–0.6, their readers/checkers and every delivered behavior stay frozen.
 
-## 0. Changes in v0.3
+## 0. Changes in v0.6
 
+- Folds the round-2 review (DeepSeek): compact display is scoped to histogram *results*, not
+  parameters; histograms-only and both-flags budget texts are split; the cli and package
+  coordination rows are completed.
+- Round-2 Opus: completes the admission inventory with
+  `tensorboard_events.py`, `locator_profiles.py` and the adapter; adds `inspect` and graph
+  conflicting-evidence to compact display; pins lossy-integer/overflow handling and the exact
+  JSON-Schema shape; tidies ladder/wording edges.
+- Round-2 Sol: 0.7 tag/budget texts apply only with `--include-histograms`.
 - Folds the first review from all four seats (Sol, Opus, Gemini, DeepSeek).
 - Pins the strict `HistogramValue`/`Result07.value` contract, cross-kind value/locator rule,
   entry-local inner decode failures, exact oneof merge boundary, bounded 1,025-pair state,
@@ -42,9 +50,10 @@ Schema 0.7 = 0.6 plus histograms. A histogram value is a bounded object:
 `Result07.value` is `Scalar | HistogramValue`, with these rules:
 
 - `HistogramValue` is strict (`extra="forbid"`), all seven keys required, `kind` const;
-- all numeric fields are finite binary64 (`allow_inf_nan=False`); JSON integers are accepted only
-  when `float(value) == value` (so `9007199254740993` is rejected); booleans and numeric strings
-  are rejected;
+- all numeric fields are finite binary64 (`allow_inf_nan=False`); a JSON integer is accepted
+  only when it converts exactly to a finite binary64, checked **before** Pydantic coercion (so
+  `9007199254740993` is rejected); an integer that overflows binary64 is a validation error,
+  never an uncaught exception; booleans and numeric strings are rejected;
 - `num >= 0`; every count finite and `>= 0`; array lengths equal; at most 1,024 pairs;
   `bucket_limit` strictly increasing (`-0.0` and `0.0` compare equal, so `[-0.0, 0.0]` is not
   increasing); zero or one pair is valid; no `min <= max` requirement (TF1 empty histograms use
@@ -95,8 +104,8 @@ type other than 1/2 on fields 6/7, unknown fields with a valid wire type are ski
 
 ### 3.4 Bounded state and conformance
 
-The decoder retains at most 1,025 limits and 1,025 counts. The 1,025th pair marks the entry
-failing; later field 6/7 entries are skipped without retention. No list larger than 1,025 is
+The decoder retains at most 1,025 limits and 1,025 counts. The 1,025th limit or count marks
+the entry failing; later field 6/7 entries are skipped without retention. No list larger than 1,025 is
 allocated, and retained state never exceeds the snapshot bytes.
 
 An entry is conforming only when: equal lengths, at most 1,024 pairs, strictly increasing
@@ -127,9 +136,10 @@ never execute histogram code.
 | Condition | Outcome | Code / message |
 | --- | --- | --- |
 | occurrence < conforming | value | — |
+| occurrence < conforming, different value | mismatch | `result-value-mismatch` / `does not match the recorded value` |
 | occurrence >= conforming, conforming >= 1 | not found | `locator-mismatch` / `was not found` |
 | conforming == 0, winning field-5 entry failing | unsupported encoding | `locator-unsupported-value` / `selects an unsupported histogram encoding` |
-| conforming == 0, another winning entry | unsupported value | `locator-unsupported-value` / `selects an unsupported value` |
+| conforming == 0, no failing, another winning entry | unsupported value | `locator-unsupported-value` / `selects an unsupported value` |
 | tag/step never appears | not found | `locator-mismatch` / `was not found` |
 | structural file refusal | unreadable | existing structural outcome |
 
@@ -142,11 +152,13 @@ never execute histogram code.
   metadata); no TensorBoard value was read`. 0.7 is eligible for the 128 MiB snapshot cap.
 - Display: `tensorboard-histogram:step=<step>,occurrence=<n>`. `run_claim._display_details`
   (reused by lineage) adds the kind so the raw locator and tag never print.
-- Human `compare`, `matrix`, `run`, `claim` and `lineage` render
+- Human `compare`, `matrix`, `run`, `claim`, `lineage`, `inspect` (`report.format_overview`)
+  and the `checks/graph.py` conflicting-evidence message render
   `histogram(<k> buckets, num=<num>)`, where `k = len(bucket)` and
-  `num = json.dumps(value["num"])`; the rule applies whenever the recorded value is a
-  `HistogramValue` in a 0.7 manifest. `--json` keeps the exact object. `leaderboard` excludes it
-  as `non_numeric_or_nonfinite`.
+  `num = json.dumps(value["num"])`; the rule applies only to results whose locator kind is
+  `tensorboard-histogram` and whose value is a `HistogramValue`. Parameters, names, JSON-locator
+  strings and every non-histogram value keep their delivered rendering. `--json` keeps the
+  exact object. `leaderboard` excludes it as `non_numeric_or_nonfinite`.
 - Every consumer converts a live model with `model_dump(mode="json")`; `run_compare`,
   `run_matrix`, `run_details`, `run_claim`, `run_lineage`, `run_leaderboard` and `report` are
   tested with a real `HistogramValue`.
@@ -173,19 +185,25 @@ never execute histogram code.
 - Budgets: 10,000 results shared; 16 MiB tag bytes shared; 16 MiB selected string UTF-8 bytes
   (the 0.6 cap, retained); 16 MiB selected histogram JSON; 1,024 buckets per histogram; 128 MiB
   file and 16 MiB merged-summary caps unchanged. Histogram JSON bytes are exactly
-  `json.dumps(model_dump, ensure_ascii=True, allow_nan=False, separators=(",", ":"))` UTF-8,
-  charged once per selected histogram.
+  `json.dumps(model_dump, ensure_ascii=True, allow_nan=False, separators=(",", ":"))` UTF-8
+  **after** `-0.0` normalization, charged once per selected histogram. A hand-written integer
+  such as `"num": 4` is saved back as `4.0`.
 - Failure precedence: path, profile, unrepresentable scalar tag, too-expensive pattern, caps,
   fixed-id collision, result-name collision, volatile. Nonconforming histogram/string entries
   are skipped and never occupy a tier.
 - Fixed errors:
   - `ERROR: adapter {name!r} does not support --include-histograms. Nothing was written.`
   - `ERROR: adapter {name!r} cannot apply --include-histograms. Nothing was written.`
-  - a scalar tag under either include flag:
+  - a scalar tag when `--include-histograms` is set:
     `a scalar tag cannot be represented in schema 0.7; nothing was written`
-  - budget:
+  - budget, histograms only:
+    `the selected TensorBoard summaries exceed the 10,000-result, 16 MiB tag or 16 MiB
+    histogram-JSON limit; nothing was written`
+  - budget, histograms and strings:
     `the selected TensorBoard summaries exceed the 10,000-result, 16 MiB tag, 16 MiB
     string-value or 16 MiB histogram-JSON limit; nothing was written`
+  - strings-only extraction keeps the delivered `TAG_MESSAGE_06` and `BUDGET_MESSAGE_06`
+    byte-identically; no flag keeps the 0.5 texts.
 
 ## 7. Migration, refusals, fixed texts
 
@@ -215,6 +233,12 @@ never execute histogram code.
 
 ## 8. Admission checklist (per module)
 
+- `tensorboard_events.py`: `HistogramProto` decoder, `histo` merge/reset state,
+  `iter_supported_histograms`, `iter_supported_summaries_07`, `scan_tensorboard_07`; 0.5/0.6
+  scanners untouched.
+- `locator_profiles.py`: `display_locator` histogram branch.
+- `packages/runevidence-tensorboard/src/runevidence_tensorboard/adapter.py`: capability flag,
+  0.7 tag/budget texts, histogram budgets, id/name/digest kind branches.
 - `models.py`: `Manifest07`, `Result07`, `HistogramValue`, `TensorboardHistogramLocator`
   (not a subclass of `TensorboardLocator`), `_LOCATOR_ADAPTER_07`/`_dispatch_locator_07`,
   scalar-shape guard, `model_dump`/`_version_specific_shape` 0.7, cross-field value/locator
@@ -229,8 +253,17 @@ never execute histogram code.
   JSON/JSONL reject of histogram values, directory hint.
 - `checks/graph.py`, `run_claim.py`/`run_lineage.py`, `run_comparability.py`,
   `run_compare.py`, `run_matrix.py`, `run_details.py`, `run_leaderboard.py`, `report.py`.
-- `migrate.py`/`cli.py`: target 0.7, texts, `declared` tuple, `Manifest07` volatile, CLI hash
-  rotation.
+- `migrate.py`/`cli.py`: target 0.7, `--include-histograms`, texts, `declared` tuple,
+  `Manifest07` volatile, CLI hash rotation.
+- Package coordination: the gate is unreleased; the adapter's top-level 0.7 imports mean a
+  pre-gate core fails to load the adapter even for default 0.5/0.6 runs. Core and adapter must
+  come from matched checkouts; the dependency floor changes only at an authorized release.
+- `json_schema_0_7` is pinned as: `Result07` uses `allOf` with the existing `artifact_id`
+  `if`/`then` plus a value/locator `if`/`then` (an object value requires a
+  `tensorboard-histogram` or null locator); `$defs.HistogramValue` declares the seven required
+  keys, `kind` const, `additionalProperties: false`, `number` fields, `minimum: 0` on `num` and
+  `bucket`, `maxItems: 1024` on both arrays; equal lengths, strict increase and exact integers
+  are model-only and pinned by vectors the schema accepts but the model rejects.
 - `schema/runevidence-0.7.schema.json` added and pinned; unknown-version vectors moved from
   0.7 to 0.8; tests that used 0.7 as unsupported move to 0.8.
 
