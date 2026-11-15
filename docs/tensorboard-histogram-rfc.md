@@ -1,14 +1,18 @@
-# TensorBoard histograms — design RFC (v0.6)
+# TensorBoard histograms — design RFC (v0.8)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.7 admission decision are required before any code.
 Schema 0.1–0.6, their readers/checkers and every delivered behavior stay frozen.
 
-## 0. Changes in v0.6
+## 0. Changes in v0.8
 
-- Folds the round-2 review (DeepSeek): compact display is scoped to histogram *results*, not
-  parameters; histograms-only and both-flags budget texts are split; the cli and package
-  coordination rows are completed.
+- Folds the round-3 review (DeepSeek): an empty `Summary.Value` (no winning oneof member) is an
+  "other" entry and reports `selects an unsupported value`, not "was not found"; the value model
+  has eight required keys (`kind` plus seven) and the schema `required` includes `kind`.
+- Round-3 Opus: null-locator compact display, `bucket.items` minimum, unknown-field wording.
+- Round-2 DeepSeek: compact display is scoped to histogram *results*, not parameters;
+  histograms-only and both-flags budget texts are split; the cli and package coordination rows
+  are completed.
 - Round-2 Opus: completes the admission inventory with
   `tensorboard_events.py`, `locator_profiles.py` and the adapter; adds `inspect` and graph
   conflicting-evidence to compact display; pins lossy-integer/overflow handling and the exact
@@ -49,7 +53,8 @@ Schema 0.7 = 0.6 plus histograms. A histogram value is a bounded object:
 
 `Result07.value` is `Scalar | HistogramValue`, with these rules:
 
-- `HistogramValue` is strict (`extra="forbid"`), all seven keys required, `kind` const;
+- `HistogramValue` is strict (`extra="forbid"`), eight keys required (`kind` plus the seven
+  value keys), `kind` const;
 - all numeric fields are finite binary64 (`allow_inf_nan=False`); a JSON integer is accepted
   only when it converts exactly to a finite binary64, checked **before** Pydantic coercion (so
   `9007199254740993` is rejected); an integer that overflows binary64 is a validation error,
@@ -100,7 +105,8 @@ The histogram decoder never calls the whole-file `_refuse()` path. Inside a winn
 `HistogramProto` slice, every decode failure makes **the entry** failing and leaves the rest of
 the file readable: bad key varint, field number 0 or `> 2^29-1`, wire types 3/4/6/7, truncated
 length or fixed64, packed length not a multiple of 8, wire type other than 1 on fields 1–5, wire
-type other than 1/2 on fields 6/7, unknown fields with a valid wire type are skipped.
+type other than 1/2 on fields 6/7. Unknown fields with a valid wire type and in-bounds payload
+are skipped and never affect classification.
 
 ### 3.4 Bounded state and conformance
 
@@ -139,7 +145,7 @@ never execute histogram code.
 | occurrence < conforming, different value | mismatch | `result-value-mismatch` / `does not match the recorded value` |
 | occurrence >= conforming, conforming >= 1 | not found | `locator-mismatch` / `was not found` |
 | conforming == 0, winning field-5 entry failing | unsupported encoding | `locator-unsupported-value` / `selects an unsupported histogram encoding` |
-| conforming == 0, no failing, another winning entry | unsupported value | `locator-unsupported-value` / `selects an unsupported value` |
+| conforming == 0, no failing, another entry (including a `Summary.Value` with no winning oneof member) | unsupported value | `locator-unsupported-value` / `selects an unsupported value` |
 | tag/step never appears | not found | `locator-mismatch` / `was not found` |
 | structural file refusal | unreadable | existing structural outcome |
 
@@ -155,9 +161,10 @@ never execute histogram code.
 - Human `compare`, `matrix`, `run`, `claim`, `lineage`, `inspect` (`report.format_overview`)
   and the `checks/graph.py` conflicting-evidence message render
   `histogram(<k> buckets, num=<num>)`, where `k = len(bucket)` and
-  `num = json.dumps(value["num"])`; the rule applies only to results whose locator kind is
-  `tensorboard-histogram` and whose value is a `HistogramValue`. Parameters, names, JSON-locator
-  strings and every non-histogram value keep their delivered rendering. `--json` keeps the
+  `num = json.dumps(value["num"])`; the rule applies to any result whose value is a
+  `HistogramValue` (its locator is `tensorboard-histogram` or null by the §2 cross-kind rule).
+  Parameters, names, JSON-locator strings and every non-histogram value keep their delivered
+  rendering. `--json` keeps the
   exact object. `leaderboard` excludes it as `non_numeric_or_nonfinite`.
 - Every consumer converts a live model with `model_dump(mode="json")`; `run_compare`,
   `run_matrix`, `run_details`, `run_claim`, `run_lineage`, `run_leaderboard` and `report` are
@@ -260,9 +267,9 @@ never execute histogram code.
   come from matched checkouts; the dependency floor changes only at an authorized release.
 - `json_schema_0_7` is pinned as: `Result07` uses `allOf` with the existing `artifact_id`
   `if`/`then` plus a value/locator `if`/`then` (an object value requires a
-  `tensorboard-histogram` or null locator); `$defs.HistogramValue` declares the seven required
-  keys, `kind` const, `additionalProperties: false`, `number` fields, `minimum: 0` on `num` and
-  `bucket`, `maxItems: 1024` on both arrays; equal lengths, strict increase and exact integers
+  `tensorboard-histogram` or null locator); `$defs.HistogramValue` declares all eight keys in
+  `required` (`kind` plus the seven value keys), `kind` const, `additionalProperties: false`, `number` fields, `minimum: 0` on `num` and on
+  `bucket.items`, `maxItems: 1024` on both arrays; equal lengths, strict increase and exact integers
   are model-only and pinned by vectors the schema accepts but the model rejects.
 - `schema/runevidence-0.7.schema.json` added and pinned; unknown-version vectors moved from
   0.7 to 0.8; tests that used 0.7 as unsupported move to 0.8.
@@ -277,8 +284,8 @@ never execute histogram code.
 - Value model: bool/string/NaN/inf/lossy integer rejection, `-0.0` normalization, cross-kind
   locator rejection, exact JSON bytes, live model through every consumer.
 - Identity/names/ids, mixed tags, multifile groups, insertion and delete-then-add.
-- Checker ladder, exact comparison, cap text/cardinality, 128 MiB, claim/lineage canary,
-  graph labels, JSON exactness, 0.6 regression pins.
+- Checker ladder including the empty-member case, exact comparison, cap text/cardinality,
+  128 MiB, claim/lineage canary, graph labels, JSON exactness, 0.6 regression pins.
 - Adapter/CLI flags and texts, budgets including 16 MiB string and histogram boundaries,
   skipped entries, capability errors, migration/refusals.
 - Full matrices 3.10/3.12/3.14, pydantic 2.6/2.14, Windows, packaging.
