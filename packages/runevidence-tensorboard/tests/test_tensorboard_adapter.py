@@ -1222,3 +1222,14 @@ def test_backslash_path_outranks_a_corrupt_file_without_reading_it(tmp_path):
     with pytest.raises(AdapterError) as excinfo:
         adapter.extract(root, discovery, project_id="p", project_name="P")
     assert str(excinfo.value) == adapter_module.BACKSLASH_MESSAGE
+
+
+def test_reinit_produces_byte_identical_manifests(tmp_path, capsys):
+    root = _two_tag_folder(tmp_path)
+    assert main(["init", str(root), "--adapter", "tensorboard", "--tags", "loss"]) == 0
+    capsys.readouterr()
+    first = (root / MANIFEST_FILENAME).read_bytes()
+    (root / MANIFEST_FILENAME).unlink()
+    assert main(["init", str(root), "--adapter", "tensorboard", "--tags", "loss"]) == 0
+    capsys.readouterr()
+    assert (root / MANIFEST_FILENAME).read_bytes() == first
