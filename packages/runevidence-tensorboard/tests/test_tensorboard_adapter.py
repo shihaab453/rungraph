@@ -1901,6 +1901,25 @@ def test_truncated_packed_histogram_length_is_entry_local(tmp_path, capsys):
     assert [r["name"] for r in document["results"]] == ["loss @ 1"]
 
 
+def test_packed_length_not_multiple_of_eight_is_entry_local(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    payload = _key(6, 2) + _varint(9) + b"123456789"
+    _write(
+        root / "e.tfevents",
+        _records(
+            _scalar_event(b"loss", 0.5, step=1),
+            _event(summary_bytes=_summary(_histo_value(b"bad", payload))),
+        ),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert [r["name"] for r in document["results"]] == ["loss @ 1"]
+
+
 def test_many_empty_histogram_occurrences_stay_bounded(tmp_path, capsys):
     root = tmp_path / "experiment"
     payload = b"".join(_key(5, 2) + b"\x00" for _ in range(1100))
@@ -2485,9 +2504,10 @@ def test_compare_and_matrix_use_each_result_locator(tmp_path, capsys):
 def test_scanner_dispatch_is_per_schema(tmp_path, capsys, monkeypatch):
     import runevidence.checks.results as result_checks
 
-    calls = {"scalars": 0, "combined": 0}
+    calls = {"scalars": 0, "combined": 0, "combined07": 0}
     real_scalars = result_checks.scan_scalars
     real_combined = result_checks.scan_tensorboard_06
+    real_combined07 = result_checks.scan_tensorboard_07
 
     def counting_scalars(buffer, requests):
         calls["scalars"] += 1
@@ -2497,8 +2517,13 @@ def test_scanner_dispatch_is_per_schema(tmp_path, capsys, monkeypatch):
         calls["combined"] += 1
         return real_combined(buffer, scalar_requests, string_requests)
 
+    def counting_combined07(buffer, scalar_requests, string_requests, hist_requests):
+        calls["combined07"] += 1
+        return real_combined07(buffer, scalar_requests, string_requests, hist_requests)
+
     monkeypatch.setattr(result_checks, "scan_scalars", counting_scalars)
     monkeypatch.setattr(result_checks, "scan_tensorboard_06", counting_combined)
+    monkeypatch.setattr(result_checks, "scan_tensorboard_07", counting_combined07)
 
     root05 = tmp_path / "exp05"
     _write(root05 / "e.tfevents", _records(_scalar_event(b"loss", 0.5, step=1)))
@@ -2518,6 +2543,19 @@ def test_scanner_dispatch_is_per_schema(tmp_path, capsys, monkeypatch):
     capsys.readouterr()
     assert main(["validate", str(root06)]) == 0
     assert calls["combined"] == 1
+    assert calls["scalars"] == 0
+
+    calls.update(scalars=0, combined=0, combined07=0)
+    root07 = tmp_path / "exp07"
+    _write(root07 / "e.tfevents", _records(_scalar_event(b"loss", 0.5, step=1), _histo_event(b"w")))
+    assert (
+        main(["init", str(root07), "--adapter", "tensorboard", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    assert main(["validate", str(root07)]) == 0
+    assert calls["combined07"] == 1
+    assert calls["combined"] == 0
     assert calls["scalars"] == 0
 
 
