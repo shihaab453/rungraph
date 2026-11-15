@@ -59,6 +59,7 @@ from .models import (
     MANIFEST_FILENAME,
     Manifest,
     Manifest05,
+    Manifest06,
     backup_generation,
     json_schema,
 )
@@ -841,17 +842,21 @@ def cmd_review_gate(args: argparse.Namespace) -> int:
     return data["gate"]["exit_code"]
 
 
-def _accepts_tag_filter(adapter) -> bool:
-    """True when extract names an explicit tag_filter parameter."""
+def _accepts_keyword(adapter, name: str) -> bool:
+    """True when extract names an explicit keyword parameter."""
     try:
         signature = inspect.signature(adapter.extract)
     except (TypeError, ValueError):
         return False
-    parameter = signature.parameters.get("tag_filter")
+    parameter = signature.parameters.get(name)
     return parameter is not None and parameter.kind in (
         inspect.Parameter.KEYWORD_ONLY,
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
     )
+
+
+def _accepts_tag_filter(adapter) -> bool:
+    return _accepts_keyword(adapter, "tag_filter")
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -897,6 +902,12 @@ INIT_0_5_REFUSAL = (
     "Move the manifest aside, run init, then run runevidence migrate PATH --to 0.5 (unless "
     "the adapter writes 0.5 itself) and reapply the first-class values and locators."
 )
+INIT_0_6_REFUSAL = (
+    "ERROR: the existing manifest declares schema 0.6. init --force would regenerate the "
+    "manifest and cannot carry over first-class values or locators. Nothing was written. "
+    "Move the manifest aside, run init, then run runevidence migrate PATH --to 0.6 (unless "
+    "the adapter writes 0.6 itself) and reapply the first-class values and locators."
+)
 
 
 def _declared_manifest_version(path: Path):
@@ -917,12 +928,14 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         print(f"ERROR: {out} already exists. Use --force to overwrite it.")
         return EXIT_INVALID
     declared = _declared_manifest_version(out) if out.exists() else None
-    if out.exists() and args.force and declared in ("0.2", "0.3", "0.4", "0.5"):
+    if out.exists() and args.force and declared in ("0.2", "0.3", "0.4", "0.5", "0.6"):
         # Refuse before adapter discovery, backup creation or any write: a raw
         # 0.2/0.3/0.4/0.5 declaration means hand-entered data (or a would-be
         # downgrade) is at risk. An unparseable manifest keeps the legacy
         # backup-and-replace path below.
-        if declared == "0.5":
+        if declared == "0.6":
+            print(INIT_0_6_REFUSAL)
+        elif declared == "0.5":
             print(INIT_0_5_REFUSAL)
         elif declared == "0.4":
             print(INIT_0_4_REFUSAL)
@@ -937,6 +950,20 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         print(f"ERROR: {exc.args[0]}")
         return EXIT_INVALID
     name = args.name or root.name
+    include_strings = bool(getattr(args, "include_strings", False))
+    if include_strings:
+        if not getattr(adapter, "supports_include_strings", False):
+            print(
+                f"ERROR: adapter {adapter.name!r} does not support --include-strings. "
+                "Nothing was written."
+            )
+            return EXIT_INVALID
+        if not _accepts_keyword(adapter, "include_strings"):
+            print(
+                f"ERROR: adapter {adapter.name!r} cannot apply --include-strings. "
+                "Nothing was written."
+            )
+            return EXIT_INVALID
     patterns = list(getattr(args, "tags", None) or [])
     tag_filter = None
     if patterns:
@@ -957,7 +984,11 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
             return EXIT_INVALID
     try:
         discovery = adapter.discover(root)
-        extra = {"tag_filter": tag_filter} if tag_filter is not None else {}
+        extra = {}
+        if tag_filter is not None:
+            extra["tag_filter"] = tag_filter
+        if include_strings:
+            extra["include_strings"] = True
         manifest = adapter.extract(
             root,
             discovery,
@@ -1002,9 +1033,10 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         return EXIT_INVALID
     if tag_filter is not None:
         for pattern in tag_filter.unmatched_patterns():
+            kind = "summary" if include_strings else "scalar"
             print(
                 "WARNING: --tags pattern "
-                f"{ascii(pattern)} matches no representable supported scalar tag"
+                f"{ascii(pattern)} matches no representable supported {kind} tag"
             )
     volatile = sum(a.volatile for a in manifest.artifacts)
     print(
@@ -1029,8 +1061,9 @@ _MIGRATE_ERROR_TEXT = {
         "Nothing was written."
     ),
     "UNSUPPORTED_TARGET": (
-        "ERROR (UNSUPPORTED_TARGET): only --to 0.2, --to 0.3, --to 0.4 or --to 0.5 is "
-        "supported; downgrade and other versions are not available. Nothing was written."
+        "ERROR (UNSUPPORTED_TARGET): only --to 0.2, --to 0.3, --to 0.4, --to 0.5 or "
+        "--to 0.6 is supported; downgrade and other versions are not available. Nothing "
+        "was written."
     ),
     "RESERVED_PATH": (
         "ERROR (RESERVED_PATH): the target resolves to a backup name; choose the "
@@ -1118,7 +1151,7 @@ def _migrate_result_document(result) -> dict:
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
-    """Declare an existing 0.1-0.4 manifest as 0.2, 0.3, 0.4 or 0.5 additively."""
+    """Declare an existing 0.1-0.5 manifest as 0.2, 0.3, 0.4, 0.5 or 0.6 additively."""
     if args.to not in TARGET_VERSIONS:
         return _migrate_failure("UNSUPPORTED_TARGET", args.json)
     if not args.dry_run and not _writer_target_folder_exists(args.path):
@@ -1240,6 +1273,12 @@ _CONDITIONS_UNSUPPORTED_VERSION_0_5 = (
     "runevidence migrate PATH --to 0.2; schema 0.3, 0.4 and 0.5 have no downgrade path. "
     "Nothing was written."
 )
+_CONDITIONS_UNSUPPORTED_VERSION_0_6 = (
+    "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
+    "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
+    "runevidence migrate PATH --to 0.2; schema 0.3, 0.4, 0.5 and 0.6 have no downgrade "
+    "path. Nothing was written."
+)
 
 
 def _conditions_failure(code: str, as_json: bool, *, version: str | None = None) -> int:
@@ -1259,6 +1298,8 @@ def _conditions_failure(code: str, as_json: bool, *, version: str | None = None)
         print(_CONDITIONS_UNSUPPORTED_VERSION_0_4)
     elif code == "UNSUPPORTED_VERSION" and version == "0.5":
         print(_CONDITIONS_UNSUPPORTED_VERSION_0_5)
+    elif code == "UNSUPPORTED_VERSION" and version == "0.6":
+        print(_CONDITIONS_UNSUPPORTED_VERSION_0_6)
     else:
         print(_CONDITIONS_ERROR_TEXT[code])
     return EXIT_INVALID
@@ -1391,7 +1432,7 @@ def _event_artifact_is_volatile(manifest: Manifest, patterns: list[str]) -> bool
     points at the artifact, so an empty or fully filtered event file is still
     protected.
     """
-    if not isinstance(manifest, Manifest05):
+    if not isinstance(manifest, (Manifest05, Manifest06)):
         return False
     return any(
         getattr(artifact, "artifact_type", "file") == "file"
@@ -2504,6 +2545,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--id", help="project id (default: derived from name)")
     p.add_argument("--force", action="store_true", help=f"overwrite an existing {MANIFEST_FILENAME}")
     p.add_argument(
+        "--include-strings",
+        action="store_true",
+        help=(
+            "also record scalar-shaped TensorBoard string tensors as schema 0.6 results "
+            "(opt-in; default output stays schema 0.5)"
+        ),
+    )
+    p.add_argument(
         "--tags",
         action="append",
         metavar="PATTERN",
@@ -2524,10 +2573,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "migrate",
-        help="declare an existing manifest as schema 0.2, 0.3, 0.4 or 0.5 without changing any recorded value (explicit, no inference)",
+        help="declare an existing manifest as schema 0.2, 0.3, 0.4, 0.5 or 0.6 without changing any recorded value (explicit, no inference)",
     )
     p.add_argument("path", type=Path, help=f"experiment folder (containing {MANIFEST_FILENAME}) or manifest file")
-    p.add_argument("--to", required=True, metavar="VERSION", help="target schema version (0.2, 0.3, 0.4 or 0.5)")
+    p.add_argument("--to", required=True, metavar="VERSION", help="target schema version (0.2, 0.3, 0.4, 0.5 or 0.6)")
     p.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
     p.add_argument("--json", action="store_true", help="machine-readable result")
     p.set_defaults(func=cmd_migrate)

@@ -26,15 +26,18 @@ def _run(manifest: Manifest, identifier: str):
     return matches[0]
 
 
-def _results(manifest: Manifest, run_id: str) -> dict[str, Any]:
+def _results(manifest: Manifest, run_id: str) -> tuple[dict[str, Any], set[str]]:
     result_map: dict[str, Any] = {}
+    text_names: set[str] = set()
     for r in manifest.results:
         if r.run_id != run_id:
             continue
         if r.name in result_map:
             raise ComparisonError(f"run {run_id!r} has multiple results named {r.name!r}; refusing ambiguous comparison")
         result_map[r.name] = r.value
-    return result_map
+        if getattr(getattr(r, "locator", None), "kind", None) == "tensorboard-string":
+            text_names.add(r.name)
+    return result_map, text_names
 
 
 def _numeric(v: object) -> bool:
@@ -78,17 +81,39 @@ def _delta(base: int | float, target: int | float) -> int | float | None:
     return rounded
 
 
-def _items(base: dict[str, Any], target: dict[str, Any], *, numeric_deltas: bool) -> list[dict[str, Any]]:
+def _items(
+    base: dict[str, Any],
+    target: dict[str, Any],
+    *,
+    numeric_deltas: bool,
+    base_text: set[str] | frozenset[str] = frozenset(),
+    target_text: set[str] | frozenset[str] = frozenset(),
+) -> list[dict[str, Any]]:
     items = []
     for name in sorted(base.keys() | target.keys()):
         if name not in base:
-            items.append({"name": name, "target": target[name], "status": "target_only"})
+            row = {"name": name, "target": target[name], "status": "target_only"}
+            if name in target_text:
+                row["target_text"] = True
+            items.append(row)
             continue
         if name not in target:
-            items.append({"name": name, "baseline": base[name], "status": "baseline_only"})
+            row = {"name": name, "baseline": base[name], "status": "baseline_only"}
+            if name in base_text:
+                row["baseline_text"] = True
+            items.append(row)
             continue
         b, t = base[name], target[name]
-        row: dict[str, Any] = {"name": name, "baseline": b, "target": t, "status": "same" if _same(b, t) else "changed"}
+        row: dict[str, Any] = {
+            "name": name,
+            "baseline": b,
+            "target": t,
+            "status": "same" if _same(b, t) else "changed",
+        }
+        if name in base_text:
+            row["baseline_text"] = True
+        if name in target_text:
+            row["target_text"] = True
         if numeric_deltas and _numeric(b) and _numeric(t):
             delta = _delta(b, t)
             if delta is not None:
@@ -104,7 +129,15 @@ def compare_runs(manifest: Manifest, baseline_id: str, target_id: str, *, manife
     b = _run(manifest, baseline_id)
     t = _run(manifest, target_id)
     parameters = _items(b.params, t.params, numeric_deltas=False)
-    results = _items(_results(manifest, baseline_id), _results(manifest, target_id), numeric_deltas=True)
+    baseline_results, baseline_text = _results(manifest, baseline_id)
+    target_results, target_text = _results(manifest, target_id)
+    results = _items(
+        baseline_results,
+        target_results,
+        numeric_deltas=True,
+        base_text=baseline_text,
+        target_text=target_text,
+    )
     data = {
         "manifest": manifest_path,
         "baseline": {"id": b.id, "name": b.name},
@@ -130,6 +163,12 @@ def _visible(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True)
 
 
+def _display_value(value: Any, *, text: bool) -> str:
+    if text and isinstance(value, str) and len(value) > 120:
+        return json.dumps(value[:120], ensure_ascii=True, allow_nan=False) + "..."
+    return _visible(value)
+
+
 def format_comparison(data: dict[str, Any]) -> str:
     """Deterministic, terminal-safe readable comparison."""
     # Unlike run IDs, a user-controlled filesystem path can contain newlines.
@@ -148,11 +187,22 @@ def format_comparison(data: dict[str, Any]) -> str:
             name = _visible(row["name"])
             status = row["status"]
             if status == "baseline_only":
-                msg = f"baseline only {_visible(row['baseline'])}"
+                msg = (
+                    "baseline only "
+                    f"{_display_value(row['baseline'], text=row.get('baseline_text', False))}"
+                )
             elif status == "target_only":
-                msg = f"target only {_visible(row['target'])}"
+                msg = (
+                    "target only "
+                    f"{_display_value(row['target'], text=row.get('target_text', False))}"
+                )
             else:
-                msg = f"{_visible(row['baseline'])} -> {_visible(row['target'])} [{status}]"
+                msg = (
+                    f"{_display_value(row['baseline'], text=row.get('baseline_text', False))}"
+                    " -> "
+                    f"{_display_value(row['target'], text=row.get('target_text', False))}"
+                    f" [{status}]"
+                )
                 if "delta" in row:
                     delta = row["delta"]
                     readable_delta = f"{delta:+.12g}" if isinstance(delta, float) else f"{delta:+d}"

@@ -34,7 +34,7 @@ def _display_details(details: dict[str, Any]) -> dict[str, Any]:
         if isinstance(locator, dict)
         else getattr(locator, "kind", None)
     )
-    if kind in ("csv-cell", "tensorboard"):
+    if kind in ("csv-cell", "tensorboard", "tensorboard-string"):
         return {**details, "locator": display_locator(locator)}
     return details
 

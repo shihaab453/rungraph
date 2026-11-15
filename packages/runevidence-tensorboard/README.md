@@ -59,6 +59,15 @@ alignment where it is unambiguous: a single-file `(tag, step)` group is
 member is `tag @ step [basename] #<16-hex digest>`. Nothing is merged: values
 across files stay separate results.
 
+## String tensors (schema 0.6)
+
+`init --include-strings` also records scalar-shaped `DT_STRING` tensors as
+`tensorboard-string` results and writes a schema 0.6 manifest. Without the flag
+the adapter writes schema 0.5 and ignores string entries, byte-identically.
+Values must be valid UTF-8 and at most 64 KiB; selected string bytes have a
+16 MiB budget. `--tags` matches string tags too. Existing 0.5 manifests and
+outputs are unchanged.
+
 ## Tag filtering
 
 `init --tags PATTERN` (repeatable) selects scalars by a full-string glob:

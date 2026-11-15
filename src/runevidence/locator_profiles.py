@@ -402,11 +402,21 @@ def display_locator(locator: Any, *, limit: int = 200) -> str:
                 f"tensorboard:step={locator.get('step')},"
                 f"occurrence={locator.get('occurrence')}"
             )
+        if locator.get("kind") == "tensorboard-string":
+            return (
+                f"tensorboard-string:step={locator.get('step')},"
+                f"occurrence={locator.get('occurrence')}"
+            )
         prefix, payload = f"jsonl:{locator.get('line')}#", str(locator.get('pointer', ''))
     elif getattr(locator, "kind", None) == "csv-cell":
         return f"csv-cell:{locator.row},{locator.column}"
     elif getattr(locator, "kind", None) == "tensorboard":
         return f"tensorboard:step={locator.step},occurrence={locator.occurrence}"
+    elif getattr(locator, "kind", None) == "tensorboard-string":
+        return (
+            f"tensorboard-string:step={locator.step},"
+            f"occurrence={locator.occurrence}"
+        )
     else:
         prefix, payload = f"jsonl:{locator.line}#", str(locator.pointer)
     escaped = json.dumps(payload, ensure_ascii=True)[1:-1]

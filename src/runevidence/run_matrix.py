@@ -61,6 +61,7 @@ def metric_matrix(
     selected_set = set(run_ids)
     metric_filter = None if requested_metrics is None else set(requested_metrics)
     recorded: dict[str, dict[str, Any]] = {run_id: {} for run_id in run_ids}
+    recorded_text: dict[str, set[str]] = {run_id: set() for run_id in run_ids}
     for result in manifest.results:
         if result.run_id not in selected_set:
             continue
@@ -72,6 +73,8 @@ def metric_matrix(
                 f"run {result.run_id!r} has multiple results named {result.name!r}; refusing ambiguous matrix"
             )
         bucket[result.name] = result.value
+        if getattr(getattr(result, "locator", None), "kind", None) == "tensorboard-string":
+            recorded_text[result.run_id].add(result.name)
 
     metric_names = (sorted({name for bucket in recorded.values() for name in bucket})
                     if requested_metrics is None else requested_metrics)
@@ -89,7 +92,10 @@ def metric_matrix(
                 values.append({"metric": name, "status": "nonfinite"})
                 nonfinite_count += 1
                 continue
-            values.append({"metric": name, "status": "recorded", "value": value})
+            cell = {"metric": name, "status": "recorded", "value": value}
+            if name in recorded_text[run_id]:
+                cell["text"] = True
+            values.append(cell)
         rows.append({"run_id": run_id, "run_name": runs[run_id].name, "values": values})
 
     data = {
@@ -104,6 +110,7 @@ def metric_matrix(
         },
         "note": "Recorded manifest values only. Artifact bytes and result locators were not verified.",
     }
+
     try:
         json.dumps(data, ensure_ascii=True, allow_nan=False)
     except (ValueError, TypeError, OverflowError) as exc:
@@ -113,6 +120,12 @@ def metric_matrix(
 
 def _shown(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True)
+
+
+def _display_value(value: Any, *, text: bool) -> str:
+    if text and isinstance(value, str) and len(value) > 120:
+        return json.dumps(value[:120], ensure_ascii=True, allow_nan=False) + "..."
+    return _shown(value)
 
 
 def format_metric_matrix(data: dict[str, Any]) -> str:
@@ -129,7 +142,12 @@ def format_metric_matrix(data: dict[str, Any]) -> str:
     for row in data["runs"]:
         lines.append(f"  {row['run_id']} ({_shown(row['run_name'])}):")
         for cell in row["values"]:
-            value = _shown(cell["value"]) if cell["status"] == "recorded" else f"({cell['status']})"
+            if cell["status"] == "recorded":
+                value = _display_value(
+                    cell["value"], text=cell.get("text", False)
+                )
+            else:
+                value = f"({cell['status']})"
             lines.append(f"    {_shown(cell['metric'])}: {value}")
     lines.append(
         f"Missing cells: {summary['missing_cells']}. Nonfinite cells: {summary['nonfinite_cells']}."

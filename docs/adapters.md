@@ -339,6 +339,10 @@ How it reads the folder:
   producing a digest/parse mismatch.
 - **Volatile:** a regular event artifact cannot be `--volatile`; matching one
   stops `init` before any backup or save, even when it has no selected result.
+- **String tensors (0.6):** `init --include-strings` records scalar-shaped
+  `DT_STRING` summaries as `tensorboard-string` results in a schema 0.6
+  manifest. Without the flag the adapter writes schema 0.5 and ignores them.
+  The per-value cap is 64 KiB and selected string bytes share a 16 MiB budget.
 
 The adapter emits `Manifest05`, so `runevidence validate` verifies the scalar
 locators. See

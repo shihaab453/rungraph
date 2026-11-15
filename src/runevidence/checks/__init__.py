@@ -12,8 +12,10 @@ from ..models import (
     SCHEMA_VERSION_0_3,
     SCHEMA_VERSION_0_4,
     SCHEMA_VERSION_0_5,
+    SCHEMA_VERSION_0_6,
     CsvCellLocator,
     TensorboardLocator,
+    TensorboardStringLocator,
 )
 from .conditions import check_conditions
 from .files import check_files
@@ -44,7 +46,12 @@ TENSORBOARD_MAX_ENTRIES = 10_000
 TENSORBOARD_MAX_TAG_BYTES = 16 * 1024 * 1024
 
 _LOCATOR_SCHEMAS = frozenset(
-    {SCHEMA_VERSION_0_3, SCHEMA_VERSION_0_4, SCHEMA_VERSION_0_5}
+    {
+        SCHEMA_VERSION_0_3,
+        SCHEMA_VERSION_0_4,
+        SCHEMA_VERSION_0_5,
+        SCHEMA_VERSION_0_6,
+    }
 )
 
 
@@ -58,7 +65,11 @@ def _csv_cell_cap(
     eligible artifacts. Header metadata is the UTF-8 byte length of each
     eligible locator's recorded header.
     """
-    if manifest.schema_version not in (SCHEMA_VERSION_0_4, SCHEMA_VERSION_0_5):
+    if manifest.schema_version not in (
+        SCHEMA_VERSION_0_4,
+        SCHEMA_VERSION_0_5,
+        SCHEMA_VERSION_0_6,
+    ):
         return False, frozenset()
     eligible_artifacts = {
         artifact.id
@@ -96,7 +107,7 @@ def _tensorboard_cap(
     tensorboard locator. Tag metadata is the UTF-8 byte length of each eligible
     locator's recorded tag.
     """
-    if manifest.schema_version != SCHEMA_VERSION_0_5:
+    if manifest.schema_version not in (SCHEMA_VERSION_0_5, SCHEMA_VERSION_0_6):
         return False, frozenset()
     eligible_artifacts = {
         artifact.id
@@ -111,7 +122,9 @@ def _tensorboard_cap(
     with_entries: set[str] = set()
     for result in manifest.results:
         locator = result.locator
-        if not isinstance(locator, TensorboardLocator):
+        if not isinstance(
+            locator, (TensorboardLocator, TensorboardStringLocator)
+        ):
             continue
         if result.artifact_id not in eligible_artifacts:
             continue
@@ -133,7 +146,7 @@ def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
     kind-mismatched locator never raises it, and runtime digest/volatile state
     is irrelevant here (a directory is never read as a snapshot).
     """
-    if manifest.schema_version != SCHEMA_VERSION_0_5:
+    if manifest.schema_version not in (SCHEMA_VERSION_0_5, SCHEMA_VERSION_0_6):
         return frozenset()
     paths = {
         artifact.id: artifact.path
@@ -143,7 +156,9 @@ def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
     return frozenset(
         result.artifact_id
         for result in manifest.results
-        if isinstance(result.locator, TensorboardLocator)
+        if isinstance(
+            result.locator, (TensorboardLocator, TensorboardStringLocator)
+        )
         and result.artifact_id is not None
         and result.artifact_id in paths
         and _tensorboard_path_matches(paths[result.artifact_id])

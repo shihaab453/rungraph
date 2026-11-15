@@ -1,4 +1,4 @@
-"""Read TensorBoard event files into a schema 0.5 RunEvidence manifest.
+"""Read TensorBoard event files into a schema 0.5 or 0.6 manifest.
 
 This adapter is optional: core verification does not need it, and nothing here
 imports TensorBoard, TensorFlow, protobuf or google-crc32c. The dependency-free
@@ -60,20 +60,31 @@ from runevidence.checks.results import _tensorboard_path_matches
 from runevidence.models import (
     MAX_TENSORBOARD_TAG,
     SCHEMA_VERSION_0_5,
+    SCHEMA_VERSION_0_6,
     Artifact,
     Manifest05,
+    Manifest06,
     Project,
     Result05,
+    Result06,
     Run,
     TensorboardLocator,
+    TensorboardStringLocator,
     is_own_file,
 )
 from runevidence.tag_filter import TagFilter, TagPatternTooExpensive
-from runevidence.tensorboard_events import EventFileError, iter_supported_scalars
+from runevidence.tensorboard_events import (
+    EventFileError,
+    StringRecord,
+    iter_supported_scalars,
+    iter_supported_summaries,
+)
 
 #: Per-manifest result budget and total tag-byte budget (RFC section 9).
 MAX_RESULTS = 10_000
 MAX_TAG_BYTES = 16 * 1024 * 1024
+MAX_TEXT_BYTES = 16 * 1024 * 1024
+MAX_STRING_VALUE_BYTES = 65_536
 
 PROFILE_MESSAGE = (
     "the event file does not satisfy the strict TensorBoard profile; nothing was written"
@@ -82,9 +93,14 @@ OVER_CAP_MESSAGE = (
     "the event file exceeds the 128 MiB TensorBoard limit; nothing was written"
 )
 TAG_MESSAGE = "a scalar tag cannot be represented in schema 0.5; nothing was written"
+TAG_MESSAGE_06 = "a scalar tag cannot be represented in schema 0.6; nothing was written"
 BUDGET_MESSAGE = (
     "the selected TensorBoard scalars exceed the 10,000-result or 16 MiB tag limit; "
     "nothing was written"
+)
+BUDGET_MESSAGE_06 = (
+    "the selected TensorBoard summaries exceed the 10,000-result, 16 MiB tag or "
+    "16 MiB string-value limit; nothing was written"
 )
 COLLISION_MESSAGE = "a generated id collides with an existing id; nothing was written"
 NAME_MESSAGE = "a generated result name collides within a run; nothing was written"
@@ -103,8 +119,9 @@ _NAME = 6
 class TensorboardAdapter(Adapter):
     name = "tensorboard"
     supports_tag_filters = True
+    supports_include_strings = True
     description = (
-        "TensorBoard log directories: one run per directory, selected scalars as results."
+        "TensorBoard log directories: one run per directory, selected scalars or strings."
     )
 
     def discover(self, root: Path) -> Discovery:
@@ -120,13 +137,19 @@ class TensorboardAdapter(Adapter):
         project_id: str,
         project_name: str,
         tag_filter: TagFilter | None = None,
-    ) -> Manifest05:
+        include_strings: bool = False,
+    ) -> Manifest05 | Manifest06:
         root = Path(root)
         paths = sorted(discovery.files)
         event_paths = [path for path in paths if _tensorboard_path_matches(path)]
         _refuse_paths(paths, event_paths)
+        schema_version = (
+            SCHEMA_VERSION_0_6 if include_strings else SCHEMA_VERSION_0_5
+        )
+        result_type = Result06 if include_strings else Result05
+        manifest_type = Manifest06 if include_strings else Manifest05
 
-        state = _State(tag_filter)
+        state = _State(tag_filter, include_strings=include_strings)
         events: dict[str, _EventFile] = {}
         for rel in event_paths:
             event = _read_event_file(root, rel, state)
@@ -144,7 +167,14 @@ class TensorboardAdapter(Adapter):
             _record_reservation(event.artifact_id, used, state)
             for observation in event.observations:
                 _record_reservation(
-                    _result_id(event.run_id, event.artifact_id, observation.tag, observation.step, observation.occurrence),
+                    _result_id(
+                        event.run_id,
+                        event.artifact_id,
+                        observation.kind,
+                        observation.tag,
+                        observation.step,
+                        observation.occurrence,
+                    ),
                     used,
                     state,
                 )
@@ -163,7 +193,7 @@ class TensorboardAdapter(Adapter):
 
         event_set = set(event_paths)
         artifacts: list[Artifact] = []
-        results: list[Result05] = []
+        results: list[Result05 | Result06] = []
         for rel in paths:
             event = events.get(rel)
             if event is not None:
@@ -177,11 +207,26 @@ class TensorboardAdapter(Adapter):
                     )
                 )
                 for observation in event.observations:
+                    if observation.kind == "text":
+                        locator = TensorboardStringLocator(
+                            kind="tensorboard-string",
+                            tag=observation.tag,
+                            step=observation.step,
+                            occurrence=observation.occurrence,
+                        )
+                    else:
+                        locator = TensorboardLocator(
+                            kind="tensorboard",
+                            tag=observation.tag,
+                            step=observation.step,
+                            occurrence=observation.occurrence,
+                        )
                     results.append(
-                        Result05(
+                        result_type(
                             id=_result_id(
                                 event.run_id,
                                 event.artifact_id,
+                                observation.kind,
                                 observation.tag,
                                 observation.step,
                                 observation.occurrence,
@@ -190,12 +235,7 @@ class TensorboardAdapter(Adapter):
                             name=observation.name or "",
                             value=observation.value,
                             artifact_id=event.artifact_id,
-                            locator=TensorboardLocator(
-                                kind="tensorboard",
-                                tag=observation.tag,
-                                step=observation.step,
-                                occurrence=observation.occurrence,
-                            ),
+                            locator=locator,
                         )
                     )
                 continue
@@ -218,8 +258,8 @@ class TensorboardAdapter(Adapter):
             )
 
         state.raise_first()
-        return Manifest05(
-            schema_version=SCHEMA_VERSION_0_5,
+        return manifest_type(
+            schema_version=schema_version,
             project=Project(id=project_id, name=project_name),
             runs=runs,
             artifacts=artifacts,
@@ -234,21 +274,30 @@ class _Budget:
 
     results: int = 0
     tag_bytes: int = 0
+    text_bytes: int = 0
     over: bool = False
 
-    def charge(self, tag_bytes: int) -> bool:
+    def charge(self, tag_bytes: int, text_bytes: int = 0) -> bool:
         if self.over:
             return False
-        if self.results + 1 > MAX_RESULTS or self.tag_bytes + tag_bytes > MAX_TAG_BYTES:
+        if self.results + 1 > MAX_RESULTS:
+            self.over = True
+            return False
+        if self.tag_bytes + tag_bytes > MAX_TAG_BYTES:
+            self.over = True
+            return False
+        if text_bytes and self.text_bytes + text_bytes > MAX_TEXT_BYTES:
             self.over = True
             return False
         self.results += 1
         self.tag_bytes += tag_bytes
+        self.text_bytes += text_bytes
         return True
 
 
 @dataclass
 class _Observation:
+    kind: str
     tag: str
     step: int
     occurrence: int
@@ -275,6 +324,7 @@ class _State:
     """Shared per-extract filter, budget and deferred failures."""
 
     tag_filter: TagFilter | None
+    include_strings: bool = False
     budget: _Budget = field(default_factory=_Budget)
     failures: dict[int, Exception] = field(default_factory=dict)
     selected: dict[str, bool] = field(default_factory=dict)
@@ -341,7 +391,14 @@ def _artifact_id(path: str) -> str:
     return f"tb-art-{hashlib.sha256(_fs_bytes(path)).hexdigest()[:16]}"
 
 
-def _result_id(run_id: str, artifact_id: str, tag: str, step: int, occurrence: int) -> str:
+def _result_id(
+    run_id: str,
+    artifact_id: str,
+    kind: str,
+    tag: str,
+    step: int,
+    occurrence: int,
+) -> str:
     payload = (
         run_id.encode("utf-8")
         + b"\x00"
@@ -353,15 +410,19 @@ def _result_id(run_id: str, artifact_id: str, tag: str, step: int, occurrence: i
         + b"\x00"
         + str(occurrence).encode("ascii")
     )
+    if kind == "text":
+        payload += b"\x00text"
     return f"tb-res-{hashlib.sha256(payload).hexdigest()[:16]}"
 
 
-def _name_digest(artifact_id: str, occurrence: int) -> str:
+def _name_digest(artifact_id: str, occurrence: int, kind: str) -> str:
     payload = (
         artifact_id.encode("utf-8")
         + b"\x00"
         + str(occurrence).encode("ascii")
     )
+    if kind == "text":
+        payload += b"\x00text"
     return hashlib.sha256(payload).hexdigest()[:16]
 
 
@@ -389,25 +450,49 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
         return None
 
     observations: list[_Observation] = []
-    occurrences: dict[tuple[str, int], int] = {}
+    occurrences: dict[tuple[str, str, int], int] = {}
+    iterator = (
+        iter_supported_summaries(snapshot.data)
+        if state.include_strings
+        else iter_supported_scalars(snapshot.data)
+    )
     try:
-        for record in iter_supported_scalars(snapshot.data):
+        for record in iterator:
+            is_text = isinstance(record, StringRecord)
+            kind = "text" if is_text else "scalar"
             try:
-                tag = _decoded_tag(record.tag)
+                tag = _decoded_tag(
+                    record.tag, state.include_strings, text=is_text
+                )
             except AdapterError as exc:
                 if state.tag_filter is None:
                     state.record(_TAG, exc)
                 continue
-            key = (tag, record.step)
+            if tag is None:
+                continue
+            key = (kind, tag, record.step)
             occurrence = occurrences.get(key, 0)
             occurrences[key] = occurrence + 1
             if not state.select(tag):
                 continue
-            if state.budget.over or not state.budget.charge(len(record.tag)):
-                state.record(_BUDGET, AdapterError(BUDGET_MESSAGE))
+            text_bytes = len(record.value) if is_text else 0
+            if state.budget.over or not state.budget.charge(
+                len(record.tag), text_bytes
+            ):
+                message = BUDGET_MESSAGE_06 if state.include_strings else BUDGET_MESSAGE
+                state.record(_BUDGET, AdapterError(message))
                 continue
+            value: Any = record.value
+            if is_text:
+                value = record.value.decode("utf-8")
             observations.append(
-                _Observation(tag=tag, step=record.step, occurrence=occurrence, value=record.value)
+                _Observation(
+                    kind=kind,
+                    tag=tag,
+                    step=record.step,
+                    occurrence=occurrence,
+                    value=value,
+                )
             )
     except EventFileError:
         state.record(_PROFILE, AdapterError(PROFILE_MESSAGE))
@@ -426,27 +511,36 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
 
 
 def _assign_names(events: dict[str, _EventFile], state: _State) -> None:
-    """Name observations per ``(tag, step)`` group and refuse duplicates."""
+    """Name observations per ``(kind, tag, step)`` group and refuse duplicates."""
 
-    groups: dict[tuple[str, str, int], list[tuple[_EventFile, _Observation]]] = {}
+    groups: dict[
+        tuple[str, str, str, int], list[tuple[_EventFile, _Observation]]
+    ] = {}
     for event in events.values():
         for observation in event.observations:
-            groups.setdefault((event.run_id, observation.tag, observation.step), []).append(
-                (event, observation)
-            )
+            groups.setdefault(
+                (
+                    event.run_id,
+                    observation.kind,
+                    observation.tag,
+                    observation.step,
+                ),
+                [],
+            ).append((event, observation))
 
     seen: set[tuple[str, str]] = set()
-    for (run_id, tag, step), members in groups.items():
+    for (run_id, kind, tag, step), members in groups.items():
         files = {event.path for event, _ in members}
+        marker = " (text)" if kind == "text" else ""
         for event, observation in members:
             if len(files) == 1:
-                name = f"{tag} @ {step}"
+                name = f"{tag} @ {step}{marker}"
                 if observation.occurrence > 0:
                     name += f" #{observation.occurrence}"
             else:
                 name = (
-                    f"{tag} @ {step} [{event.basename}] "
-                    f"#{_name_digest(event.artifact_id, observation.occurrence)}"
+                    f"{tag} @ {step}{marker} [{event.basename}] "
+                    f"#{_name_digest(event.artifact_id, observation.occurrence, kind)}"
                 )
             observation.name = name
             key = (run_id, name)
@@ -462,14 +556,22 @@ def _record_reservation(value: str, used: set[str], state: _State) -> None:
     used.add(value)
 
 
-def _decoded_tag(raw: bytes) -> str:
-    """The tag as schema 0.5 can represent it, or the fixed refusal."""
+def _decoded_tag(raw: bytes, schema_06: bool = False, *, text: bool = False) -> str | None:
+    """The tag as the target schema can represent it.
+
+    Scalar tags keep the delivered refusal; a string entry with an
+    unrepresentable tag is skipped (returns ``None``).
+    """
     if not raw or len(raw) > MAX_TENSORBOARD_TAG:
-        raise AdapterError(TAG_MESSAGE)
+        if text:
+            return None
+        raise AdapterError(TAG_MESSAGE_06 if schema_06 else TAG_MESSAGE)
     try:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise AdapterError(TAG_MESSAGE) from None
+        if text:
+            return None
+        raise AdapterError(TAG_MESSAGE_06 if schema_06 else TAG_MESSAGE) from None
 
 
 def _unique(base: str, used: set[str]) -> str:

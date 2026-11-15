@@ -48,6 +48,9 @@ SCHEMA_VERSION_0_4 = "0.4"
 # 0.5 adds tensorboard scalar locators. Like 0.4 it is only reached through
 # the manifest dispatcher; the base Manifest stays at 0.1-0.3.
 SCHEMA_VERSION_0_5 = "0.5"
+# 0.6 adds TensorBoard string-tensor locators. It is only reached through the
+# manifest dispatcher; the base Manifest stays at 0.1-0.3.
+SCHEMA_VERSION_0_6 = "0.6"
 SCHEMA_VERSIONS = (SCHEMA_VERSION, SCHEMA_VERSION_0_2, SCHEMA_VERSION_0_3)
 MAX_JSONL_LINE = 2**63 - 1
 MAX_CSV_CELL_HEADER = 65536
@@ -854,9 +857,67 @@ class TensorboardLocator(_Strict):
         return value
 
 
+class TensorboardStringLocator(_Strict):
+    """Structured 0.6 locator for one supported TensorBoard string tensor.
+
+    The fields keep the 0.5 ``tensorboard`` locator rules: exact tag, signed
+    64-bit step and zero-based occurrence. Occurrence counts conforming string
+    entries per artifact, separately from scalars.
+    """
+
+    kind: Literal["tensorboard-string"] = Field(
+        description="Locator kind; 0.6 admits tensorboard-string."
+    )
+    tag: StrictStr = Field(
+        min_length=1,
+        max_length=MAX_TENSORBOARD_TAG,
+        description=(
+            "Exact event tag, at most 4,096 code points and at most 4,096 "
+            "UTF-8 bytes. A lone surrogate is rejected."
+        ),
+    )
+    step: StrictInt = Field(
+        ge=-(2**63),
+        le=2**63 - 1,
+        description="Signed 64-bit event step; an absent Event.step means 0.",
+    )
+    occurrence: StrictInt = Field(
+        ge=0,
+        le=MAX_TENSORBOARD_OCCURRENCE,
+        description=(
+            "Required zero-based occurrence among conforming string entries "
+            "with this exact (tag, step) in this artifact."
+        ),
+    )
+
+    @field_validator("tag", mode="after")
+    @classmethod
+    def _tag_is_utf8_encodable_and_bounded(cls, value: str) -> str:
+        try:
+            encoded = value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise PydanticCustomError(
+                "string_unicode", "tag contains a lone surrogate"
+            ) from None
+        if len(encoded) > MAX_TENSORBOARD_TAG:
+            raise ValueError("tag must be at most 4096 UTF-8 bytes")
+        return value
+
+
 _LOCATOR_ADAPTER_05 = TypeAdapter(
     Annotated[
         Union[JsonlLocator, CsvCellLocator, TensorboardLocator],
+        Field(discriminator="kind"),
+    ]
+)
+_LOCATOR_ADAPTER_06 = TypeAdapter(
+    Annotated[
+        Union[
+            JsonlLocator,
+            CsvCellLocator,
+            TensorboardLocator,
+            TensorboardStringLocator,
+        ],
         Field(discriminator="kind"),
     ]
 )
@@ -895,6 +956,29 @@ def _dispatch_locator_05(value: Any) -> Any:
         # A raised ValidationError propagates with the field location prefixed
         # and the discriminator tag in ``loc`` for the error-aware walker.
         return _LOCATOR_ADAPTER_05.validate_python(value)
+    raise ValueError("locator must be a string, an object, or null")
+
+
+def _dispatch_locator_06(value: Any) -> Any:
+    """Normalize a 0.6 locator before the field union validates it."""
+    if value is None:
+        return None
+    if type(value) is str:
+        if not is_valid_locator_pointer(value):
+            raise ValueError("locator must be empty or use the JSON Pointer grammar")
+        return value
+    if isinstance(
+        value,
+        (
+            JsonlLocator,
+            CsvCellLocator,
+            TensorboardLocator,
+            TensorboardStringLocator,
+        ),
+    ):
+        return value
+    if type(value) is dict:
+        return _LOCATOR_ADAPTER_06.validate_python(value)
     raise ValueError("locator must be a string, an object, or null")
 
 
@@ -983,6 +1067,40 @@ class Result05(Result):
         raise ValueError("locator must be a string, an object, or null")
 
 
+class Result06(Result):
+    """0.6 result: 0.5 locators plus the ``tensorboard-string`` object."""
+
+    locator: Annotated[
+        Optional[
+            Union[
+                StrictStr,
+                JsonlLocator,
+                CsvCellLocator,
+                TensorboardLocator,
+                TensorboardStringLocator,
+            ]
+        ],
+        BeforeValidator(_dispatch_locator_06),
+    ] = None
+
+    @field_validator("locator", mode="before")
+    @classmethod
+    def _locator_scalar_shape(cls, value: Any) -> Any:
+        if value is None or type(value) is str or type(value) is dict:
+            return value
+        if isinstance(
+            value,
+            (
+                JsonlLocator,
+                CsvCellLocator,
+                TensorboardLocator,
+                TensorboardStringLocator,
+            ),
+        ):
+            return value
+        raise ValueError("locator must be a string, an object, or null")
+
+
 class EvidenceReference(_Strict):
     id: Id = Field(pattern=ID_PATTERN)
     claim: str = Field(min_length=1, description="The statement being made, in plain words.")
@@ -1031,6 +1149,7 @@ class Manifest(_Strict):
             SCHEMA_VERSION_0_3,
             SCHEMA_VERSION_0_4,
             SCHEMA_VERSION_0_5,
+            SCHEMA_VERSION_0_6,
         ):
             # Default fields keep their normal 0.1 spelling. The per-model
             # presence overrides already removed only unset 0.2+ members.
@@ -1105,6 +1224,32 @@ class Manifest(_Strict):
                         "a schema 0.5 locator must be a string, a jsonl object, "
                         "a csv-cell object, or a tensorboard object"
                     )
+        elif self.schema_version == SCHEMA_VERSION_0_6:
+            for result in self.results:
+                locator = result.locator
+                if locator is None:
+                    continue
+                if result.artifact_id is None:
+                    raise ValueError("a schema 0.6 locator requires artifact_id")
+                if type(locator) is str:
+                    if not is_valid_locator_pointer(locator):
+                        raise ValueError(
+                            "a schema 0.6 string locator must be empty or a JSON Pointer"
+                        )
+                elif not isinstance(
+                    locator,
+                    (
+                        JsonlLocator,
+                        CsvCellLocator,
+                        TensorboardLocator,
+                        TensorboardStringLocator,
+                    ),
+                ):
+                    raise ValueError(
+                        "a schema 0.6 locator must be a string, a jsonl object, "
+                        "a csv-cell object, a tensorboard object, or a "
+                        "tensorboard-string object"
+                    )
         else:
             for result in self.results:
                 if isinstance(result.locator, JsonlLocator):
@@ -1126,9 +1271,16 @@ class Manifest05(Manifest):
     results: list[Result05] = Field(default_factory=list)
 
 
+class Manifest06(Manifest):
+    """Schema 0.6 manifest: 0.5 locators plus tensorboard-string."""
+
+    schema_version: Literal["0.6"]
+    results: list[Result06] = Field(default_factory=list)
+
+
 def is_manifest(value: object) -> bool:
     """True for every manifest model the dispatcher can return."""
-    return isinstance(value, (Manifest, Manifest04, Manifest05))
+    return isinstance(value, (Manifest, Manifest04, Manifest05, Manifest06))
 
 
 def _strip_0_2_keys(data: dict[str, Any]) -> None:
@@ -1550,4 +1702,106 @@ def json_schema_0_5() -> dict[str, Any]:
     _pin_schema_version(schema, SCHEMA_VERSION_0_5, required=True)
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     schema["$id"] = f"urn:runevidence:manifest:{SCHEMA_VERSION_0_5}"
+    return schema
+
+
+def _generated_schema_0_6() -> dict[str, Any]:
+    """The canonical JSON Schema for Manifest06, before version fixes."""
+    schema = Manifest06.model_json_schema()
+    _canonicalize_schema(schema)
+    _add_artifact_type_rules(schema["$defs"]["Artifact"])
+    return schema
+
+
+def _rewrite_descriptions(value: Any) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key == "description" and isinstance(child, str):
+                value[key] = (
+                    child.replace("0.5", "0.6")
+                    .replace("0.4", "0.6")
+                    .replace("0.3", "0.6")
+                )
+            else:
+                _rewrite_descriptions(child)
+    elif isinstance(value, list):
+        for child in value:
+            _rewrite_descriptions(child)
+
+
+def json_schema_0_6() -> dict[str, Any]:
+    """JSON Schema for the 0.6 manifest (adds ``tensorboard-string``).
+
+    It carries every 0.5 locator form plus the string-tensor object. A non-null
+    locator requires ``artifact_id``. The 0.5 file stays byte-frozen.
+    """
+    schema = _generated_schema_0_6()
+    _publish_common_0_2(schema)
+    _rewrite_descriptions(schema)
+    defs = schema["$defs"]
+    jsonl = defs["JsonlLocator"]
+    jsonl["description"] = (
+        "Structured 0.6 jsonl locator for one physical JSONL line and a JSON "
+        "Pointer. 0.6 admits jsonl/csv-cell/tensorboard/tensorboard-string; "
+        "``line`` is one-based and uses ``StrictInt`` at runtime."
+    )
+    jsonl["properties"]["kind"]["description"] = (
+        "Locator kind; 0.6 admits jsonl/csv-cell/tensorboard/tensorboard-string."
+    )
+    jsonl["properties"]["pointer"]["pattern"] = _LOCATOR_POINTER_JSON_PATTERN
+    jsonl["properties"]["pointer"]["description"] = (
+        "JSON Pointer inside the selected line; empty or /-prefixed, "
+        "with only ~0/~1 escapes."
+    )
+    csv_cell = defs["CsvCellLocator"]
+    csv_cell["description"] = (
+        "Structured 0.6 csv-cell locator for one CSV data cell. ``row`` is "
+        "one-based over data records and ``column`` is one-based over the "
+        "parsed header; both use ``StrictInt`` at runtime."
+    )
+    csv_cell["properties"]["kind"]["description"] = (
+        "Locator kind; 0.6 admits csv-cell."
+    )
+    text = defs["TensorboardStringLocator"]
+    text["description"] = (
+        "Structured 0.6 tensorboard-string locator for one supported string "
+        "tensor. ``tag`` is the exact event tag; ``step`` is a signed 64-bit "
+        "integer; ``occurrence`` is the zero-based position among conforming "
+        "string entries with that exact (tag, step) in this artifact."
+    )
+    defs["Result06"]["properties"]["locator"] = {
+        "oneOf": [
+            {
+                "type": "string",
+                "pattern": _LOCATOR_POINTER_JSON_PATTERN,
+                "description": (
+                    "Empty or a JSON Pointer string with only ~0/~1 escapes into "
+                    "a .json artifact."
+                ),
+            },
+            {"$ref": "#/$defs/JsonlLocator"},
+            {"$ref": "#/$defs/CsvCellLocator"},
+            {"$ref": "#/$defs/TensorboardLocator"},
+            {"$ref": "#/$defs/TensorboardStringLocator"},
+            {"type": "null"},
+        ],
+        "default": None,
+        "title": "Locator",
+        "description": (
+            "RFC 6901 JSON Pointer string, a structured jsonl, csv-cell, "
+            "tensorboard or tensorboard-string locator object, or null. In 0.6 "
+            "any non-null locator requires artifact_id."
+        ),
+    }
+    defs["Result06"]["if"] = {
+        "required": ["locator"],
+        "properties": {"locator": {"not": {"type": "null"}}},
+    }
+    defs["Result06"]["then"] = {
+        "required": ["artifact_id"],
+        "properties": {"artifact_id": {"type": "string"}},
+    }
+    _pin_schema_version(schema, SCHEMA_VERSION_0_6, required=True)
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["$id"] = f"urn:runevidence:manifest:{SCHEMA_VERSION_0_6}"
     return schema
