@@ -1781,3 +1781,42 @@ def test_migrate_05_to_06_is_identity(tmp_path, capsys):
     assert after["schema_version"] == "0.6"
     before["schema_version"] = "0.6"
     assert before == after
+
+
+def test_include_strings_unsupported_adapter_is_refused(tmp_path, capsys):
+    root = _string_folder(tmp_path)
+    assert (
+        main(["init", str(root), "--adapter", "generic", "--include-strings"]) == 2
+    )
+    out = capsys.readouterr().out
+    assert (
+        "ERROR: adapter 'generic' does not support --include-strings. Nothing was written."
+        in out
+    )
+    assert not (root / MANIFEST_FILENAME).exists()
+
+
+def test_migrate_06_to_05_is_a_downgrade(tmp_path, capsys):
+    root = _string_folder(tmp_path)
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 0
+    )
+    capsys.readouterr()
+    assert main(["migrate", str(root), "--to", "0.5"]) == 2
+    assert "DOWNGRADE_UNSUPPORTED" in capsys.readouterr().out
+
+
+def test_string_only_log_warns_as_scalar_without_the_flag(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(
+        root / "e.tfevents",
+        _records(_string_event(b"config", b"x", step=0)),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--tags", "config"]) == 0
+    )
+    out = capsys.readouterr().out
+    assert "matches no representable supported scalar tag" in out
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.5"
+    assert document["results"] == []
