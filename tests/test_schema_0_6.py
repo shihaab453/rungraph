@@ -121,6 +121,14 @@ def test_json_schema_06_keeps_the_jsonl_pointer_constraint():
     assert errors
 
 
+def test_json_schema_06_descriptions_name_06():
+    schema = json_schema_0_6()
+    for name in ("JsonlLocator", "CsvCellLocator", "TensorboardStringLocator"):
+        description = schema["$defs"][name]["description"]
+        assert "0.6" in description
+        assert "0.3" not in description and "0.4" not in description and "0.5" not in description
+
+
 def test_json_schema_06_shape():
     schema = json_schema_0_6()
     assert schema["$id"] == "urn:runevidence:manifest:0.6"

@@ -1717,7 +1717,11 @@ def _rewrite_descriptions(value: Any) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             if key == "description" and isinstance(child, str):
-                value[key] = child.replace("0.5", "0.6")
+                value[key] = (
+                    child.replace("0.5", "0.6")
+                    .replace("0.4", "0.6")
+                    .replace("0.3", "0.6")
+                )
             else:
                 _rewrite_descriptions(child)
     elif isinstance(value, list):
@@ -1735,8 +1739,28 @@ def json_schema_0_6() -> dict[str, Any]:
     _publish_common_0_2(schema)
     _rewrite_descriptions(schema)
     defs = schema["$defs"]
-    defs["JsonlLocator"]["properties"]["pointer"]["pattern"] = (
-        _LOCATOR_POINTER_JSON_PATTERN
+    jsonl = defs["JsonlLocator"]
+    jsonl["description"] = (
+        "Structured 0.6 jsonl locator for one physical JSONL line and a JSON "
+        "Pointer. 0.6 admits jsonl/csv-cell/tensorboard/tensorboard-string; "
+        "``line`` is one-based and uses ``StrictInt`` at runtime."
+    )
+    jsonl["properties"]["kind"]["description"] = (
+        "Locator kind; 0.6 admits jsonl/csv-cell/tensorboard/tensorboard-string."
+    )
+    jsonl["properties"]["pointer"]["pattern"] = _LOCATOR_POINTER_JSON_PATTERN
+    jsonl["properties"]["pointer"]["description"] = (
+        "JSON Pointer inside the selected line; empty or /-prefixed, "
+        "with only ~0/~1 escapes."
+    )
+    csv_cell = defs["CsvCellLocator"]
+    csv_cell["description"] = (
+        "Structured 0.6 csv-cell locator for one CSV data cell. ``row`` is "
+        "one-based over data records and ``column`` is one-based over the "
+        "parsed header; both use ``StrictInt`` at runtime."
+    )
+    csv_cell["properties"]["kind"]["description"] = (
+        "Locator kind; 0.6 admits csv-cell."
     )
     text = defs["TensorboardStringLocator"]
     text["description"] = (

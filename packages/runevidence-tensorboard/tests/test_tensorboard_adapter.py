@@ -1820,3 +1820,148 @@ def test_string_only_log_warns_as_scalar_without_the_flag(tmp_path, capsys):
     document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
     assert document["schema_version"] == "0.5"
     assert document["results"] == []
+
+
+def test_string_profile_wire_and_size_edges(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(
+        root / "a.tfevents",
+        _records(
+            _string_event(b"ok64k", b"a" * 65536),
+            _string_event(b"too_big", b"a" * 65537),
+            _event(
+                summary_bytes=_summary(
+                    _value(
+                        b"typed7",
+                        tensor_bytes=_string_tensor(b"x", extra=_varint_field(7, 1)),
+                    )
+                )
+            ),
+        ),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert [r["locator"]["tag"] for r in document["results"]] == ["ok64k"]
+
+    _write(
+        root / "b.tfevents",
+        _records(
+            _event(
+                summary_bytes=_summary(
+                    _value(
+                        b"bad_wire",
+                        tensor_bytes=_string_tensor(b"x", extra=_key(10, 3)),
+                    )
+                )
+            )
+        ),
+    )
+    (root / MANIFEST_FILENAME).unlink()
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 2
+    )
+
+
+def test_text_only_event_file_is_volatile_refused(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "e.tfevents", _records(_string_event(b"cfg", b"x")))
+    assert (
+        main(
+            [
+                "init",
+                str(root),
+                "--adapter",
+                "tensorboard",
+                "--include-strings",
+                "--volatile",
+                "*.tfevents*",
+            ]
+        )
+        == 2
+    )
+    assert "an event artifact cannot be volatile" in capsys.readouterr().out
+
+
+def test_init_force_refuses_an_existing_06_manifest(tmp_path, capsys):
+    root = _string_folder(tmp_path)
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 0
+    )
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "init",
+                str(root),
+                "--adapter",
+                "tensorboard",
+                "--include-strings",
+                "--force",
+            ]
+        )
+        == 2
+    )
+    assert "declares schema 0.6" in capsys.readouterr().out
+
+
+def test_add_accepts_06_and_rehash_refuses_text_locators(tmp_path, capsys):
+    root = _string_folder(tmp_path)
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 0
+    )
+    capsys.readouterr()
+    _write(root / "notes.txt", b"note\n")
+    assert main(["add", str(root), str(root / "notes.txt")]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.6"
+    assert main(["rehash", str(root), "--all"]) == 2
+    out = capsys.readouterr().out
+    assert "LOCATOR_REFRESH_UNSUPPORTED" in out
+
+
+def test_text_truncation_boundary_is_120_code_points(tmp_path, capsys):
+    for length, shortened in ((120, False), (121, True)):
+        root = tmp_path / f"exp{length}"
+        text = "a" * length
+        _write(
+            root / "train" / "e.tfevents",
+            _records(_string_event(b"cfg", text.encode())),
+        )
+        assert (
+            main(["init", str(root), "--adapter", "tensorboard", "--include-strings"])
+            == 0
+        )
+        capsys.readouterr()
+        document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+        run_id = document["runs"][0]["id"]
+        assert main(["run", "--id", run_id, str(root)]) == 0
+        out = capsys.readouterr().out
+        if shortened:
+            assert "..." in out
+            assert text not in out
+        else:
+            assert text in out
+
+
+def test_06_tensorboard_cap_uses_the_value_wording(tmp_path, capsys, monkeypatch):
+    import runevidence.checks as checks_module
+
+    root = _string_folder(tmp_path)
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    artifact_id = document["artifacts"][0]["id"]
+    monkeypatch.setattr(
+        checks_module,
+        "_tensorboard_cap",
+        lambda manifest: (True, frozenset({artifact_id})),
+    )
+    assert main(["validate", str(root)]) == 1
+    out = capsys.readouterr().out
+    assert "no TensorBoard value was read" in out
