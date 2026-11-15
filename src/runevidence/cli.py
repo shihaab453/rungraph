@@ -59,7 +59,6 @@ from .models import (
     MANIFEST_FILENAME,
     Manifest,
     Manifest05,
-    TensorboardLocator,
     backup_generation,
     json_schema,
 )
