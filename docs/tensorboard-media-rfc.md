@@ -145,7 +145,11 @@ Inside a winning media member, key decoding is lenient exactly like the histogra
 - a failed entry is not a value, consumes no occurrence number, and does not affect sibling
   entries, other values, or other files;
 - if a merge had already accumulated fields when the lenient failure occurred, the accumulated
-  state is discarded; the entry is unsupported, never partially recorded.
+  state is discarded; the entry is unsupported, never partially recorded;
+- a failure is sticky for the rest of that `Summary.Value`: once any occurrence of the winning
+  media member fails, a later well-formed occurrence does not rescue the entry. This matches
+  the delivered histogram rule, where a malformed part fails the merged histogram even if a
+  good part follows.
 
 Unknown fields inside `Summary.Image`/`Summary.Audio` are skipped, as the histogram decoder
 does.
@@ -296,6 +300,12 @@ the selected TensorBoard summaries exceed the 10,000-result, 16 MiB tag, 16 MiB 
 
   The four delivered texts (0.5 scalars, 0.6 strings, 0.7 histograms, 0.7 both) are unchanged,
   and no flag combination reuses a text that names a limit it did not enable.
+
+  The media-reference limit is real, not decorative: the adapter sums the UTF-8 JSON length of
+  every image and audio value it emits and refuses the run when that sum exceeds 16 MiB, the
+  same way the string-value and histogram-JSON budgets work. A 200-byte value at the
+  10,000-result cap is 2 MB, so the budget only fires on pathological manifests, but the text
+  and the check stay in step.
 
 ## 7. Migration, refusals, fixed texts
 
