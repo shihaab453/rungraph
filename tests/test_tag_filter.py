@@ -137,6 +137,13 @@ def test_empty_and_over_long_tags_are_skipped_without_charge():
     assert tag_filter.matches("a" * 4096)
 
 
+def test_budget_is_inclusive_at_the_exact_limit():
+    tag_filter = TagFilter(["ab"], budget=2)
+    assert tag_filter.matches("ab")
+    assert tag_filter.spent == 2
+    assert tag_filter.remaining == 0
+
+
 def test_budget_raises_and_stops_further_pairs():
     tag_filter = TagFilter(["ab"], budget=1)
     with pytest.raises(TagPatternTooExpensive):
