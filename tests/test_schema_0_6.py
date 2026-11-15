@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from runevidence.manifest import artifact_to_dict, load_manifest, validate_manifest
 from runevidence.migrate import migrate_manifest
+from runevidence.checks.results import _locator_kind
 from runevidence.run_claim import _display_details
 from runevidence.models import (
     Artifact,
@@ -181,3 +182,10 @@ def test_claim_display_hides_a_text_tag():
     )
     assert displayed["locator"] == "tensorboard-string:step=0,occurrence=0"
     assert "SECRET_TAG" not in str(displayed)
+
+
+def test_locator_kind_recognises_the_string_locator():
+    locator = TensorboardStringLocator(
+        kind="tensorboard-string", tag="cfg", step=0, occurrence=0
+    )
+    assert _locator_kind(locator) == "tensorboard-string"

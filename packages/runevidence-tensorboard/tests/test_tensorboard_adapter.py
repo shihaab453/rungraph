@@ -2205,6 +2205,21 @@ def test_ladder_failing_entry_is_unsupported_encoding(tmp_path, capsys):
     assert "selects an unsupported scalar encoding" in capsys.readouterr().out
 
 
+def test_float_typed_tensor_with_string_val_is_not_a_string(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    tensor = _varint_field(1, 1) + _bytes_field(8, b"x")
+    _write(
+        root / "e.tfevents",
+        _records(_event(summary_bytes=_summary(_value(b"cfg", tensor_bytes=tensor)))),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["results"] == []
+
+
 def test_profile_valid_plus_wrong_wire_string_is_non_string(tmp_path, capsys):
     root = tmp_path / "experiment"
     tensor = (
