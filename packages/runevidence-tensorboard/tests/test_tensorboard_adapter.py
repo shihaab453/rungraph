@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import itertools
 import json
+import re
 import struct
 from importlib.metadata import distribution, entry_points
 from pathlib import Path
@@ -1438,3 +1440,135 @@ def test_result_cap_does_not_outrank_a_profile_failure(tmp_path, monkeypatch):
     with pytest.raises(AdapterError) as excinfo:
         _extract(root)
     assert str(excinfo.value) == PROFILE_MESSAGE
+
+
+REVIEW_PATTERN = "*" + ("a" * 1020) + "?b*"
+REVIEW_TAGS = tuple(("a" * 4095) + ch for ch in "cdefghijklmnopq")
+
+
+def test_budget_accumulates_across_files_with_repeated_pattern(tmp_path):
+    root = tmp_path / "experiment"
+    for index in range(3):
+        chunk = REVIEW_TAGS[index * 5 : (index + 1) * 5]
+        _write(
+            root / f"e{index}.tfevents",
+            _records(*(_scalar_event(tag.encode(), 1.0, step=0) for tag in chunk)),
+        )
+    manifest = _extract(root, TagFilter([REVIEW_PATTERN, REVIEW_PATTERN]))
+    assert manifest.results == []
+
+    _write(
+        root / "e3.tfevents",
+        _records(_scalar_event(("a" * 4095 + "r").encode(), 1.0, step=0)),
+    )
+    with pytest.raises(TagPatternTooExpensive):
+        _extract(root, TagFilter([REVIEW_PATTERN, REVIEW_PATTERN]))
+
+
+def test_real_fixture_twice_in_one_directory_gets_qualified_names(tmp_path):
+    data = Path(__file__).resolve().parents[3] / "tests" / "data" / "tensorboard"
+    root = tmp_path / "experiment"
+    (root / "logs").mkdir(parents=True)
+    original = (data / "legacy-simple-value.tfevents").read_bytes()
+    (root / "logs" / "a.tfevents").write_bytes(original)
+    (root / "logs" / "z.tfevents").write_bytes(original)
+    manifest = _extract(root)
+    assert [run.name for run in manifest.runs] == ["logs"]
+    assert manifest.results
+    assert all(" [" in result.name and " #" in result.name for result in manifest.results)
+    assert len({result.name for result in manifest.results}) == len(manifest.results)
+
+
+def _reference_matches(pattern: str, tag: str) -> bool:
+    tokens = []
+    escaped = False
+    for char in pattern:
+        if escaped:
+            tokens.append(re.escape(char))
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == "*":
+            tokens.append(".*")
+        elif char == "?":
+            tokens.append(".")
+        else:
+            tokens.append(re.escape(char))
+    if escaped:
+        raise ValueError("trailing backslash")
+    return re.fullmatch("".join(tokens), tag, re.DOTALL) is not None
+
+
+def test_matcher_agrees_with_a_reference_implementation():
+    alphabet = ["a", "b", "*", "?", "\\"]
+    tags = ["a", "b", "ab", "ba", "aab", "abb", "aba", "bbb", "a?b", "a*b"]
+    for length in (1, 2, 3):
+        for parts in itertools.product(alphabet, repeat=length):
+            pattern = "".join(parts)
+            if pattern.endswith("\\"):
+                continue
+            try:
+                tag_filter = TagFilter([pattern])
+            except InvalidTagPattern:
+                continue
+            for tag in tags:
+                assert tag_filter.matches(tag) == _reference_matches(pattern, tag), (
+                    pattern,
+                    tag,
+                )
+
+
+def test_capable_adapter_receives_one_tag_filter(monkeypatch, tmp_path):
+    class Recording:
+        name = "record"
+        supports_tag_filters = True
+
+        def __init__(self):
+            self.generic = GenericAdapter()
+            self.seen = "unset"
+
+        def discover(self, root):
+            return self.generic.discover(root)
+
+        def extract(self, root, discovery, *, project_id, project_name, tag_filter=None):
+            self.seen = tag_filter
+            return self.generic.extract(
+                root, discovery, project_id=project_id, project_name=project_name
+            )
+
+    from runevidence import cli as cli_module
+
+    adapter = Recording()
+    monkeypatch.setattr(cli_module, "get_adapter", lambda name: adapter)
+    root = tmp_path / "experiment"
+    _write(root / "notes.txt", b"x\n")
+    assert main(["init", str(root), "--adapter", "record", "--tags", "*"]) == 0
+    assert isinstance(adapter.seen, TagFilter)
+
+
+def test_legacy_adapter_is_called_without_a_tag_filter(monkeypatch, tmp_path):
+    class Legacy:
+        name = "legacy"
+        supports_tag_filters = False
+
+        def __init__(self):
+            self.generic = GenericAdapter()
+            self.called = False
+
+        def discover(self, root):
+            return self.generic.discover(root)
+
+        def extract(self, root, discovery, *, project_id, project_name):
+            self.called = True
+            return self.generic.extract(
+                root, discovery, project_id=project_id, project_name=project_name
+            )
+
+    from runevidence import cli as cli_module
+
+    adapter = Legacy()
+    monkeypatch.setattr(cli_module, "get_adapter", lambda name: adapter)
+    root = tmp_path / "experiment"
+    _write(root / "notes.txt", b"x\n")
+    assert main(["init", str(root), "--adapter", "legacy"]) == 0
+    assert adapter.called

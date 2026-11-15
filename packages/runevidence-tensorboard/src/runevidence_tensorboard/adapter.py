@@ -20,8 +20,9 @@ Discovery uses the RFC 4.4 predicate exactly (basename contains ``.tfevents``,
 case-insensitive). Event artifacts and runs use path-derived fixed IDs and
 results use ``(run_id, artifact_id, tag, step, occurrence)``-derived fixed IDs;
 every fixed ``tb-art``/``tb-run``/``tb-res`` ID is reserved before generic IDs
-are allocated, so generic slugs suffix on any collision. Only two different
-paths hashing to the same fixed ID are an error.
+are allocated, so generic slugs suffix on any collision. Any fixed-vs-fixed
+collision (two paths, two runs or two results hashing to the same ID, or a
+fixed ID equal to the project ID) is the single collision error.
 
 Each event file is read exactly once through the core protected snapshot
 (128 MiB cap) and the same bytes are hashed and parsed. A missing, changed,

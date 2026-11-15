@@ -57,6 +57,9 @@ HISTORICAL_25_ROUTES = ("validate", "validate-batch", "inspect", "compare", "com
 # conditions snapshot, before the public read-only directory flag.
 # M42-SCANNER-S3B (2026-11-12) superseded these; HISTORICAL RECORD only.
 HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
+    # Slice D accepted 26-route bytes before the multi-file/tags gate.
+    "37ca37bf0f32fd45ffe9a10acf24ef5bae5ef3a2244b5dab8d40fcd117c22980",  # LF
+    "97a89251f71f5255ee4dd68b47d3c401abb4b8e352385140c3ce143255740d19",  # CRLF
     "59e42297c6387012a33e73e008f376766871a9235e37f58982c92cd5c46ee340",  # LF
     "cbfc3de10aa22996eaa66646516116ec4ea0dd37e2f6d86e7144f05b857e1a7d",  # CRLF
     # M47-S4-2A G4-2a 3rd review fix (2026-11-12): superseded by the 4th review
