@@ -1255,3 +1255,33 @@ def test_cli_refuses_a_surrogate_path(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "a path is not valid UTF-8; nothing was written" in out
     assert not (root / MANIFEST_FILENAME).exists()
+
+
+def test_delete_then_add_keeps_a_bare_name_but_changes_the_id(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "z.tfevents", _records(_scalar_event(b"loss", 1.0, step=1)))
+    before = _extract(root)
+    assert [result.name for result in before.results] == ["loss @ 1"]
+    old_id = before.results[0].id
+
+    (root / "logs" / "z.tfevents").unlink()
+    _write(root / "logs" / "a.tfevents", _records(_scalar_event(b"loss", 2.0, step=1)))
+    after = _extract(root)
+    assert [result.name for result in after.results] == ["loss @ 1"]
+    assert after.results[0].id != old_id
+    assert after.results[0].value == 2.0
+
+
+def test_nul_in_a_tag_keeps_the_id_payload_unambiguous(tmp_path):
+    root = tmp_path / "experiment"
+    _write(
+        root / "events.out.tfevents.1",
+        _records(
+            _scalar_event(b"loss", 1.0, step=1),
+            _scalar_event(b"loss\x00raw", 2.0, step=1),
+        ),
+    )
+    manifest = _extract(root)
+    assert [result.locator.tag for result in manifest.results] == ["loss", "loss\x00raw"]
+    assert len({result.id for result in manifest.results}) == 2
+    assert len({result.name for result in manifest.results}) == 2
