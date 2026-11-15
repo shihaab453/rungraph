@@ -1591,3 +1591,17 @@ def test_loading_with_a_core_without_the_tag_filter_fails():
     )
     assert result.returncode != 0
     assert "tag_filter" in result.stderr
+
+
+def test_cli_warning_order_ascii_escaping_and_repeats(tmp_path, capsys):
+    root = _two_tag_folder(tmp_path)
+    patterns = ["nomatch'one", "loss", "nomatch'one", "é?"]
+    argv = ["init", str(root), "--adapter", "tensorboard"]
+    for pattern in patterns:
+        argv += ["--tags", pattern]
+    assert main(argv) == 0
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("WARNING:")]
+    assert len(lines) == 3
+    assert '"nomatch\'one"' in lines[0]
+    assert '"nomatch\'one"' in lines[1]
+    assert "'\\xe9?'" in lines[2]
