@@ -12,8 +12,11 @@ import ast
 import hashlib
 import itertools
 import json
+import os
 import re
 import struct
+import subprocess
+import sys
 from importlib.metadata import distribution, entry_points
 from pathlib import Path
 
@@ -1572,3 +1575,19 @@ def test_legacy_adapter_is_called_without_a_tag_filter(monkeypatch, tmp_path):
     _write(root / "notes.txt", b"x\n")
     assert main(["init", str(root), "--adapter", "legacy"]) == 0
     assert adapter.called
+
+
+def test_loading_with_a_core_without_the_tag_filter_fails():
+    code = (
+        "import sys\n"
+        "sys.modules['runevidence.tag_filter'] = None\n"
+        "import runevidence_tensorboard.adapter\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+    assert result.returncode != 0
+    assert "tag_filter" in result.stderr
