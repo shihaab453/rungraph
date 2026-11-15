@@ -694,8 +694,10 @@ before any write (`LOCATOR_MIGRATION_UNSUPPORTED`), and 0.5 → 0.4/0.3/0.2 is
 manifest before writing (`INIT_0_5_REFUSAL`); a pre-0.5 binary backs it up and
 replaces it with 0.1, so keep 0.5 manifests away from older builds. The
 optional `packages/runevidence-tensorboard` adapter turns event files into
-one run, one artifact and one result per supported scalar, with fixed `tb-`
-ids and step-qualified names; an event artifact cannot be `--volatile`. The
+one run per directory, one artifact per file and one result per selected
+scalar, with fixed `tb-` ids and conditional result names; `init --tags`
+filters tags with a bounded glob, and an event artifact cannot be
+`--volatile`. The
 `schema` command still prints 0.1; the 0.5 schema is
 `schema/runevidence-0.5.schema.json`. Schemas 0.1-0.4 are unchanged and 0.4
 remains byte-frozen. See
