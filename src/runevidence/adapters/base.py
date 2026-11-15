@@ -53,6 +53,8 @@ class Adapter(ABC):
     name: ClassVar[str]
     #: One line shown in ``runevidence adapters``.
     description: ClassVar[str] = ""
+    #: True when ``extract`` accepts a keyword-only ``tag_filter``.
+    supports_tag_filters: ClassVar[bool] = False
 
     @abstractmethod
     def discover(self, root: Path) -> Discovery:
