@@ -10,6 +10,7 @@ import json
 import math
 from typing import Any, Sequence
 
+from .histogram_display import histogram_display, value_to_json
 from .models import Manifest
 
 
@@ -72,7 +73,7 @@ def metric_matrix(
             raise MatrixError(
                 f"run {result.run_id!r} has multiple results named {result.name!r}; refusing ambiguous matrix"
             )
-        bucket[result.name] = result.value
+        bucket[result.name] = value_to_json(result.value)
         if getattr(getattr(result, "locator", None), "kind", None) == "tensorboard-string":
             recorded_text[result.run_id].add(result.name)
 
@@ -123,6 +124,9 @@ def _shown(value: Any) -> str:
 
 
 def _display_value(value: Any, *, text: bool) -> str:
+    hist = histogram_display(value)
+    if hist is not None:
+        return hist
     if text and isinstance(value, str) and len(value) > 120:
         return json.dumps(value[:120], ensure_ascii=True, allow_nan=False) + "..."
     return _shown(value)

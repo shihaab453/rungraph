@@ -32,17 +32,21 @@ from ..models import (
     SCHEMA_VERSION_0_4,
     SCHEMA_VERSION_0_5,
     SCHEMA_VERSION_0_6,
+    SCHEMA_VERSION_0_7,
     CsvCellLocator,
+    HistogramValue,
     JsonlLocator,
     Manifest,
     TensorboardLocator,
     TensorboardStringLocator,
+    TensorboardHistogramLocator,
 )
 from ..tensorboard_events import (
     EventFileError,
     ScalarOutcome,
     scan_scalars,
     scan_tensorboard_06,
+    scan_tensorboard_07,
 )
 from .csv import (
     CsvNotNumeric,
@@ -133,7 +137,14 @@ def _extension_matches(artifact_path: str, locator: Any) -> bool:
         return lowered.endswith(".json")
     if isinstance(locator, CsvCellLocator):
         return lowered.endswith(".csv")
-    if isinstance(locator, (TensorboardLocator, TensorboardStringLocator)):
+    if isinstance(
+        locator,
+        (
+            TensorboardLocator,
+            TensorboardStringLocator,
+            TensorboardHistogramLocator,
+        ),
+    ):
         return _tensorboard_path_matches(artifact_path)
     return lowered.endswith(".jsonl")
 
@@ -143,7 +154,14 @@ def _expected_extension(locator: Any) -> str:
         return ".json"
     if isinstance(locator, CsvCellLocator):
         return ".csv"
-    if isinstance(locator, (TensorboardLocator, TensorboardStringLocator)):
+    if isinstance(
+        locator,
+        (
+            TensorboardLocator,
+            TensorboardStringLocator,
+            TensorboardHistogramLocator,
+        ),
+    ):
         return "TensorBoard event"
     return ".jsonl"
 
@@ -528,7 +546,61 @@ def _check_one_tensorboard_string(
     return findings, False
 
 
+def _check_one_tensorboard_histogram(
+    result, artifact_path: str, locator: TensorboardHistogramLocator, selection
+) -> tuple[list[Finding], bool]:
+    findings: list[Finding] = []
+    outcome = selection.outcome
+    if outcome is ScalarOutcome.mismatch:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_mismatch, "was not found",
+            )
+        )
+        return findings, True
+    if outcome is ScalarOutcome.unsupported_scalar:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unsupported_value,
+                "selects an unsupported histogram encoding",
+            )
+        )
+        return findings, True
+    if outcome is not ScalarOutcome.value or selection.value is None:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unsupported_value, "selects an unsupported value",
+            )
+        )
+        return findings, True
+    recorded = result.value
+    if isinstance(recorded, HistogramValue):
+        recorded = recorded.model_dump(mode="json")
+    if not isinstance(recorded, dict) or recorded.get("kind") != "histogram":
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unsupported_value, "selects an unsupported value",
+            )
+        )
+        return findings, True
+    if recorded != selection.value:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.result_value_mismatch, "does not match the recorded value",
+            )
+        )
+        return findings, True
+    return findings, False
+
+
 def _locator_kind(locator: Any) -> str:
+    if isinstance(locator, TensorboardHistogramLocator):
+        return "tensorboard-histogram"
     if isinstance(locator, TensorboardStringLocator):
         return "tensorboard-string"
     if isinstance(locator, TensorboardLocator):
@@ -558,7 +630,11 @@ def check_targeted_results(
         return findings, broken, False
 
     if target_check.state == "directory":
-        if manifest.schema_version in (SCHEMA_VERSION_0_5, SCHEMA_VERSION_0_6):
+        if manifest.schema_version in (
+            SCHEMA_VERSION_0_5,
+            SCHEMA_VERSION_0_6,
+            SCHEMA_VERSION_0_7,
+        ):
             directory_hint = (
                 "Point the result at a single JSON, JSONL, CSV or TensorBoard event "
                 "file artifact, or drop the locator."
@@ -641,13 +717,16 @@ def check_targeted_results(
                     path=artifact.path,
                     message=(
                         TENSORBOARD_CAP_MESSAGE_06
-                        if manifest.schema_version == SCHEMA_VERSION_0_6
+                        if manifest.schema_version
+                        in (SCHEMA_VERSION_0_6, SCHEMA_VERSION_0_7)
                         else TENSORBOARD_CAP_MESSAGE
                     ),
                     hint=None,
                 )
             )
-            capped_kinds.update({"tensorboard", "tensorboard-string"})
+            capped_kinds.update(
+                {"tensorboard", "tensorboard-string", "tensorboard-histogram"}
+            )
             capped_artifact = True
         if csv_cell_capped and csv_cell_eligible:
             findings.append(
@@ -683,7 +762,11 @@ def check_targeted_results(
         kind = _locator_kind(result.locator)
         if kind in capped_kinds:
             continue
-        if kind in ("tensorboard", "tensorboard-string"):
+        if kind in (
+            "tensorboard",
+            "tensorboard-string",
+            "tensorboard-histogram",
+        ):
             if file_over_cap_128:
                 findings.append(
                     _value_error(
@@ -774,12 +857,18 @@ def check_targeted_results(
         result
         for result in usable
         if isinstance(
-            result.locator, (TensorboardLocator, TensorboardStringLocator)
+            result.locator,
+            (
+                TensorboardLocator,
+                TensorboardStringLocator,
+                TensorboardHistogramLocator,
+            ),
         )
     ]
     tensorboard_refused: set[str] = set()
     scalar_selections = None
     text_selections = None
+    hist_selections = None
     if tensorboard_results:
         scalar_requests = [
             (
@@ -799,8 +888,25 @@ def check_targeted_results(
             for result in tensorboard_results
             if isinstance(result.locator, TensorboardStringLocator)
         ]
+        hist_requests = [
+            (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+            )
+            for result in tensorboard_results
+            if isinstance(result.locator, TensorboardHistogramLocator)
+        ]
         try:
-            if (
+            if manifest.schema_version == SCHEMA_VERSION_0_7:
+                (
+                    scalar_selections,
+                    text_selections,
+                    hist_selections,
+                ) = scan_tensorboard_07(
+                    data, scalar_requests, text_requests, hist_requests
+                )
+            elif (
                 manifest.schema_version == SCHEMA_VERSION_0_6
                 or text_requests
             ):
@@ -876,6 +982,16 @@ def check_targeted_results(
             result_findings, failed = _check_one_tensorboard_string(
                 result, artifact.path, result.locator, text_selections[key]
             )
+        elif isinstance(result.locator, TensorboardHistogramLocator):
+            assert hist_selections is not None
+            key = (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+            )
+            result_findings, failed = _check_one_tensorboard_histogram(
+                result, artifact.path, result.locator, hist_selections[key]
+            )
         elif isinstance(result.locator, CsvCellLocator):
             result_findings, failed = _check_one_csv_cell(
                 result, artifact.path, result.locator, csv_profile
@@ -921,6 +1037,7 @@ def check_results(
         SCHEMA_VERSION_0_4,
         SCHEMA_VERSION_0_5,
         SCHEMA_VERSION_0_6,
+        SCHEMA_VERSION_0_7,
     )
 
     def unverifiable(res_id: str, msg: str) -> None:

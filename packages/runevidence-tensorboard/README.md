@@ -68,6 +68,14 @@ Values must be valid UTF-8 and at most 64 KiB; selected string bytes have a
 16 MiB budget. `--tags` matches string tags too. Existing 0.5 manifests and
 outputs are unchanged.
 
+## Histograms (schema 0.7)
+
+`init --include-histograms` also records legacy `Summary.Value.histo`
+(`HistogramProto`) summaries as structured `tensorboard-histogram` results and
+writes schema 0.7. Values carry finite per-bucket counts with at most 1,024
+buckets; malformed histogram entries are skipped, not fatal. TF2 `[k,3]` tensor
+histograms are not recorded. Without the flag, 0.5/0.6 output is unchanged.
+
 ## Tag filtering
 
 `init --tags PATTERN` (repeatable) selects scalars by a full-string glob:

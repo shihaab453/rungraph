@@ -11,6 +11,7 @@ import math
 from fractions import Fraction
 from typing import Any
 
+from .histogram_display import histogram_display, value_to_json
 from .models import Manifest
 
 
@@ -34,7 +35,7 @@ def _results(manifest: Manifest, run_id: str) -> tuple[dict[str, Any], set[str]]
             continue
         if r.name in result_map:
             raise ComparisonError(f"run {run_id!r} has multiple results named {r.name!r}; refusing ambiguous comparison")
-        result_map[r.name] = r.value
+        result_map[r.name] = value_to_json(r.value)
         if getattr(getattr(r, "locator", None), "kind", None) == "tensorboard-string":
             text_names.add(r.name)
     return result_map, text_names
@@ -164,6 +165,9 @@ def _visible(value: Any) -> str:
 
 
 def _display_value(value: Any, *, text: bool) -> str:
+    hist = histogram_display(value)
+    if hist is not None:
+        return hist
     if text and isinstance(value, str) and len(value) > 120:
         return json.dumps(value[:120], ensure_ascii=True, allow_nan=False) + "..."
     return _visible(value)

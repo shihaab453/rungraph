@@ -58,6 +58,7 @@ from .models import (
     SCHEMA_VERSION_0_4,
     SCHEMA_VERSION_0_5,
     SCHEMA_VERSION_0_6,
+    SCHEMA_VERSION_0_7,
 )
 
 # Comparability is defined on the 0.1/0.2 recorded-condition projections.

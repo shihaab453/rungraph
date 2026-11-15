@@ -10,6 +10,7 @@ import math
 from typing import Any
 
 from .locator_profiles import display_locator
+from .histogram_display import histogram_display, value_to_json
 from .models import Manifest, RelationshipType, locator_to_json
 
 
@@ -131,7 +132,7 @@ def run_details(manifest: Manifest, run_id: str, *, manifest_path: str) -> dict[
 
     result_rows: list[dict[str, Any]] = []
     for r in results:
-        row = {"id": r.id, "name": r.name, "value": r.value,
+        row = {"id": r.id, "name": r.name, "value": value_to_json(r.value),
                "artifact_id": r.artifact_id, "locator": locator_to_json(r.locator)}
         if sources_by_result[r.id]:
             # Preserve every recorded target ID, including dangling ones.
@@ -198,6 +199,9 @@ def format_run_details(data: dict[str, Any]) -> str:
             if isinstance(locator, dict)
             else getattr(locator, "kind", None)
         )
+        hist = histogram_display(value)
+        if hist is not None:
+            return json.dumps(hist, ensure_ascii=True, allow_nan=False)
         if (
             kind == "tensorboard-string"
             and isinstance(value, str)

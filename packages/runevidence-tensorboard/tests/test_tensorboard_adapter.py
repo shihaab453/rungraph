@@ -1640,6 +1640,195 @@ def _string_folder(tmp_path):
     return root
 
 
+def _double_field(field: int, value: float) -> bytes:
+    return _key(field, 1) + struct.pack("<d", value)
+
+
+def _histo_tensor(
+    limits, counts, *, minimum=0.0, maximum=1.0, num=None, extra=b""
+) -> bytes:
+    if num is None:
+        num = float(sum(counts))
+    parts = [
+        _double_field(1, minimum),
+        _double_field(2, maximum),
+        _double_field(3, num),
+        _double_field(4, 0.0),
+        _double_field(5, 0.0),
+        *[_double_field(6, limit) for limit in limits],
+        *[_double_field(7, count) for count in counts],
+        extra,
+    ]
+    return b"".join(parts)
+
+
+def _histo_value(tag: bytes, payload: bytes) -> bytes:
+    return _bytes_field(1, tag) + _bytes_field(5, payload)
+
+
+def _histo_event(tag: bytes, limits=(0.5,), counts=(2.0,), *, step=0, **kwargs) -> bytes:
+    return _event(
+        step=step,
+        summary_bytes=_summary(
+            _histo_value(tag, _histo_tensor(limits, counts, **kwargs))
+        ),
+    )
+
+
+def test_histograms_are_ignored_without_the_flag(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "e.tfevents", _records(_histo_event(b"w")))
+    assert main(["init", str(root), "--adapter", "tensorboard"]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.5"
+    assert document["results"] == []
+
+
+def test_include_histograms_writes_07_and_validates(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "e.tfevents", _records(_histo_event(b"w", (0.5,), (2.0,))))
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.7"
+    result = document["results"][0]
+    assert result["name"] == "w @ 0 (histogram)"
+    assert result["locator"]["kind"] == "tensorboard-histogram"
+    assert result["value"] == {
+        "kind": "histogram",
+        "min": 0.0,
+        "max": 1.0,
+        "num": 2.0,
+        "sum": 0.0,
+        "sum_squares": 0.0,
+        "bucket_limit": [0.5],
+        "bucket": [2.0],
+    }
+    assert main(["validate", str(root)]) == 0
+
+
+def test_histogram_merge_and_reset(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    first = _histo_tensor([0.5], [1.0], num=1.0)
+    second = _histo_tensor([1.0], [2.0], num=2.0)
+    reset = (
+        _bytes_field(1, b"reset")
+        + _bytes_field(5, first)
+        + _float_field(2, 1.0)
+        + _bytes_field(5, second)
+    )
+    merged = (
+        _bytes_field(1, b"merged")
+        + _bytes_field(5, _histo_tensor([0.5], [1.0], num=1.0))
+        + _bytes_field(9, b"")
+        + _bytes_field(5, _histo_tensor([1.0], [2.0], num=2.0))
+    )
+    _write(root / "e.tfevents", _records(_event(summary_bytes=_summary(reset, merged))))
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    values = {r["locator"]["tag"]: r["value"] for r in document["results"]}
+    assert values["reset"]["bucket"] == [2.0]
+    assert values["merged"]["bucket"] == [1.0, 2.0]
+    assert values["merged"]["num"] == 2.0
+
+
+def test_histogram_inner_failure_is_entry_local(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    bad = _bytes_field(6, b"123456789")  # packed length 9, not a multiple of 8
+    good = _scalar_event(b"loss", 0.5, step=1)
+    _write(
+        root / "e.tfevents",
+        _records(
+            good,
+            _event(
+                summary_bytes=_summary(
+                    _histo_value(b"bad", _double_field(3, 1.0) + bad)
+                )
+            ),
+        ),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert [r["name"] for r in document["results"]] == ["loss @ 1"]
+
+
+def test_strings_and_histograms_together_write_07(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(
+        root / "e.tfevents",
+        _records(
+            _scalar_event(b"loss", 0.5, step=1),
+            _string_event(b"cfg", b"x"),
+            _histo_event(b"w"),
+        ),
+    )
+    assert (
+        main(
+            [
+                "init",
+                str(root),
+                "--adapter",
+                "tensorboard",
+                "--include-strings",
+                "--include-histograms",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.7"
+    assert {r["locator"]["kind"] for r in document["results"]} == {
+        "tensorboard",
+        "tensorboard-string",
+        "tensorboard-histogram",
+    }
+
+
+def test_histogram_compact_display(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "e.tfevents", _records(_histo_event(b"w", (0.5, 1.0), (2.0, 3.0))))
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    run_id = document["runs"][0]["id"]
+    assert main(["run", "--id", run_id, str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "histogram(2 buckets, num=5.0)" in out
+    assert "bucket_limit" not in out
+
+
+def test_migrate_06_to_07_is_identity(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "e.tfevents", _records(_scalar_event(b"loss", 0.5, step=1)))
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 0
+    )
+    capsys.readouterr()
+    path = root / MANIFEST_FILENAME
+    before = json.loads(path.read_text(encoding="utf-8"))
+    assert main(["migrate", str(root), "--to", "0.7"]) == 0
+    after = json.loads(path.read_text(encoding="utf-8"))
+    assert after["schema_version"] == "0.7"
+    before["schema_version"] = "0.7"
+    assert before == after
+
+
 def test_strings_are_ignored_without_the_flag(tmp_path, capsys):
     root = _string_folder(tmp_path)
     assert main(["init", str(root), "--adapter", "tensorboard"]) == 0
