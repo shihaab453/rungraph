@@ -26,15 +26,18 @@ def _run(manifest: Manifest, identifier: str):
     return matches[0]
 
 
-def _results(manifest: Manifest, run_id: str) -> dict[str, Any]:
+def _results(manifest: Manifest, run_id: str) -> tuple[dict[str, Any], set[str]]:
     result_map: dict[str, Any] = {}
+    text_names: set[str] = set()
     for r in manifest.results:
         if r.run_id != run_id:
             continue
         if r.name in result_map:
             raise ComparisonError(f"run {run_id!r} has multiple results named {r.name!r}; refusing ambiguous comparison")
         result_map[r.name] = r.value
-    return result_map
+        if getattr(getattr(r, "locator", None), "kind", None) == "tensorboard-string":
+            text_names.add(r.name)
+    return result_map, text_names
 
 
 def _numeric(v: object) -> bool:
@@ -78,17 +81,39 @@ def _delta(base: int | float, target: int | float) -> int | float | None:
     return rounded
 
 
-def _items(base: dict[str, Any], target: dict[str, Any], *, numeric_deltas: bool) -> list[dict[str, Any]]:
+def _items(
+    base: dict[str, Any],
+    target: dict[str, Any],
+    *,
+    numeric_deltas: bool,
+    base_text: set[str] | frozenset[str] = frozenset(),
+    target_text: set[str] | frozenset[str] = frozenset(),
+) -> list[dict[str, Any]]:
     items = []
     for name in sorted(base.keys() | target.keys()):
         if name not in base:
-            items.append({"name": name, "target": target[name], "status": "target_only"})
+            row = {"name": name, "target": target[name], "status": "target_only"}
+            if name in target_text:
+                row["target_text"] = True
+            items.append(row)
             continue
         if name not in target:
-            items.append({"name": name, "baseline": base[name], "status": "baseline_only"})
+            row = {"name": name, "baseline": base[name], "status": "baseline_only"}
+            if name in base_text:
+                row["baseline_text"] = True
+            items.append(row)
             continue
         b, t = base[name], target[name]
-        row: dict[str, Any] = {"name": name, "baseline": b, "target": t, "status": "same" if _same(b, t) else "changed"}
+        row: dict[str, Any] = {
+            "name": name,
+            "baseline": b,
+            "target": t,
+            "status": "same" if _same(b, t) else "changed",
+        }
+        if name in base_text:
+            row["baseline_text"] = True
+        if name in target_text:
+            row["target_text"] = True
         if numeric_deltas and _numeric(b) and _numeric(t):
             delta = _delta(b, t)
             if delta is not None:
@@ -104,7 +129,15 @@ def compare_runs(manifest: Manifest, baseline_id: str, target_id: str, *, manife
     b = _run(manifest, baseline_id)
     t = _run(manifest, target_id)
     parameters = _items(b.params, t.params, numeric_deltas=False)
-    results = _items(_results(manifest, baseline_id), _results(manifest, target_id), numeric_deltas=True)
+    baseline_results, baseline_text = _results(manifest, baseline_id)
+    target_results, target_text = _results(manifest, target_id)
+    results = _items(
+        baseline_results,
+        target_results,
+        numeric_deltas=True,
+        base_text=baseline_text,
+        target_text=target_text,
+    )
     data = {
         "manifest": manifest_path,
         "baseline": {"id": b.id, "name": b.name},
@@ -119,14 +152,6 @@ def compare_runs(manifest: Manifest, baseline_id: str, target_id: str, *, manife
         },
         "note": "Recorded manifest values only. Artifact contents and result locators were not revalidated.",
     }
-    text_names = sorted(
-        result.name
-        for result in manifest.results
-        if getattr(getattr(result, "locator", None), "kind", None)
-        == "tensorboard-string"
-    )
-    if text_names:
-        data["text_names"] = text_names
     try:
         json.dumps(data, allow_nan=False)
     except (ValueError, TypeError, OverflowError) as exc:
@@ -155,22 +180,28 @@ def format_comparison(data: dict[str, Any]) -> str:
         f"Target: {data['target']['id']} ({_visible(data['target']['name'])})",
         "Recorded values only, not validated against artifact files.",
     ]
-    text_names = set(data.get("text_names", ()))
     for field, heading in (("parameters", "Parameters"), ("results", "Results")):
         items = data[field]
         lines.append(f"\n{heading} ({len(items)}):")
         for row in items:
             name = _visible(row["name"])
             status = row["status"]
-            is_text = row["name"] in text_names
             if status == "baseline_only":
-                msg = f"baseline only {_display_value(row['baseline'], text=is_text)}"
+                msg = (
+                    "baseline only "
+                    f"{_display_value(row['baseline'], text=row.get('baseline_text', False))}"
+                )
             elif status == "target_only":
-                msg = f"target only {_display_value(row['target'], text=is_text)}"
+                msg = (
+                    "target only "
+                    f"{_display_value(row['target'], text=row.get('target_text', False))}"
+                )
             else:
                 msg = (
-                    f"{_display_value(row['baseline'], text=is_text)} -> "
-                    f"{_display_value(row['target'], text=is_text)} [{status}]"
+                    f"{_display_value(row['baseline'], text=row.get('baseline_text', False))}"
+                    " -> "
+                    f"{_display_value(row['target'], text=row.get('target_text', False))}"
+                    f" [{status}]"
                 )
                 if "delta" in row:
                     delta = row["delta"]

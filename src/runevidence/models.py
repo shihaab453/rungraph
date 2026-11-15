@@ -1735,6 +1735,9 @@ def json_schema_0_6() -> dict[str, Any]:
     _publish_common_0_2(schema)
     _rewrite_descriptions(schema)
     defs = schema["$defs"]
+    defs["JsonlLocator"]["properties"]["pointer"]["pattern"] = (
+        _LOCATOR_POINTER_JSON_PATTERN
+    )
     text = defs["TensorboardStringLocator"]
     text["description"] = (
         "Structured 0.6 tensorboard-string locator for one supported string "

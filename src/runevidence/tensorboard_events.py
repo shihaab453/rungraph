@@ -391,7 +391,12 @@ def _parse_shape(
 
 
 def _parse_tensor(
-    data: bytes | bytearray, start: int, end: int, state: _TensorState
+    data: bytes | bytearray,
+    start: int,
+    end: int,
+    state: _TensorState,
+    *,
+    strings: bool = False,
 ) -> None:
     """Merge one ``TensorProto`` into ``state`` with the RFC's last-wins rules."""
     position = start
@@ -454,7 +459,7 @@ def _parse_tensor(
                 position += 8
             else:
                 _refuse()
-        elif field_number == 8:  # string_val, repeated bytes
+        elif field_number == 8 and strings:  # string_val, repeated bytes
             if wire_type == 2:
                 value_start, value_end = _read_length(data, position, end)
                 if state.string_count == 0:
@@ -467,7 +472,7 @@ def _parse_tensor(
                 position = _skip_field(data, position, end, wire_type)
             else:
                 _refuse()
-        elif field_number in (
+        elif strings and field_number in (
             7,
             9,
             10,
@@ -497,7 +502,12 @@ def _parse_tensor(
 
 
 def _scan_tensor_region(
-    data: bytes | bytearray, start: int, end: int, state: _TensorState
+    data: bytes | bytearray,
+    start: int,
+    end: int,
+    state: _TensorState,
+    *,
+    strings: bool = False,
 ) -> None:
     """Decode winning ``tensor`` occurrences after the last different member.
 
@@ -511,14 +521,19 @@ def _scan_tensor_region(
             if wire_type != 2:
                 _refuse()
             tensor_start, tensor_end = _read_length(data, position, end)
-            _parse_tensor(data, tensor_start, tensor_end, state)
+            _parse_tensor(data, tensor_start, tensor_end, state, strings=strings)
             position = tensor_end
         else:
             position = _skip_field(data, position, end, wire_type)
 
 
 def _parse_value(
-    data: bytes | bytearray, start: int, end: int, step: int
+    data: bytes | bytearray,
+    start: int,
+    end: int,
+    step: int,
+    *,
+    strings: bool = False,
 ):
     """Parse one ``Summary.Value`` and return its final oneof state.
 
@@ -581,12 +596,17 @@ def _parse_value(
     tensor = None
     if kind == 8:
         tensor = _TensorState()
-        _scan_tensor_region(data, tensor_restart, end, tensor)
+        _scan_tensor_region(data, tensor_restart, end, tensor, strings=strings)
     return tag_start, tag_end, step, kind, simple_value, tensor
 
 
 def _iter_summary_values(
-    data: bytes | bytearray, start: int, end: int, step: int
+    data: bytes | bytearray,
+    start: int,
+    end: int,
+    step: int,
+    *,
+    strings: bool = False,
 ):
     """Yield parsed values from one winning ``Summary`` message."""
     position = start
@@ -596,14 +616,21 @@ def _iter_summary_values(
             if wire_type != 2:
                 _refuse()
             value_start, value_end = _read_length(data, position, end)
-            yield _parse_value(data, value_start, value_end, step)
+            yield _parse_value(
+                data, value_start, value_end, step, strings=strings
+            )
             position = value_end
         else:
             position = _skip_field(data, position, end, wire_type)
 
 
 def _iter_winning_summaries(
-    data: bytes | bytearray, start: int, end: int, step: int
+    data: bytes | bytearray,
+    start: int,
+    end: int,
+    step: int,
+    *,
+    strings: bool = False,
 ):
     """Find winning ``summary`` members in the Event tail and yield their values.
 
@@ -618,14 +645,20 @@ def _iter_winning_summaries(
             if wire_type != 2:
                 _refuse()
             summary_start, summary_end = _read_length(data, position, end)
-            yield from _iter_summary_values(data, summary_start, summary_end, step)
+            yield from _iter_summary_values(
+                data, summary_start, summary_end, step, strings=strings
+            )
             position = summary_end
         else:
             position = _skip_field(data, position, end, wire_type)
 
 
 def _iter_event_values(
-    data: bytes | bytearray, start: int, end: int
+    data: bytes | bytearray,
+    start: int,
+    end: int,
+    *,
+    strings: bool = False,
 ):
     """Yield every winning value from one Event record.
 
@@ -671,13 +704,17 @@ def _iter_event_values(
         return
     if summary_bytes > MAX_SUMMARY_BYTES:
         _refuse()
-    yield from _iter_winning_summaries(data, last_other_end, end, step)
+    yield from _iter_winning_summaries(
+        data, last_other_end, end, step, strings=strings
+    )
 
 
-def _iter_winning_values(data: bytes | bytearray):
+def _iter_winning_values(data: bytes | bytearray, *, strings: bool = False):
     """Yield ``(tag_start, tag_end, step, kind, simple_value, tensor)``."""
     for payload_start, payload_end in _iter_records(data):
-        yield from _iter_event_values(data, payload_start, payload_end)
+        yield from _iter_event_values(
+            data, payload_start, payload_end, strings=strings
+        )
 
 
 # --- classification ---------------------------------------------------------
@@ -942,7 +979,9 @@ def _classify_string(
 
 def iter_supported_strings(data: bytes | bytearray) -> Iterator[StringRecord]:
     """Yield every conforming string tensor in file order."""
-    for tag_start, tag_end, step, kind, _simple, tensor in _iter_winning_values(data):
+    for tag_start, tag_end, step, kind, _simple, tensor in _iter_winning_values(
+        data, strings=True
+    ):
         category, value = _classify_string(data, kind, tensor)
         if category == _STRING_SUPPORTED:
             yield StringRecord(
@@ -954,9 +993,7 @@ def iter_supported_summaries(
     data: bytes | bytearray,
 ) -> Iterator[ScalarRecord | StringRecord]:
     """Yield supported scalars and strings in one pass, in record order."""
-    for tag_start, tag_end, step, kind, simple_value, tensor in _iter_winning_values(
-        data
-    ):
+    for tag_start, tag_end, step, kind, simple_value, tensor in _iter_winning_values(data, strings=True):
         category, value, float32 = _classify(data, kind, simple_value, tensor)
         if category == _SUPPORTED:
             yield ScalarRecord(
@@ -990,9 +1027,7 @@ def scan_tensorboard_06(
     if not scalar_states and not string_states:
         return {}, {}
 
-    for tag_start, tag_end, step, kind, simple_value, tensor in _iter_winning_values(
-        data
-    ):
+    for tag_start, tag_end, step, kind, simple_value, tensor in _iter_winning_values(data, strings=True):
         tag_length = 0 if tag_start < 0 else tag_end - tag_start
         tag = b"" if tag_start < 0 else data[tag_start:tag_end]
         if type(tag) is not bytes:

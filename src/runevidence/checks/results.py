@@ -60,6 +60,10 @@ CSV_CELL_CAP_MESSAGE = (
     "16 MiB of header metadata); no CSV cell was read"
 )
 CSV_PROFILE_HINT = "the CSV artifact does not satisfy the strict csv-cell profile"
+TENSORBOARD_CAP_MESSAGE_06 = (
+    "the manifest exceeds the tensorboard verification limit (10,000 entries or "
+    "16 MiB of tag metadata); no TensorBoard value was read"
+)
 TENSORBOARD_CAP_MESSAGE = (
     "the manifest exceeds the tensorboard verification limit (10,000 entries or "
     "16 MiB of tag metadata); no TensorBoard scalar was read"
@@ -635,7 +639,11 @@ def check_targeted_results(
                     severity=Severity.error,
                     subject=artifact.id,
                     path=artifact.path,
-                    message=TENSORBOARD_CAP_MESSAGE,
+                    message=(
+                        TENSORBOARD_CAP_MESSAGE_06
+                        if manifest.schema_version == SCHEMA_VERSION_0_6
+                        else TENSORBOARD_CAP_MESSAGE
+                    ),
                     hint=None,
                 )
             )
@@ -792,7 +800,10 @@ def check_targeted_results(
             if isinstance(result.locator, TensorboardStringLocator)
         ]
         try:
-            if text_requests:
+            if (
+                manifest.schema_version == SCHEMA_VERSION_0_6
+                or text_requests
+            ):
                 scalar_selections, text_selections = scan_tensorboard_06(
                     data, scalar_requests, text_requests
                 )

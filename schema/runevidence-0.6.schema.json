@@ -290,7 +290,8 @@
         "pointer": {
           "description": "JSON Pointer inside the selected line; empty or /-prefixed, ~0/~1 only.",
           "title": "Pointer",
-          "type": "string"
+          "type": "string",
+          "pattern": "^(?![\\s\\S]*[\\r\\n\\u2028\\u2029])(?:/(?:[^~]|~[01])*)?$"
         }
       },
       "required": [

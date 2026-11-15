@@ -6,10 +6,12 @@ import json
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from runevidence.manifest import artifact_to_dict, load_manifest, validate_manifest
 from runevidence.migrate import migrate_manifest
+from runevidence.run_claim import _display_details
 from runevidence.models import (
     Artifact,
     Manifest06,
@@ -107,6 +109,18 @@ def test_schema_06_admits_every_05_locator():
     assert isinstance(manifest, Manifest06)
 
 
+def test_json_schema_06_keeps_the_jsonl_pointer_constraint():
+    document = _manifest06()
+    document["results"][0]["locator"] = {
+        "kind": "jsonl",
+        "line": 1,
+        "pointer": "not/a/pointer",
+    }
+    schema = json_schema_0_6()
+    errors = list(Draft202012Validator(schema).iter_errors(document))
+    assert errors
+
+
 def test_json_schema_06_shape():
     schema = json_schema_0_6()
     assert schema["$id"] == "urn:runevidence:manifest:0.6"
@@ -143,3 +157,19 @@ def test_load_manifest_dispatches_06(tmp_path):
 def test_artifact_to_dict_accepts_06():
     artifact = Artifact(id="a", path="x", sha256="a" * 64, size_bytes=1)
     assert artifact_to_dict(artifact, schema_version="0.6")["id"] == "a"
+
+
+def test_claim_display_hides_a_text_tag():
+    displayed = _display_details(
+        {
+            "locator": {
+                "kind": "tensorboard-string",
+                "tag": "SECRET_TAG",
+                "step": 0,
+                "occurrence": 0,
+            },
+            "value": "x" * 300,
+        }
+    )
+    assert displayed["locator"] == "tensorboard-string:step=0,occurrence=0"
+    assert "SECRET_TAG" not in str(displayed)
