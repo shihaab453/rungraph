@@ -140,7 +140,7 @@ class TensorboardAdapter(Adapter):
     supports_include_strings = True
     supports_include_histograms = True
     description = (
-        "TensorBoard log directories: one run per directory, selected scalars or strings."
+        "TensorBoard log directories: one run per directory, selected scalars or summaries."
     )
 
     def discover(self, root: Path) -> Discovery:

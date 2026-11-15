@@ -134,6 +134,8 @@ def test_json_schema_07_shape():
     assert hist["properties"]["bucket"]["items"]["minimum"] == 0
     assert hist["properties"]["bucket"]["maxItems"] == 1024
     assert "allOf" in schema["$defs"]["Result07"]
+    assert "0.7" in schema["$defs"]["TensorboardLocator"]["properties"]["kind"]["description"]
+    assert "0.6" not in schema["$defs"]["TensorboardStringLocator"]["properties"]["kind"]["description"]
 
 
 def test_json_schema_07_rejects_bad_histograms():

@@ -129,7 +129,7 @@ def format_overview(manifest: Manifest) -> str:
     if manifest.results:
         lines.append(f"\nResults ({len(manifest.results)}):")
         for r in manifest.results:
-            lines.append(f"  {r.id}: {r.run_id} {r.name} = {histogram_display(r.value) or r.value!r}")
+            lines.append(f"  {r.id}: {r.run_id} {r.name} = {histogram_display(r.value) or repr(r.value)}")
 
     if manifest.evidence:
         lines.append(f"\nEvidence ({len(manifest.evidence)}):")

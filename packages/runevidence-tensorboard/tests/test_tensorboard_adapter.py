@@ -2033,6 +2033,36 @@ def test_histogram_selection_ladder_direct():
     assert hist[(b"empty", 0, 0)].outcome is ScalarOutcome.unsupported_value
 
 
+def test_histogram_consumers_use_compact_display(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "e.tfevents", _records(_histo_event(b"w")))
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    path = root / MANIFEST_FILENAME
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["evidence"] = [{"id": "e1", "claim": "weights", "supports": ["res"]}]
+    for result in document["results"]:
+        result["id"] = "res"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    for argv in (
+        ["inspect", str(root)],
+        ["claim", "--id", "e1", str(root)],
+        ["lineage", "--id", "e1", str(root)],
+    ):
+        assert main(argv) == 0
+        out = capsys.readouterr().out
+        assert "histogram(1 buckets, num=2.0)" in out
+        assert '"kind": "tensorboard-histogram"' not in out
+    metric = document["results"][0]["name"]
+    assert main(["leaderboard", "--metric", metric, "--direction", "min", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "non_numeric" in out or "Eligible: 0" in out
+
+
 def test_strings_are_ignored_without_the_flag(tmp_path, capsys):
     root = _string_folder(tmp_path)
     assert main(["init", str(root), "--adapter", "tensorboard"]) == 0

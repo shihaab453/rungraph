@@ -837,7 +837,7 @@
       "properties": {
         "kind": {
           "const": "tensorboard",
-          "description": "Locator kind; 0.6 admits tensorboard.",
+          "description": "Locator kind; 0.7 admits tensorboard.",
           "title": "Kind",
           "type": "string"
         },
@@ -878,7 +878,7 @@
       "properties": {
         "kind": {
           "const": "tensorboard-string",
-          "description": "Locator kind; 0.6 admits tensorboard-string.",
+          "description": "Locator kind; 0.7 admits tensorboard-string.",
           "title": "Kind",
           "type": "string"
         },
@@ -915,7 +915,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Schema 0.7 manifest: 0.6 locators plus tensorboard-histogram.",
+  "description": "Schema 0.7 manifest: 0.7 locators plus tensorboard-histogram.",
   "properties": {
     "schema_version": {
       "const": "0.7",

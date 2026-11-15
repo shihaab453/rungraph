@@ -2064,11 +2064,24 @@ def _generated_schema_0_7() -> dict[str, Any]:
     return schema
 
 
+def _rewrite_06_descriptions(value: Any) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key == "description" and isinstance(child, str):
+                value[key] = child.replace("0.6", "0.7")
+            else:
+                _rewrite_06_descriptions(child)
+    elif isinstance(value, list):
+        for child in value:
+            _rewrite_06_descriptions(child)
+
+
 def json_schema_0_7() -> dict[str, Any]:
     """JSON Schema for the 0.7 manifest (adds ``tensorboard-histogram``)."""
     schema = _generated_schema_0_7()
     _publish_common_0_2(schema)
     _rewrite_descriptions(schema)
+    _rewrite_06_descriptions(schema)
     for definition in schema["$defs"].values():
         if isinstance(definition, dict):
             for key in ("description",):

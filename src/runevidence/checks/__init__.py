@@ -107,7 +107,7 @@ def _tensorboard_cap(
 ) -> tuple[bool, frozenset[str]]:
     """Classify TensorBoard eligibility without reads; emit nothing.
 
-    Returns ``(capped, eligible_artifact_ids)``. Only schema 0.5 can carry a
+    Returns ``(capped, eligible_artifact_ids)``. Schema 0.5-0.7 can carry a
     tensorboard locator. Tag metadata is the UTF-8 byte length of each eligible
     locator's recorded tag.
     """
