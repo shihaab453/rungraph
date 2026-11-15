@@ -10,8 +10,13 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import itertools
 import json
+import os
+import re
 import struct
+import subprocess
+import sys
 from importlib.metadata import distribution, entry_points
 from pathlib import Path
 
@@ -28,12 +33,17 @@ from runevidence.adapters import AdapterError, available_adapters  # noqa: E402
 from runevidence.adapters.generic import GenericAdapter  # noqa: E402
 from runevidence.checks import EXIT_INVALID  # noqa: E402
 from runevidence.checks import files as files_module  # noqa: E402
-from runevidence.cli import main  # noqa: E402
+from runevidence.cli import _event_artifact_is_volatile, main  # noqa: E402
 from runevidence.models import (  # noqa: E402
     MANIFEST_FILENAME,
+    SCHEMA_VERSION_0_5,
+    Artifact,
     Manifest05,
+    Project,
+    Run,
     TensorboardLocator,
 )
+from runevidence.tag_filter import TagFilter, TagPatternTooExpensive  # noqa: E402
 from runevidence_tensorboard import TensorboardAdapter, __version__  # noqa: E402
 from runevidence_tensorboard import adapter as adapter_module  # noqa: E402
 
@@ -168,10 +178,14 @@ def _write(path: Path, data: bytes) -> None:
     path.write_bytes(data)
 
 
-def _extract(root: Path):
+def _extract(root: Path, tag_filter=None):
     adapter = TensorboardAdapter()
     return adapter.extract(
-        root, adapter.discover(root), project_id="tensorboard-example", project_name="Event folder"
+        root,
+        adapter.discover(root),
+        project_id="tensorboard-example",
+        project_name="Event folder",
+        tag_filter=tag_filter,
     )
 
 
@@ -191,19 +205,25 @@ def _art_id(path: str) -> str:
     return f"tb-art-{_short(path.encode('utf-8'))}"
 
 
-def _run_id(path: str) -> str:
-    return f"tb-run-{_short(path.encode('utf-8'))}"
+def _run_id(dir_rel: str) -> str:
+    return f"tb-run-{_short(dir_rel.encode('utf-8'))}"
 
 
-def _res_id(run_id: str, tag: str, step: int, occurrence: int) -> str:
+def _name_digest(artifact_id: str, occurrence: int) -> str:
+    return _short(artifact_id.encode("utf-8") + b"\x00" + str(occurrence).encode("ascii"))
+
+
+def _res_id(run_id: str, artifact_id: str, tag: str, step: int, occurrence: int) -> str:
     payload = (
         run_id.encode("utf-8")
         + b"\x00"
+        + artifact_id.encode("utf-8")
+        + b"\x00"
         + tag.encode("utf-8")
         + b"\x00"
-        + str(step).encode("utf-8")
+        + str(step).encode("ascii")
         + b"\x00"
-        + str(occurrence).encode("utf-8")
+        + str(occurrence).encode("ascii")
     )
     return f"tb-res-{hashlib.sha256(payload).hexdigest()[:16]}"
 
@@ -281,10 +301,7 @@ def test_discovery_excludes_own_files_and_records_everything_else(tmp_path):
         root, discovery, project_id="discovered", project_name="Discovered"
     )
     assert [artifact.path for artifact in manifest.artifacts] == discovery.files
-    assert [run.name for run in manifest.runs] == [
-        "logs/EVENTS.OUT.TFEVENTS.2",
-        "logs/events.out.tfevents.1",
-    ]
+    assert [run.name for run in manifest.runs] == ["logs"]
     assert ".tfevents/notes.txt" not in {run.name for run in manifest.runs}
 
 
@@ -314,12 +331,12 @@ def test_non_event_artifact_ids_equal_the_generic_adapter(tmp_path):
 
     event_path = "events.out.tfevents.1"
     assert actual[event_path].id == _art_id(event_path)
-    assert actual[event_path].run_id == _run_id(event_path)
+    assert actual[event_path].run_id == _run_id(".")
     assert actual[event_path].sha256 == hashlib.sha256(
         (root / event_path).read_bytes()
     ).hexdigest()
     assert actual[event_path].size_bytes == (root / event_path).stat().st_size
-    assert [run.name for run in manifest.runs] == [event_path]
+    assert [run.name for run in manifest.runs] == ["."]
 
 
 def test_fixed_ids_follow_the_documented_hash_formulas(tmp_path):
@@ -331,10 +348,12 @@ def test_fixed_ids_follow_the_documented_hash_formulas(tmp_path):
     run = manifest.runs[0]
     artifact = manifest.artifacts[0]
     result = manifest.results[0]
-    assert run.id == "tb-run-" + hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
+    assert run.id == "tb-run-" + hashlib.sha256(b"logs").hexdigest()[:16]
     assert artifact.id == "tb-art-" + hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
     expected = (
         run.id.encode("utf-8")
+        + b"\x00"
+        + artifact.id.encode("utf-8")
         + b"\x00"
         + b"loss/val"
         + b"\x00"
@@ -343,7 +362,7 @@ def test_fixed_ids_follow_the_documented_hash_formulas(tmp_path):
         + b"0"
     )
     assert result.id == "tb-res-" + hashlib.sha256(expected).hexdigest()[:16]
-    assert result.id == _res_id(run.id, "loss/val", -3, 0)
+    assert result.id == _res_id(run.id, artifact.id, "loss/val", -3, 0)
     assert result.run_id == run.id
     assert result.artifact_id == artifact.id
     assert isinstance(result.locator, TensorboardLocator)
@@ -362,10 +381,7 @@ def test_two_event_files_are_two_runs_and_identical_tags_do_not_collide(tmp_path
     )
     manifest = _extract(root)
 
-    assert [run.name for run in manifest.runs] == [
-        "events.out.tfevents.1",
-        "logs/events.out.tfevents.2",
-    ]
+    assert [run.name for run in manifest.runs] == [".", "logs"]
     assert len({run.id for run in manifest.runs}) == 2
     assert len({result.id for result in manifest.results}) == 2
     assert len({result.artifact_id for result in manifest.results}) == 2
@@ -373,7 +389,7 @@ def test_two_event_files_are_two_runs_and_identical_tags_do_not_collide(tmp_path
     assert [result.name for result in manifest.results] == ["loss @ 0", "loss @ 0"]
 
     for result in manifest.results:
-        assert result.id == _res_id(result.run_id, "loss", 0, 0)
+        assert result.id == _res_id(result.run_id, result.artifact_id, "loss", 0, 0)
 
 
 def test_result_names_are_step_qualified_and_occurrence_suffixes_are_sparse(tmp_path):
@@ -502,7 +518,7 @@ def test_empty_and_header_only_files_are_artifacts_without_results(tmp_path):
         "empty.tfevents",
         "header.tfevents",
     ]
-    assert [run.name for run in manifest.runs] == ["empty.tfevents", "header.tfevents"]
+    assert [run.name for run in manifest.runs] == ["."]
     assert manifest.results == []
     assert manifest.evidence == []
 
@@ -687,7 +703,7 @@ def test_cli_init_and_validate_accept_a_generated_event_folder(tmp_path, capsys)
 
     document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
     assert document["schema_version"] == "0.5"
-    assert [run["name"] for run in document["runs"]] == ["logs/events.out.tfevents.1"]
+    assert [run["name"] for run in document["runs"]] == ["logs"]
     assert len(document["results"]) == 3
     assert document["results"][0]["locator"] == {
         "kind": "tensorboard",
@@ -780,3 +796,812 @@ def test_cli_init_generic_volatile_behavior_is_unchanged(tmp_path, capsys):
     artifacts = {artifact["path"]: artifact for artifact in document["artifacts"]}
     assert artifacts["logs/events.out.tfevents.1"]["volatile"] is True
     assert artifacts["logs/events.out.tfevents.1"]["sha256"] is None
+
+
+# --- multi-file runs --------------------------------------------------------
+
+
+def test_two_files_in_one_directory_share_a_run_and_get_qualified_names(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "a.tfevents", _records(_scalar_event(b"loss", 1.0, step=1)))
+    _write(root / "logs" / "z.tfevents", _records(_scalar_event(b"loss", 2.0, step=1)))
+    manifest = _extract(root)
+
+    assert [run.name for run in manifest.runs] == ["logs"]
+    assert len(manifest.runs) == 1
+    assert len({artifact.run_id for artifact in manifest.artifacts}) == 1
+    assert len({result.id for result in manifest.results}) == 2
+    assert [result.value for result in manifest.results] == [1.0, 2.0]
+    for result, basename in zip(manifest.results, ("a.tfevents", "z.tfevents")):
+        digest = _name_digest(result.artifact_id, 0)
+        assert result.name == f"loss @ 1 [{basename}] #{digest}"
+
+
+def test_nested_directories_are_separate_runs_and_root_is_dot(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "e.tfevents", _records(_scalar_event(b"loss", 0.1)))
+    _write(root / "logs" / "a.tfevents", _records(_scalar_event(b"loss", 0.2)))
+    _write(root / "logs" / "sub" / "b.tfevents", _records(_scalar_event(b"loss", 0.3)))
+    manifest = _extract(root)
+
+    assert [run.name for run in manifest.runs] == [".", "logs", "logs/sub"]
+    assert [run.id for run in manifest.runs] == [
+        _run_id("."),
+        _run_id("logs"),
+        _run_id("logs/sub"),
+    ]
+
+
+def test_one_file_per_directory_keeps_bare_names(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "train" / "e.tfevents", _records(_scalar_event(b"loss", 1.0, step=4)))
+    _write(root / "validation" / "e.tfevents", _records(_scalar_event(b"loss", 2.0, step=4)))
+    manifest = _extract(root)
+
+    assert [result.name for result in manifest.results] == ["loss @ 4", "loss @ 4"]
+
+
+def test_occurrences_are_per_file_and_stay_distinct_across_files(tmp_path):
+    root = tmp_path / "experiment"
+    _write(
+        root / "logs" / "a.tfevents",
+        _records(
+            _scalar_event(b"loss", 1.0, step=2),
+            _scalar_event(b"loss", 1.5, step=2),
+        ),
+    )
+    _write(root / "logs" / "b.tfevents", _records(_scalar_event(b"loss", 2.0, step=2)))
+    manifest = _extract(root)
+
+    assert [result.locator.occurrence for result in manifest.results] == [0, 1, 0]
+    assert len({result.name for result in manifest.results}) == 3
+    assert len({result.id for result in manifest.results}) == 3
+
+
+# --- filtering --------------------------------------------------------------
+
+
+def test_filter_selects_tags_and_leaves_occurrence_alone(tmp_path):
+    root = tmp_path / "experiment"
+    _write(
+        root / "events.out.tfevents.1",
+        _records(
+            _event(
+                step=3,
+                summary_bytes=_summary(
+                    _value(b"loss", simple_value=0.5),
+                    _value(b"acc", simple_value=0.25),
+                    _value(b"loss", simple_value=0.75),
+                ),
+            )
+        ),
+    )
+    manifest = _extract(root, TagFilter(["loss"]))
+    assert [result.locator.tag for result in manifest.results] == ["loss", "loss"]
+    assert [result.locator.occurrence for result in manifest.results] == [0, 1]
+    assert [result.name for result in manifest.results] == ["loss @ 3", "loss @ 3 #1"]
+
+
+def test_filter_skips_unrepresentable_tags_instead_of_refusing(tmp_path):
+    root = tmp_path / "experiment"
+    _write(
+        root / "events.out.tfevents.1",
+        _records(
+            _scalar_event(b"\xff", 0.5),
+            _scalar_event(b"good", 1.0),
+        ),
+    )
+    manifest = _extract(root, TagFilter(["*"]))
+    assert [result.locator.tag for result in manifest.results] == ["good"]
+
+    with pytest.raises(AdapterError) as excinfo:
+        _extract(root)
+    assert str(excinfo.value) == TAG_MESSAGE
+
+
+def test_filter_budget_is_the_core_exception_not_an_adapter_error(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "events.out.tfevents.1", _records(_scalar_event(b"ab", 0.5)))
+    with pytest.raises(TagPatternTooExpensive):
+        _extract(root, TagFilter(["ab"], budget=1))
+
+
+def test_profile_failure_outranks_too_expensive(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "a.tfevents", _records(_scalar_event(b"ab", 1.0)))
+    _write(root / "z.tfevents", _record(_scalar_event(b"loss", 0.5))[:-3])
+    with pytest.raises(AdapterError) as excinfo:
+        _extract(root, TagFilter(["ab"], budget=1))
+    assert str(excinfo.value) == PROFILE_MESSAGE
+
+
+# --- path and collision refusals -------------------------------------------
+
+
+@pytest.mark.skipif(adapter_module.os.name == "nt", reason="POSIX-only path rule")
+def test_posix_event_path_with_a_backslash_is_refused_before_any_read(tmp_path):
+    root = tmp_path / "experiment"
+    adapter = TensorboardAdapter()
+    discovery = adapter.discover(root)
+    discovery.files = ["logs/a\\b.tfevents"]
+    with pytest.raises(AdapterError) as excinfo:
+        adapter.extract(root, discovery, project_id="p", project_name="P")
+    assert str(excinfo.value) == adapter_module.BACKSLASH_MESSAGE
+
+
+def test_surrogate_path_is_refused_before_any_read(tmp_path):
+    adapter = TensorboardAdapter()
+    discovery = adapter.discover(tmp_path)
+    discovery.files = ["logs/\udcff.tfevents"]
+    with pytest.raises(AdapterError) as excinfo:
+        adapter.extract(tmp_path, discovery, project_id="p", project_name="P")
+    assert str(excinfo.value) == adapter_module.SURROGATE_MESSAGE
+
+
+def test_duplicate_generated_result_name_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(adapter_module, "_name_digest", lambda artifact_id, occurrence: "0" * 16)
+    root = tmp_path / "experiment"
+    _write(
+        root / "logs" / "a.tfevents",
+        _records(
+            _scalar_event(b"loss", 1.0, step=1),
+            _scalar_event(b"loss", 1.5, step=1),
+        ),
+    )
+    _write(root / "logs" / "z.tfevents", _records(_scalar_event(b"loss", 2.0, step=1)))
+    with pytest.raises(AdapterError) as excinfo:
+        _extract(root)
+    assert str(excinfo.value) == adapter_module.NAME_MESSAGE
+
+
+def test_duplicate_generated_artifact_id_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(adapter_module, "_artifact_id", lambda path: "tb-art-fixed")
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "a.tfevents", _records(_scalar_event(b"loss", 1.0)))
+    _write(root / "logs" / "z.tfevents", _records(_scalar_event(b"loss", 2.0)))
+    with pytest.raises(AdapterError) as excinfo:
+        _extract(root)
+    assert str(excinfo.value) == adapter_module.COLLISION_MESSAGE
+
+
+# --- CLI --tags -------------------------------------------------------------
+
+
+def _two_tag_folder(tmp_path):
+    root = tmp_path / "experiment"
+    _write(
+        root / "logs" / "e.tfevents",
+        _records(
+            _event(
+                step=0,
+                summary_bytes=_summary(
+                    _value(b"loss", simple_value=0.5),
+                    _value(b"acc", simple_value=0.25),
+                ),
+            )
+        ),
+    )
+    return root
+
+
+def test_cli_tags_selects_and_prints_no_warning(tmp_path, capsys):
+    root = _two_tag_folder(tmp_path)
+    assert main(["init", str(root), "--adapter", "tensorboard", "--tags", "loss"]) == 0
+    out = capsys.readouterr().out
+    assert "WARNING" not in out
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert [result["locator"]["tag"] for result in document["results"]] == ["loss"]
+
+
+def test_cli_tags_warns_after_a_successful_write(tmp_path, capsys):
+    root = _two_tag_folder(tmp_path)
+    assert main(["init", str(root), "--adapter", "tensorboard", "--tags", "nomatch"]) == 0
+    out = capsys.readouterr().out
+    assert (
+        "WARNING: --tags pattern 'nomatch' matches no representable supported scalar tag"
+        in out
+    )
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["results"] == []
+
+
+def test_cli_tags_invalid_pattern_writes_nothing(tmp_path, capsys):
+    root = _two_tag_folder(tmp_path)
+    assert main(["init", str(root), "--adapter", "tensorboard", "--tags", ""]) == 2
+    out = capsys.readouterr().out
+    assert "ERROR: invalid --tags pattern. Nothing was written." in out
+    assert not (root / MANIFEST_FILENAME).exists()
+
+
+def test_cli_tags_unsupported_adapter_writes_nothing(tmp_path, capsys):
+    root = _two_tag_folder(tmp_path)
+    assert main(["init", str(root), "--adapter", "generic", "--tags", "loss"]) == 2
+    out = capsys.readouterr().out
+    assert (
+        "ERROR: adapter 'generic' does not support --tags. Nothing was written." in out
+    )
+    assert not (root / MANIFEST_FILENAME).exists()
+
+
+def test_cli_tags_contract_failure_writes_nothing(monkeypatch, tmp_path, capsys):
+    class NoParameter:
+        name = "fake"
+        supports_tag_filters = True
+
+        def extract(self, root, discovery, *, project_id, project_name):
+            raise AssertionError("must not be called")
+
+    from runevidence import cli as cli_module
+
+    assert not cli_module._accepts_tag_filter(NoParameter())
+    monkeypatch.setattr(cli_module, "get_adapter", lambda name: NoParameter())
+    root = _two_tag_folder(tmp_path)
+    assert main(["init", str(root), "--adapter", "fake", "--tags", "loss"]) == 2
+    out = capsys.readouterr().out
+    assert "ERROR: adapter 'fake' cannot apply --tags. Nothing was written." in out
+    assert not (root / MANIFEST_FILENAME).exists()
+
+
+def test_cli_tags_too_expensive_writes_nothing(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    tags = [("a" * 4095) + ch for ch in "cdefghijklmnopqr"]
+    _write(
+        root / "e.tfevents",
+        _records(*(_scalar_event(tag.encode("utf-8"), 0.5) for tag in tags)),
+    )
+    pattern = "*" + ("a" * 1020) + "?b*"
+    assert main(["init", str(root), "--adapter", "tensorboard", "--tags", pattern]) == 2
+    out = capsys.readouterr().out
+    assert "ERROR: --tags pattern is too expensive. Nothing was written." in out
+    assert not (root / MANIFEST_FILENAME).exists()
+
+
+def test_cli_volatile_refuses_an_empty_event_file(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "empty.tfevents", b"")
+    assert (
+        main(
+            [
+                "init",
+                str(root),
+                "--adapter",
+                "tensorboard",
+                "--volatile",
+                "*.tfevents*",
+            ]
+        )
+        == 2
+    )
+    out = capsys.readouterr().out
+    assert "an event artifact cannot be volatile; nothing was written" in out
+    assert not (root / MANIFEST_FILENAME).exists()
+
+
+def test_real_tensorboard_fixtures_in_one_directory_share_a_run(tmp_path):
+    data = Path(__file__).resolve().parents[3] / "tests" / "data" / "tensorboard"
+    root = tmp_path / "experiment"
+    (root / "logs").mkdir(parents=True)
+    for name in ("legacy-simple-value.tfevents", "tensor-content.tfevents"):
+        (root / "logs" / name).write_bytes((data / name).read_bytes())
+    manifest = _extract(root)
+    assert [run.name for run in manifest.runs] == ["logs"]
+    assert {artifact.path for artifact in manifest.artifacts} == {
+        "logs/legacy-simple-value.tfevents",
+        "logs/tensor-content.tfevents",
+    }
+    assert manifest.results
+
+
+def test_discovery_order_cannot_change_ids_names_or_output(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "a.tfevents", _records(_scalar_event(b"loss", 1.0, step=1)))
+    _write(root / "logs" / "z.tfevents", _records(_scalar_event(b"loss", 2.0, step=1)))
+    adapter = TensorboardAdapter()
+    discovery = adapter.discover(root)
+    first = adapter.extract(
+        root, discovery, project_id="p", project_name="P"
+    ).model_dump()
+    discovery.files.reverse()
+    second = adapter.extract(
+        root, discovery, project_id="p", project_name="P"
+    ).model_dump()
+    assert first == second
+
+
+def test_sibling_insertion_makes_a_bare_name_qualified_without_changing_ids(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "z.tfevents", _records(_scalar_event(b"loss", 1.5, step=1)))
+    before = _extract(root)
+    assert [result.name for result in before.results] == ["loss @ 1"]
+    old_id = before.results[0].id
+    old_artifact = before.results[0].artifact_id
+
+    _write(root / "logs" / "a.tfevents", _records(_scalar_event(b"loss", 0.5, step=1)))
+    after = _extract(root)
+    assert [run.name for run in after.runs] == ["logs"]
+    assert [result.name for result in after.results] == [
+        f"loss @ 1 [a.tfevents] #{_name_digest(after.results[0].artifact_id, 0)}",
+        f"loss @ 1 [z.tfevents] #{_name_digest(old_artifact, 0)}",
+    ]
+    z_result = next(result for result in after.results if result.artifact_id == old_artifact)
+    assert z_result.id == old_id
+    assert z_result.value == 1.5
+
+
+def test_cli_tags_repeatable_or_and_leading_dash(tmp_path, capsys):
+    root = _two_tag_folder(tmp_path)
+    assert (
+        main(
+            [
+                "init",
+                str(root),
+                "--adapter",
+                "tensorboard",
+                "--tags",
+                "loss",
+                "--tags=-acc",
+            ]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "WARNING: --tags pattern '-acc'" in out
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert [result["locator"]["tag"] for result in document["results"]] == ["loss"]
+
+
+def test_result_cap_counts_only_selected_scalars(tmp_path):
+    root = tmp_path / "experiment"
+    records = [_scalar_event(b"skip", index * 0.5, step=index) for index in range(10_001)]
+    records.append(_scalar_event(b"keep", 1.0))
+    _write(root / "events.out.tfevents.1", _records(*records))
+
+    with pytest.raises(AdapterError) as excinfo:
+        _extract(root)
+    assert str(excinfo.value) == BUDGET_MESSAGE
+
+    manifest = _extract(root, TagFilter(["keep"]))
+    assert [result.locator.tag for result in manifest.results] == ["keep"]
+
+
+def test_crafted_delimiter_tags_never_collide(tmp_path):
+    root = tmp_path / "experiment"
+    a = "logs/q.tfevents] @ 5 [r.tfevents"
+    b = "logs/r.tfevents"
+    _write(
+        root / a,
+        _records(
+            _scalar_event(b"loss", 1.0, step=1),
+            _scalar_event(b"loss @ 1 [q.tfevents]", 5.0, step=5),
+        ),
+    )
+    _write(
+        root / b,
+        _records(
+            _scalar_event(b"loss", 2.0, step=1),
+            _scalar_event(b"loss @ 1 [q.tfevents]", 6.0, step=5),
+        ),
+    )
+    manifest = _extract(root)
+    assert len(manifest.results) == 4
+    assert len({result.name for result in manifest.results}) == 4
+    assert len({result.id for result in manifest.results}) == 4
+
+
+def test_exact_result_and_tag_byte_boundaries(tmp_path):
+    root = tmp_path / "experiment"
+    ten_thousand = [
+        _scalar_event(f"tag{i}".encode(), float(i), step=i) for i in range(10_000)
+    ]
+    _write(root / "ten-k.tfevents", _records(*ten_thousand))
+    manifest = _extract(root)
+    assert len(manifest.results) == 10_000
+
+    exact = [
+        _scalar_event(("x" * 4092 + f"{i:04d}").encode(), 1.0, step=i)
+        for i in range(4096)
+    ]
+    _write(root / "exact-16mib.tfevents", _records(*exact))
+    manifest = _extract(root, TagFilter(["x*"]))
+    assert len(manifest.results) == 4096
+
+    extra = [*exact, _scalar_event(b"y", 1.0, step=9999)]
+    _write(root / "over-16mib.tfevents", _records(*extra))
+    with pytest.raises(AdapterError) as excinfo:
+        _extract(root, TagFilter(["x*", "y"]))
+    assert str(excinfo.value) == BUDGET_MESSAGE
+
+
+def test_surrogate_path_outranks_a_posix_backslash_event_path(tmp_path):
+    adapter = TensorboardAdapter()
+    discovery = adapter.discover(tmp_path)
+    discovery.files = ["logs/\udcff.tfevents", "logs/a\\b.tfevents"]
+    with pytest.raises(AdapterError) as excinfo:
+        adapter.extract(tmp_path, discovery, project_id="p", project_name="P")
+    assert str(excinfo.value) == adapter_module.SURROGATE_MESSAGE
+
+
+@pytest.mark.skipif(adapter_module.os.name == "nt", reason="POSIX-only path rule")
+def test_backslash_path_outranks_a_corrupt_file_without_reading_it(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "broken.tfevents", b"not an event file")
+    adapter = TensorboardAdapter()
+    discovery = adapter.discover(root)
+    discovery.files = ["logs/a\\b.tfevents", "logs/broken.tfevents"]
+    with pytest.raises(AdapterError) as excinfo:
+        adapter.extract(root, discovery, project_id="p", project_name="P")
+    assert str(excinfo.value) == adapter_module.BACKSLASH_MESSAGE
+
+
+def test_reinit_produces_byte_identical_manifests(tmp_path, capsys):
+    root = _two_tag_folder(tmp_path)
+    assert main(["init", str(root), "--adapter", "tensorboard", "--tags", "loss"]) == 0
+    capsys.readouterr()
+    first = (root / MANIFEST_FILENAME).read_bytes()
+    (root / MANIFEST_FILENAME).unlink()
+    assert main(["init", str(root), "--adapter", "tensorboard", "--tags", "loss"]) == 0
+    capsys.readouterr()
+    assert (root / MANIFEST_FILENAME).read_bytes() == first
+
+
+@pytest.mark.skipif(adapter_module.os.name == "nt", reason="POSIX-only path rule")
+def test_cli_refuses_a_posix_event_path_with_a_backslash(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "a\\b.tfevents", _records(_scalar_event(b"loss", 0.5)))
+    assert main(["init", str(root), "--adapter", "tensorboard"]) == 2
+    out = capsys.readouterr().out
+    assert "an event path contains a backslash; nothing was written" in out
+    assert not (root / MANIFEST_FILENAME).exists()
+
+
+@pytest.mark.skipif(adapter_module.os.name == "nt", reason="POSIX-only surrogate path")
+def test_cli_refuses_a_surrogate_path(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    (root / "logs").mkdir(parents=True)
+    name = adapter_module.os.fsdecode(b"bad-\xff.tfevents")
+    (root / "logs" / name).write_bytes(_records(_scalar_event(b"loss", 0.5)))
+    assert main(["init", str(root), "--adapter", "tensorboard"]) == 2
+    out = capsys.readouterr().out
+    assert "a path is not valid UTF-8; nothing was written" in out
+    assert not (root / MANIFEST_FILENAME).exists()
+
+
+def test_delete_then_add_keeps_a_bare_name_but_changes_the_id(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "z.tfevents", _records(_scalar_event(b"loss", 1.0, step=1)))
+    before = _extract(root)
+    assert [result.name for result in before.results] == ["loss @ 1"]
+    old_id = before.results[0].id
+
+    (root / "logs" / "z.tfevents").unlink()
+    _write(root / "logs" / "a.tfevents", _records(_scalar_event(b"loss", 2.0, step=1)))
+    after = _extract(root)
+    assert [result.name for result in after.results] == ["loss @ 1"]
+    assert after.results[0].id != old_id
+    assert after.results[0].value == 2.0
+
+
+def test_nul_in_a_tag_keeps_the_id_payload_unambiguous(tmp_path):
+    root = tmp_path / "experiment"
+    _write(
+        root / "events.out.tfevents.1",
+        _records(
+            _scalar_event(b"loss", 1.0, step=1),
+            _scalar_event(b"loss\x00raw", 2.0, step=1),
+        ),
+    )
+    manifest = _extract(root)
+    assert [result.locator.tag for result in manifest.results] == ["loss", "loss\x00raw"]
+    assert len({result.id for result in manifest.results}) == 2
+    assert len({result.name for result in manifest.results}) == 2
+
+
+def test_non_ascii_directory_names_are_recorded_verbatim(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "lögs" / "e.tfevents", _records(_scalar_event(b"loss", 0.5, step=1)))
+    manifest = _extract(root)
+    assert [run.name for run in manifest.runs] == ["lögs"]
+    assert manifest.runs[0].id == _run_id("lögs")
+
+
+def test_absolute_root_does_not_change_ids_names_or_digests(tmp_path):
+    first_root = tmp_path / "one" / "experiment"
+    second_root = tmp_path / "two" / "experiment"
+    for root in (first_root, second_root):
+        _write(root / "logs" / "a.tfevents", _records(_scalar_event(b"loss", 0.5, step=1)))
+    first = _extract(first_root).model_dump()
+    second = _extract(second_root).model_dump()
+    assert first == second
+
+
+# --- remaining RFC vectors --------------------------------------------------
+
+
+def test_volatile_predicate_ignores_directory_artifacts():
+    directory = Manifest05(
+        schema_version=SCHEMA_VERSION_0_5,
+        project=Project(id="p", name="P"),
+        runs=[],
+        artifacts=[
+            Artifact(
+                id="d",
+                path="x.tfevents",
+                artifact_type="directory",
+                digest_format="runevidence-directory-v1",
+            )
+        ],
+        results=[],
+        evidence=[],
+    )
+    assert not _event_artifact_is_volatile(directory, ["x.tfevents"])
+
+    file_artifact = Manifest05(
+        schema_version=SCHEMA_VERSION_0_5,
+        project=Project(id="p", name="P"),
+        runs=[Run(id="r", name=".")],
+        artifacts=[Artifact(id="f", path="x.tfevents", sha256="a" * 64, size_bytes=1)],
+        results=[],
+        evidence=[],
+    )
+    assert _event_artifact_is_volatile(file_artifact, ["x.tfevents"])
+
+
+def test_signature_failure_maps_to_the_contract_error(monkeypatch, tmp_path, capsys):
+    class BrokenSignature:
+        name = "fake"
+        supports_tag_filters = True
+        extract = 42
+
+    from runevidence import cli as cli_module
+
+    monkeypatch.setattr(cli_module, "get_adapter", lambda name: BrokenSignature())
+    root = _two_tag_folder(tmp_path)
+    assert main(["init", str(root), "--adapter", "fake", "--tags", "loss"]) == 2
+    out = capsys.readouterr().out
+    assert "ERROR: adapter 'fake' cannot apply --tags. Nothing was written." in out
+
+
+def test_adapter_internal_type_error_is_not_mislabeled(monkeypatch, tmp_path):
+    class InternalTypeError:
+        name = "fake"
+        supports_tag_filters = True
+
+        def discover(self, root):
+            return adapter_module.Discovery(root=root, files=[])
+
+        def extract(self, root, discovery, *, project_id, project_name, tag_filter=None):
+            raise TypeError("adapter bug")
+
+    from runevidence import cli as cli_module
+
+    monkeypatch.setattr(cli_module, "get_adapter", lambda name: InternalTypeError())
+    root = _two_tag_folder(tmp_path)
+    with pytest.raises(TypeError, match="adapter bug"):
+        main(["init", str(root), "--adapter", "fake", "--tags", "loss"])
+
+
+def test_restart_fixture_passes_compare_matrix_and_leaderboard(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    for run, base in (("trainA", 1.0), ("trainB", 2.0)):
+        for name, delta in (("a.tfevents", 0.0), ("z.tfevents", 0.5)):
+            _write(
+                root / run / name,
+                _records(_scalar_event(b"loss", base + delta, step=1)),
+            )
+    assert main(["init", str(root), "--adapter", "tensorboard"]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    runs = {run["name"]: run["id"] for run in document["runs"]}
+    metric = document["results"][0]["name"]
+    assert main(["compare", "--base", runs["trainA"], "--target", runs["trainB"], str(root)]) == 0
+    capsys.readouterr()
+    assert main(["matrix", str(root)]) == 0
+    capsys.readouterr()
+    assert main(["leaderboard", "--metric", metric, "--direction", "min", str(root)]) == 0
+
+
+def test_cross_run_qualified_names_do_not_align_on_different_paths(tmp_path):
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    for root in (first, second):
+        _write(root / "trainA" / "e.tfevents", _records(_scalar_event(b"loss", 1.0, step=1)))
+        _write(root / "trainA" / "z.tfevents", _records(_scalar_event(b"loss", 2.0, step=1)))
+    first_names = {result.name for result in _extract(first).results}
+    second_names = {result.name for result in _extract(second).results}
+    assert first_names == second_names  # same relative paths align
+
+    other = tmp_path / "three"
+    _write(other / "trainB" / "e.tfevents", _records(_scalar_event(b"loss", 1.0, step=1)))
+    _write(other / "trainB" / "z.tfevents", _records(_scalar_event(b"loss", 2.0, step=1)))
+    other_names = {result.name for result in _extract(other).results}
+    assert first_names.isdisjoint(other_names)
+
+
+def test_a_directory_named_tfevents_is_not_an_event_file(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "x.tfevents" / "notes.txt", b"not an event file\n")
+    manifest = _extract(root)
+    assert manifest.runs == []
+    assert [artifact.path for artifact in manifest.artifacts] == ["x.tfevents/notes.txt"]
+
+    _write(root / "x.tfevents" / "e.tfevents", _records(_scalar_event(b"loss", 0.5)))
+    manifest = _extract(root)
+    assert [run.name for run in manifest.runs] == ["x.tfevents"]
+
+
+def test_result_cap_does_not_outrank_a_profile_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(adapter_module, "MAX_RESULTS", 1)
+    root = tmp_path / "experiment"
+    _write(
+        root / "a.tfevents",
+        _records(
+            _scalar_event(b"loss", 1.0, step=1),
+            _scalar_event(b"loss", 2.0, step=2),
+        ),
+    )
+    _write(root / "z.tfevents", _record(_scalar_event(b"loss", 3.0))[:-3])
+    with pytest.raises(AdapterError) as excinfo:
+        _extract(root)
+    assert str(excinfo.value) == PROFILE_MESSAGE
+
+
+REVIEW_PATTERN = "*" + ("a" * 1020) + "?b*"
+REVIEW_TAGS = tuple(("a" * 4095) + ch for ch in "cdefghijklmnopq")
+
+
+def test_budget_accumulates_across_files_with_repeated_pattern(tmp_path):
+    root = tmp_path / "experiment"
+    for index in range(3):
+        chunk = REVIEW_TAGS[index * 5 : (index + 1) * 5]
+        _write(
+            root / f"e{index}.tfevents",
+            _records(*(_scalar_event(tag.encode(), 1.0, step=0) for tag in chunk)),
+        )
+    manifest = _extract(root, TagFilter([REVIEW_PATTERN, REVIEW_PATTERN]))
+    assert manifest.results == []
+
+    _write(
+        root / "e3.tfevents",
+        _records(_scalar_event(("a" * 4095 + "r").encode(), 1.0, step=0)),
+    )
+    with pytest.raises(TagPatternTooExpensive):
+        _extract(root, TagFilter([REVIEW_PATTERN, REVIEW_PATTERN]))
+
+
+def test_real_fixture_twice_in_one_directory_gets_qualified_names(tmp_path):
+    data = Path(__file__).resolve().parents[3] / "tests" / "data" / "tensorboard"
+    root = tmp_path / "experiment"
+    (root / "logs").mkdir(parents=True)
+    original = (data / "legacy-simple-value.tfevents").read_bytes()
+    (root / "logs" / "a.tfevents").write_bytes(original)
+    (root / "logs" / "z.tfevents").write_bytes(original)
+    manifest = _extract(root)
+    assert [run.name for run in manifest.runs] == ["logs"]
+    assert manifest.results
+    assert all(" [" in result.name and " #" in result.name for result in manifest.results)
+    assert len({result.name for result in manifest.results}) == len(manifest.results)
+
+
+def _reference_matches(pattern: str, tag: str) -> bool:
+    tokens = []
+    escaped = False
+    for char in pattern:
+        if escaped:
+            tokens.append(re.escape(char))
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == "*":
+            tokens.append(".*")
+        elif char == "?":
+            tokens.append(".")
+        else:
+            tokens.append(re.escape(char))
+    if escaped:
+        raise ValueError("trailing backslash")
+    return re.fullmatch("".join(tokens), tag, re.DOTALL) is not None
+
+
+def test_matcher_agrees_with_a_reference_implementation():
+    alphabet = ["a", "b", "*", "?", "\\"]
+    tags = ["a", "b", "ab", "ba", "aab", "abb", "aba", "bbb", "a?b", "a*b"]
+    for length in (1, 2, 3):
+        for parts in itertools.product(alphabet, repeat=length):
+            pattern = "".join(parts)
+            if pattern.endswith("\\"):
+                continue
+            try:
+                tag_filter = TagFilter([pattern])
+            except InvalidTagPattern:
+                continue
+            for tag in tags:
+                assert tag_filter.matches(tag) == _reference_matches(pattern, tag), (
+                    pattern,
+                    tag,
+                )
+
+
+def test_capable_adapter_receives_one_tag_filter(monkeypatch, tmp_path):
+    class Recording:
+        name = "record"
+        supports_tag_filters = True
+
+        def __init__(self):
+            self.generic = GenericAdapter()
+            self.seen = "unset"
+
+        def discover(self, root):
+            return self.generic.discover(root)
+
+        def extract(self, root, discovery, *, project_id, project_name, tag_filter=None):
+            self.seen = tag_filter
+            return self.generic.extract(
+                root, discovery, project_id=project_id, project_name=project_name
+            )
+
+    from runevidence import cli as cli_module
+
+    adapter = Recording()
+    monkeypatch.setattr(cli_module, "get_adapter", lambda name: adapter)
+    root = tmp_path / "experiment"
+    _write(root / "notes.txt", b"x\n")
+    assert main(["init", str(root), "--adapter", "record", "--tags", "*"]) == 0
+    assert isinstance(adapter.seen, TagFilter)
+
+
+def test_legacy_adapter_is_called_without_a_tag_filter(monkeypatch, tmp_path):
+    class Legacy:
+        name = "legacy"
+        supports_tag_filters = False
+
+        def __init__(self):
+            self.generic = GenericAdapter()
+            self.called = False
+
+        def discover(self, root):
+            return self.generic.discover(root)
+
+        def extract(self, root, discovery, *, project_id, project_name):
+            self.called = True
+            return self.generic.extract(
+                root, discovery, project_id=project_id, project_name=project_name
+            )
+
+    from runevidence import cli as cli_module
+
+    adapter = Legacy()
+    monkeypatch.setattr(cli_module, "get_adapter", lambda name: adapter)
+    root = tmp_path / "experiment"
+    _write(root / "notes.txt", b"x\n")
+    assert main(["init", str(root), "--adapter", "legacy"]) == 0
+    assert adapter.called
+
+
+def test_loading_with_a_core_without_the_tag_filter_fails():
+    code = (
+        "import sys\n"
+        "sys.modules['runevidence.tag_filter'] = None\n"
+        "import runevidence_tensorboard.adapter\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+    assert result.returncode != 0
+    assert "tag_filter" in result.stderr
+
+
+def test_cli_warning_order_ascii_escaping_and_repeats(tmp_path, capsys):
+    root = _two_tag_folder(tmp_path)
+    patterns = ["nomatch'one", "loss", "nomatch'one", "é?"]
+    argv = ["init", str(root), "--adapter", "tensorboard"]
+    for pattern in patterns:
+        argv += ["--tags", pattern]
+    assert main(argv) == 0
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("WARNING:")]
+    assert len(lines) == 3
+    assert '"nomatch\'one"' in lines[0]
+    assert '"nomatch\'one"' in lines[1]
+    assert "'\\xe9?'" in lines[2]

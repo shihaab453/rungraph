@@ -315,26 +315,30 @@ How it reads the folder:
   backups. Non-event files keep the generic adapter's IDs and have no
   `run_id`. Event files (basename contains `.tfevents`, case-insensitively)
   get `tb-art-<16 hex of SHA-256(path)>`.
-- **Runs:** one per event file, never a folder run. The run ID is
-  `tb-run-<same hash>` and the run name is the recorded relative path, so two
-  event files never merge into a multi-file run.
-- **Results:** every supported scalar in record order, then
-  `Summary.Value` order. A result ID is tag-free and built from the run ID,
-  tag, step and occurrence; the name is `tag @ step`, with ` #occurrence` when
-  occurrence is greater than 0. The locator is the schema 0.5
-  `{"kind": "tensorboard", ...}` object.
+- **Runs:** one per directory that directly contains event files. Nested
+  directories are separate runs and the experiment root is `.`. The run ID is
+  `tb-run-<16 hex SHA-256(os.fsencode(dir_rel))>` and the name is the
+  directory's relative path, so two event files in one directory share a run.
+- **Results:** every selected supported scalar in discovery order, then record
+  order, then `Summary.Value` order. A result ID is built from the run ID,
+  artifact ID, tag, step and occurrence; a single-file `(tag, step)` group is
+  named `tag @ step` (with ` #occurrence` for repeats), and a group spanning
+  files is `tag @ step [basename] #<16-hex digest>`. The locator is the schema
+  0.5 `{"kind": "tensorboard", ...}` object.
+- **Filtering:** `init --tags PATTERN` (repeatable) keeps tags matching a
+  full-string glob (`*`, `?`, `\` escapes, no character classes), capped at
+  1,024 code points with a shared 50,000,000-unit budget. Without a filter an
+  unrepresentable tag refuses `init`; with one it is skipped.
 - **Profile:** TFRecord framing and CRC, the strict protobuf subset, and
   rank-0/rank-1[1] float and double scalars; the same reader the checker uses.
-  A malformed or truncated event file refuses the whole `init` and writes
-  nothing; a tag that cannot be represented in schema 0.5 (empty, invalid
-  UTF-8, longer than 4,096 bytes) does the same.
-- **Budgets:** 10,000 results and 16 MiB of tag UTF-8 bytes per manifest. The
-  event file cap is 128 MiB.
+  Every event file is profile-checked even when the filter selects nothing.
+- **Budgets:** 10,000 selected results and 16 MiB of selected tag UTF-8 bytes
+  per manifest. The event file cap is 128 MiB.
 - **One read:** the artifact digest and the parsed scalars come from the same
   protected read, so a file that changes during extraction refuses instead of
   producing a digest/parse mismatch.
-- **Volatile:** an event artifact cannot be `--volatile`; matching one stops
-  `init` before any backup or save.
+- **Volatile:** a regular event artifact cannot be `--volatile`; matching one
+  stops `init` before any backup or save, even when it has no selected result.
 
 The adapter emits `Manifest05`, so `runevidence validate` verifies the scalar
 locators. See

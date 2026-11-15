@@ -26,6 +26,7 @@ participates; other writers are not controlled.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import hmac
 import re
@@ -43,8 +44,10 @@ from pydantic import ValidationError
 from . import __version__
 from . import run_comparability
 from .adapters import AdapterError, available_adapters, get_adapter
+from .tag_filter import InvalidTagPattern, TagFilter, TagPatternTooExpensive
 from .adapters.generic import valid_slug
 from .checks import EXIT_INVALID, EXIT_OK, Report, run_checks
+from .checks.results import _tensorboard_path_matches
 from .edit import EditError, glob_match, plan_add, plan_rehash, select_artifacts
 from .manifest import (LoadedManifest, ManifestLoadError, load_manifest, load_raw,
                        parse_manifest_source, resolve_manifest_path, save_manifest,
@@ -56,7 +59,6 @@ from .models import (
     MANIFEST_FILENAME,
     Manifest,
     Manifest05,
-    TensorboardLocator,
     backup_generation,
     json_schema,
 )
@@ -839,6 +841,19 @@ def cmd_review_gate(args: argparse.Namespace) -> int:
     return data["gate"]["exit_code"]
 
 
+def _accepts_tag_filter(adapter) -> bool:
+    """True when extract names an explicit tag_filter parameter."""
+    try:
+        signature = inspect.signature(adapter.extract)
+    except (TypeError, ValueError):
+        return False
+    parameter = signature.parameters.get("tag_filter")
+    return parameter is not None and parameter.kind in (
+        inspect.Parameter.KEYWORD_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    )
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     root: Path = args.path.resolve()
     if not root.is_dir():
@@ -922,11 +937,37 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         print(f"ERROR: {exc.args[0]}")
         return EXIT_INVALID
     name = args.name or root.name
+    patterns = list(getattr(args, "tags", None) or [])
+    tag_filter = None
+    if patterns:
+        if not getattr(adapter, "supports_tag_filters", False):
+            print(
+                f"ERROR: adapter {adapter.name!r} does not support --tags. Nothing was written."
+            )
+            return EXIT_INVALID
+        if not _accepts_tag_filter(adapter):
+            print(
+                f"ERROR: adapter {adapter.name!r} cannot apply --tags. Nothing was written."
+            )
+            return EXIT_INVALID
+        try:
+            tag_filter = TagFilter(patterns)
+        except InvalidTagPattern:
+            print("ERROR: invalid --tags pattern. Nothing was written.")
+            return EXIT_INVALID
     try:
         discovery = adapter.discover(root)
+        extra = {"tag_filter": tag_filter} if tag_filter is not None else {}
         manifest = adapter.extract(
-            root, discovery, project_id=args.id or valid_slug(name).lower(), project_name=name
+            root,
+            discovery,
+            project_id=args.id or valid_slug(name).lower(),
+            project_name=name,
+            **extra,
         )
+    except TagPatternTooExpensive:
+        print("ERROR: --tags pattern is too expensive. Nothing was written.")
+        return EXIT_INVALID
     except AdapterError as exc:
         print(f"ERROR: adapter {adapter.name!r} cannot read {root}: {exc}")
         return EXIT_INVALID
@@ -959,6 +1000,12 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         if backup is not None:
             print(f"{out} was not replaced. Its previous contents are also saved in {backup}.")
         return EXIT_INVALID
+    if tag_filter is not None:
+        for pattern in tag_filter.unmatched_patterns():
+            print(
+                "WARNING: --tags pattern "
+                f"{ascii(pattern)} matches no representable supported scalar tag"
+            )
     volatile = sum(a.volatile for a in manifest.artifacts)
     print(
         f"Wrote {out}\n"
@@ -1337,20 +1384,19 @@ def cmd_conditions(args: argparse.Namespace) -> int:
 
 
 def _event_artifact_is_volatile(manifest: Manifest, patterns: list[str]) -> bool:
-    """True when a --volatile glob targets a TensorBoard-locator artifact.
+    """True when a --volatile glob targets a regular-file event artifact.
 
-    Only a schema 0.5 manifest with tensorboard locators has event artifacts;
-    generic and 0.1-0.4 init are untouched by this check.
+    Only a schema 0.5 manifest has TensorBoard event artifacts; generic and
+    0.1-0.4 init are untouched. The check is by path, not by whether a result
+    points at the artifact, so an empty or fully filtered event file is still
+    protected.
     """
     if not isinstance(manifest, Manifest05):
         return False
-    targeted = {
-        result.artifact_id
-        for result in manifest.results
-        if isinstance(result.locator, TensorboardLocator)
-    }
     return any(
-        artifact.id in targeted and any(glob_match(artifact.path, pattern) for pattern in patterns)
+        getattr(artifact, "artifact_type", "file") == "file"
+        and _tensorboard_path_matches(artifact.path)
+        and any(glob_match(artifact.path, pattern) for pattern in patterns)
         for artifact in manifest.artifacts
     )
 
@@ -2457,6 +2503,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--name", help="project name (default: folder name)")
     p.add_argument("--id", help="project id (default: derived from name)")
     p.add_argument("--force", action="store_true", help=f"overwrite an existing {MANIFEST_FILENAME}")
+    p.add_argument(
+        "--tags",
+        action="append",
+        metavar="PATTERN",
+        help=(
+            "only record scalars whose tag matches this full-string glob (repeatable; "
+            "quote it so the shell does not expand the wildcards; * and ? wildcards, "
+            "backslash escapes, no [...] classes, unlike --volatile; "
+            "use --tags=PATTERN for a leading '-')"
+        ),
+    )
     p.add_argument(
         "--volatile",
         action="append",

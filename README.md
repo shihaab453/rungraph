@@ -292,7 +292,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence validate-batch --json MANIFEST...` | Validate several manifests in order and print a counts-only summary for each, plus an aggregate (`--strict`, `--redact-manifest-path`). See [Batch summaries](#batch-summaries). |
 | `runevidence inspect PATH` | Summarize the manifest, then run every check, also listing files the manifest does not track. |
 | `runevidence comparability BASELINE TARGET --baseline-result ID --target-result ID [--json]` | Experimental read-only comparison of five mandatory recorded conditions across two manifests (no artifact checks; exit `0` comparable, `1` different, `2` unavailable). `--preflight` is a text-only read-only readiness listing/pair check (no JSON; exit `0` list/ready, `1` not ready, `2` load/unknown/invalid). See [Comparability (verdict CLI experimental)](#comparability-verdict-cli-experimental). |
-| `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`, `--volatile GLOB`). With `--force`, the old manifest is kept as a backup, because a fresh scan does not carry over hand-written results and claims. See [Backups from `init --force`](#backups-from-init---force). |
+| `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`, `--tags PATTERN`, `--volatile GLOB`). With `--force`, the old manifest is kept as a backup, because a fresh scan does not carry over hand-written results and claims. See [Backups from `init --force`](#backups-from-init---force). |
 | `runevidence migrate PATH --to 0.2\|0.3\|0.4\|0.5 [--dry-run] [--json]` | Declare an existing valid manifest as the chosen schema without changing any recorded value. Exits `0` on success, no-op or dry run; `2` on refusal or failure. There is no inference and no downgrade. See [Migrating a manifest to 0.2](#migrating-a-manifest-to-02), [Schema 0.4 CSV cell locators](#schema-04-csv-cell-locators-slice-c) and [Schema 0.5 TensorBoard scalar locators](#schema-05-tensorboard-scalar-locators-slice-d). |
 | `runevidence conditions PATH --run RUN_ID [--patch FILE\|-] [--clear FIELD]... [--dry-run] [--json]` | Set or clear recorded run conditions on a 0.2 manifest from a local JSON patch; no condition values on the command line. Exits `0` on success, no-op or dry run; `2` on refusal or failure. See [Authoring run conditions](#authoring-run-conditions). |
 | `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read values only for supported, resolvable scalar JSON-located results in changed files (`--volatile`, `--no-volatile`, `--dry-run`). `--directory` re-records one exact directory artifact ID. |
@@ -694,8 +694,10 @@ before any write (`LOCATOR_MIGRATION_UNSUPPORTED`), and 0.5 → 0.4/0.3/0.2 is
 manifest before writing (`INIT_0_5_REFUSAL`); a pre-0.5 binary backs it up and
 replaces it with 0.1, so keep 0.5 manifests away from older builds. The
 optional `packages/runevidence-tensorboard` adapter turns event files into
-one run, one artifact and one result per supported scalar, with fixed `tb-`
-ids and step-qualified names; an event artifact cannot be `--volatile`. The
+one run per directory, one artifact per file and one result per selected
+scalar, with fixed `tb-` ids and conditional result names; `init --tags`
+filters tags with a bounded glob, and an event artifact cannot be
+`--volatile`. The
 `schema` command still prints 0.1; the 0.5 schema is
 `schema/runevidence-0.5.schema.json`. Schemas 0.1-0.4 are unchanged and 0.4
 remains byte-frozen. See

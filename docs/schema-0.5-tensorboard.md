@@ -251,33 +251,45 @@ The optional package `packages/runevidence-tensorboard` registers the
 `tensorboard` adapter. Core verification is unchanged if it is absent.
 
 - **Discovery:** every regular file except RunEvidence's own manifest and
-  backups becomes an artifact. The adapter does not create `runs/<name>/`
-  folder runs. Event files (basename contains `.tfevents`) additionally
-  produce runs, artifacts and scalar results.
-- **Identity:** one run per event file. Artifact id
-  `tb-art-<16 hex SHA-256(UTF-8 path)>`; run id `tb-run-<same hash>`; run name
-  is the recorded relative path, so `a/events…` and `b/events…` differ. Result
-  id `tb-res-<16 hex SHA-256(run_id + NUL + tag + NUL + str(step) + NUL +
-  str(occurrence))>`; tag-free and step/occurrence-qualified. Non-event
+  backups becomes an artifact. Event files (basename contains `.tfevents`,
+  case-insensitively) additionally produce runs, artifacts and scalar results.
+- **Runs:** one run per directory that directly contains event files; nested
+  directories are separate and the experiment root is `.`. Run id
+  `tb-run-<16 hex SHA-256(os.fsencode(dir_rel))>`; run name is the directory's
+  relative path.
+- **Identity:** event artifact id `tb-art-<16 hex SHA-256(os.fsencode(path))>`
+  and `run_id` set to its directory's run. Result id
+  `tb-res-<16 hex SHA-256(run_id + NUL + artifact_id + NUL + tag + NUL +
+  str(step) + NUL + str(occurrence))>`; occurrence is per file. Non-event
   artifacts keep the generic adapter's ids and have no `run_id`. All fixed
   `tb-` ids are reserved before generic allocation.
-- **Names:** a result name is `tag @ step`, with ` #occurrence` when
-  occurrence is greater than 0.
-- **Selection:** every supported scalar in record order, then
-  `Summary.Value` order. There is no `--tags` filter; plugin pseudo-scalars
-  are selected. A tag that is absent/empty, invalid UTF-8 or longer than
-  4,096 bytes refuses the whole extraction
-  (`a scalar tag cannot be represented in schema 0.5; nothing was written`).
-- **Budget:** at most 10,000 results and 16 MiB of tag UTF-8 bytes per
-  manifest; otherwise nothing is written.
+- **Names:** a single-file `(tag, step)` group is `tag @ step`, plus
+  ` #occurrence` when occurrence is greater than 0. A group spanning files is
+  `tag @ step [basename] #<16-hex digest of artifact_id + NUL + occurrence>`.
+  A duplicate `(run_id, name)` refuses with
+  `a generated result name collides within a run; nothing was written`.
+- **Selection:** every supported scalar in discovery order, then record order,
+  then `Summary.Value` order. `init --tags PATTERN` (repeatable) keeps only
+  tags matching a full-string glob (`*`, `?`, `\` escapes; no character
+  classes). A tag that is absent/empty, invalid UTF-8 or longer than 4,096
+  bytes refuses the whole extraction without a filter and is skipped with one.
+  Plugin pseudo-scalars remain unselected.
+- **Budget:** at most 10,000 selected results and 16 MiB of selected tag UTF-8
+  bytes per manifest; otherwise nothing is written. Pattern work shares a
+  50,000,000-unit budget and is cached per `(tag, pattern)`.
 - **One read:** the adapter hashes and parses the same protected snapshot; a
   path/identity change refuses the file. A malformed or truncated file refuses
   with `the event file does not satisfy the strict TensorBoard profile;
   nothing was written`; a file over 128 MiB refuses with `the event file
   exceeds the 128 MiB TensorBoard limit; nothing was written`.
-- **Volatile:** an event artifact cannot be volatile. `init --volatile` that
-  matches one stops with `an event artifact cannot be volatile; nothing was
-  written`, before any backup or save.
+- **Path refusals:** on POSIX an event path containing `\` refuses with
+  `an event path contains a backslash; nothing was written`; a path that is
+  not valid UTF-8 refuses with `a path is not valid UTF-8; nothing was
+  written`. Both happen before any read.
+- **Volatile:** a regular event artifact cannot be volatile. `init
+  --volatile` that matches one stops with `an event artifact cannot be
+  volatile; nothing was written`, before any backup or save; the check is by
+  path, so an empty or fully filtered event file is still protected.
 
 ## Migration and compatibility
 
@@ -303,6 +315,12 @@ The optional package `packages/runevidence-tensorboard` registers the
   load 0.5 through the one dispatcher. The `schema` CLI route is unchanged (it
   prints 0.1); the 0.5 schema is available as a file and through
   `json_schema_0_5()`.
+- Regenerating a TensorBoard manifest now groups event files by directory. Run
+  ids are derived from the directory (not the file), result ids include the
+  artifact id, and a `(tag, step)` group spanning files gets qualified names.
+  An existing manifest is recorded data, so it stays valid, but its ids and
+  names differ from a fresh scan. Move it aside before re-running `init`;
+  there is no id remapping tool.
 
 ## Not implemented
 
