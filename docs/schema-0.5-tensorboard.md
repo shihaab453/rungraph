@@ -315,6 +315,12 @@ The optional package `packages/runevidence-tensorboard` registers the
   load 0.5 through the one dispatcher. The `schema` CLI route is unchanged (it
   prints 0.1); the 0.5 schema is available as a file and through
   `json_schema_0_5()`.
+- Regenerating a TensorBoard manifest now groups event files by directory. Run
+  ids are derived from the directory (not the file), result ids include the
+  artifact id, and a `(tag, step)` group spanning files gets qualified names.
+  An existing manifest is recorded data, so it stays valid, but its ids and
+  names differ from a fresh scan. Move it aside before re-running `init`;
+  there is no id remapping tool.
 
 ## Not implemented
 
