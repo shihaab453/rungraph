@@ -1097,3 +1097,45 @@ def test_discovery_order_cannot_change_ids_names_or_output(tmp_path):
         root, discovery, project_id="p", project_name="P"
     ).model_dump()
     assert first == second
+
+
+def test_sibling_insertion_makes_a_bare_name_qualified_without_changing_ids(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "z.tfevents", _records(_scalar_event(b"loss", 1.5, step=1)))
+    before = _extract(root)
+    assert [result.name for result in before.results] == ["loss @ 1"]
+    old_id = before.results[0].id
+    old_artifact = before.results[0].artifact_id
+
+    _write(root / "logs" / "a.tfevents", _records(_scalar_event(b"loss", 0.5, step=1)))
+    after = _extract(root)
+    assert [run.name for run in after.runs] == ["logs"]
+    assert [result.name for result in after.results] == [
+        f"loss @ 1 [a.tfevents] #{_name_digest(after.results[0].artifact_id, 0)}",
+        f"loss @ 1 [z.tfevents] #{_name_digest(old_artifact, 0)}",
+    ]
+    z_result = next(result for result in after.results if result.artifact_id == old_artifact)
+    assert z_result.id == old_id
+    assert z_result.value == 1.5
+
+
+def test_cli_tags_repeatable_or_and_leading_dash(tmp_path, capsys):
+    root = _two_tag_folder(tmp_path)
+    assert (
+        main(
+            [
+                "init",
+                str(root),
+                "--adapter",
+                "tensorboard",
+                "--tags",
+                "loss",
+                "--tags=-acc",
+            ]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "WARNING: --tags pattern '-acc'" in out
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert [result["locator"]["tag"] for result in document["results"]] == ["loss"]
