@@ -1,4 +1,4 @@
-"""Read TensorBoard event files into a schema 0.5 or 0.6 manifest.
+"""Read TensorBoard event files into a schema 0.5, 0.6 or 0.7 manifest.
 
 This adapter is optional: core verification does not need it, and nothing here
 imports TensorBoard, TensorFlow, protobuf or google-crc32c. The dependency-free
@@ -39,6 +39,7 @@ manifest returned partially.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -61,13 +62,18 @@ from runevidence.models import (
     MAX_TENSORBOARD_TAG,
     SCHEMA_VERSION_0_5,
     SCHEMA_VERSION_0_6,
+    SCHEMA_VERSION_0_7,
     Artifact,
+    HistogramValue,
     Manifest05,
     Manifest06,
+    Manifest07,
     Project,
     Result05,
     Result06,
+    Result07,
     Run,
+    TensorboardHistogramLocator,
     TensorboardLocator,
     TensorboardStringLocator,
     is_own_file,
@@ -75,9 +81,11 @@ from runevidence.models import (
 from runevidence.tag_filter import TagFilter, TagPatternTooExpensive
 from runevidence.tensorboard_events import (
     EventFileError,
+    HistogramRecord,
     StringRecord,
     iter_supported_scalars,
     iter_supported_summaries,
+    iter_supported_summaries_07,
 )
 
 #: Per-manifest result budget and total tag-byte budget (RFC section 9).
@@ -85,6 +93,7 @@ MAX_RESULTS = 10_000
 MAX_TAG_BYTES = 16 * 1024 * 1024
 MAX_TEXT_BYTES = 16 * 1024 * 1024
 MAX_STRING_VALUE_BYTES = 65_536
+MAX_HISTOGRAM_BYTES = 16 * 1024 * 1024
 
 PROFILE_MESSAGE = (
     "the event file does not satisfy the strict TensorBoard profile; nothing was written"
@@ -94,6 +103,7 @@ OVER_CAP_MESSAGE = (
 )
 TAG_MESSAGE = "a scalar tag cannot be represented in schema 0.5; nothing was written"
 TAG_MESSAGE_06 = "a scalar tag cannot be represented in schema 0.6; nothing was written"
+TAG_MESSAGE_07 = "a scalar tag cannot be represented in schema 0.7; nothing was written"
 BUDGET_MESSAGE = (
     "the selected TensorBoard scalars exceed the 10,000-result or 16 MiB tag limit; "
     "nothing was written"
@@ -101,6 +111,14 @@ BUDGET_MESSAGE = (
 BUDGET_MESSAGE_06 = (
     "the selected TensorBoard summaries exceed the 10,000-result, 16 MiB tag or "
     "16 MiB string-value limit; nothing was written"
+)
+BUDGET_MESSAGE_07_HIST = (
+    "the selected TensorBoard summaries exceed the 10,000-result, 16 MiB tag or "
+    "16 MiB histogram-JSON limit; nothing was written"
+)
+BUDGET_MESSAGE_07 = (
+    "the selected TensorBoard summaries exceed the 10,000-result, 16 MiB tag, "
+    "16 MiB string-value or 16 MiB histogram-JSON limit; nothing was written"
 )
 COLLISION_MESSAGE = "a generated id collides with an existing id; nothing was written"
 NAME_MESSAGE = "a generated result name collides within a run; nothing was written"
@@ -120,8 +138,9 @@ class TensorboardAdapter(Adapter):
     name = "tensorboard"
     supports_tag_filters = True
     supports_include_strings = True
+    supports_include_histograms = True
     description = (
-        "TensorBoard log directories: one run per directory, selected scalars or strings."
+        "TensorBoard log directories: one run per directory, selected scalars or summaries."
     )
 
     def discover(self, root: Path) -> Discovery:
@@ -138,18 +157,30 @@ class TensorboardAdapter(Adapter):
         project_name: str,
         tag_filter: TagFilter | None = None,
         include_strings: bool = False,
-    ) -> Manifest05 | Manifest06:
+        include_histograms: bool = False,
+    ) -> Manifest05 | Manifest06 | Manifest07:
         root = Path(root)
         paths = sorted(discovery.files)
         event_paths = [path for path in paths if _tensorboard_path_matches(path)]
         _refuse_paths(paths, event_paths)
-        schema_version = (
-            SCHEMA_VERSION_0_6 if include_strings else SCHEMA_VERSION_0_5
-        )
-        result_type = Result06 if include_strings else Result05
-        manifest_type = Manifest06 if include_strings else Manifest05
+        if include_histograms:
+            schema_version = SCHEMA_VERSION_0_7
+            result_type = Result07
+            manifest_type = Manifest07
+        elif include_strings:
+            schema_version = SCHEMA_VERSION_0_6
+            result_type = Result06
+            manifest_type = Manifest06
+        else:
+            schema_version = SCHEMA_VERSION_0_5
+            result_type = Result05
+            manifest_type = Manifest05
 
-        state = _State(tag_filter, include_strings=include_strings)
+        state = _State(
+            tag_filter,
+            include_strings=include_strings,
+            include_histograms=include_histograms,
+        )
         events: dict[str, _EventFile] = {}
         for rel in event_paths:
             event = _read_event_file(root, rel, state)
@@ -207,7 +238,14 @@ class TensorboardAdapter(Adapter):
                     )
                 )
                 for observation in event.observations:
-                    if observation.kind == "text":
+                    if observation.kind == "histogram":
+                        locator = TensorboardHistogramLocator(
+                            kind="tensorboard-histogram",
+                            tag=observation.tag,
+                            step=observation.step,
+                            occurrence=observation.occurrence,
+                        )
+                    elif observation.kind == "text":
                         locator = TensorboardStringLocator(
                             kind="tensorboard-string",
                             tag=observation.tag,
@@ -275,9 +313,12 @@ class _Budget:
     results: int = 0
     tag_bytes: int = 0
     text_bytes: int = 0
+    hist_bytes: int = 0
     over: bool = False
 
-    def charge(self, tag_bytes: int, text_bytes: int = 0) -> bool:
+    def charge(
+        self, tag_bytes: int, text_bytes: int = 0, hist_bytes: int = 0
+    ) -> bool:
         if self.over:
             return False
         if self.results + 1 > MAX_RESULTS:
@@ -289,9 +330,13 @@ class _Budget:
         if text_bytes and self.text_bytes + text_bytes > MAX_TEXT_BYTES:
             self.over = True
             return False
+        if hist_bytes and self.hist_bytes + hist_bytes > MAX_HISTOGRAM_BYTES:
+            self.over = True
+            return False
         self.results += 1
         self.tag_bytes += tag_bytes
         self.text_bytes += text_bytes
+        self.hist_bytes += hist_bytes
         return True
 
 
@@ -325,6 +370,7 @@ class _State:
 
     tag_filter: TagFilter | None
     include_strings: bool = False
+    include_histograms: bool = False
     budget: _Budget = field(default_factory=_Budget)
     failures: dict[int, Exception] = field(default_factory=dict)
     selected: dict[str, bool] = field(default_factory=dict)
@@ -410,8 +456,8 @@ def _result_id(
         + b"\x00"
         + str(occurrence).encode("ascii")
     )
-    if kind == "text":
-        payload += b"\x00text"
+    if kind != "scalar":
+        payload += b"\x00" + kind.encode("utf-8")
     return f"tb-res-{hashlib.sha256(payload).hexdigest()[:16]}"
 
 
@@ -421,8 +467,8 @@ def _name_digest(artifact_id: str, occurrence: int, kind: str) -> str:
         + b"\x00"
         + str(occurrence).encode("ascii")
     )
-    if kind == "text":
-        payload += b"\x00text"
+    if kind != "scalar":
+        payload += b"\x00" + kind.encode("utf-8")
     return hashlib.sha256(payload).hexdigest()[:16]
 
 
@@ -451,18 +497,25 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
 
     observations: list[_Observation] = []
     occurrences: dict[tuple[str, str, int], int] = {}
-    iterator = (
-        iter_supported_summaries(snapshot.data)
-        if state.include_strings
-        else iter_supported_scalars(snapshot.data)
-    )
+    if state.include_histograms:
+        iterator = iter_supported_summaries_07(snapshot.data)
+    elif state.include_strings:
+        iterator = iter_supported_summaries(snapshot.data)
+    else:
+        iterator = iter_supported_scalars(snapshot.data)
     try:
         for record in iterator:
             is_text = isinstance(record, StringRecord)
-            kind = "text" if is_text else "scalar"
+            if is_text and not state.include_strings:
+                continue
+            is_hist = isinstance(record, HistogramRecord)
+            kind = "histogram" if is_hist else ("text" if is_text else "scalar")
             try:
                 tag = _decoded_tag(
-                    record.tag, state.include_strings, text=is_text
+                    record.tag,
+                    state.include_strings,
+                    state.include_histograms,
+                    text=is_text or is_hist,
                 )
             except AdapterError as exc:
                 if state.tag_filter is None:
@@ -476,15 +529,34 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
             if not state.select(tag):
                 continue
             text_bytes = len(record.value) if is_text else 0
+            hist_bytes = 0
+            if is_hist:
+                hist_bytes = len(
+                    json.dumps(
+                        record.value,
+                        ensure_ascii=True,
+                        allow_nan=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                )
             if state.budget.over or not state.budget.charge(
-                len(record.tag), text_bytes
+                len(record.tag), text_bytes, hist_bytes
             ):
-                message = BUDGET_MESSAGE_06 if state.include_strings else BUDGET_MESSAGE
+                if state.include_histograms:
+                    message = (
+                        BUDGET_MESSAGE_07
+                        if state.include_strings
+                        else BUDGET_MESSAGE_07_HIST
+                    )
+                else:
+                    message = BUDGET_MESSAGE_06 if state.include_strings else BUDGET_MESSAGE
                 state.record(_BUDGET, AdapterError(message))
                 continue
             value: Any = record.value
             if is_text:
                 value = record.value.decode("utf-8")
+            elif is_hist:
+                value = HistogramValue.model_validate(record.value)
             observations.append(
                 _Observation(
                     kind=kind,
@@ -531,7 +603,7 @@ def _assign_names(events: dict[str, _EventFile], state: _State) -> None:
     seen: set[tuple[str, str]] = set()
     for (run_id, kind, tag, step), members in groups.items():
         files = {event.path for event, _ in members}
-        marker = " (text)" if kind == "text" else ""
+        marker = f" ({kind})" if kind != "scalar" else ""
         for event, observation in members:
             if len(files) == 1:
                 name = f"{tag} @ {step}{marker}"
@@ -556,7 +628,13 @@ def _record_reservation(value: str, used: set[str], state: _State) -> None:
     used.add(value)
 
 
-def _decoded_tag(raw: bytes, schema_06: bool = False, *, text: bool = False) -> str | None:
+def _decoded_tag(
+    raw: bytes,
+    schema_06: bool = False,
+    schema_07: bool = False,
+    *,
+    text: bool = False,
+) -> str | None:
     """The tag as the target schema can represent it.
 
     Scalar tags keep the delivered refusal; a string entry with an
@@ -565,12 +643,16 @@ def _decoded_tag(raw: bytes, schema_06: bool = False, *, text: bool = False) -> 
     if not raw or len(raw) > MAX_TENSORBOARD_TAG:
         if text:
             return None
+        if schema_07:
+            raise AdapterError(TAG_MESSAGE_07)
         raise AdapterError(TAG_MESSAGE_06 if schema_06 else TAG_MESSAGE)
     try:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
         if text:
             return None
+        if schema_07:
+            raise AdapterError(TAG_MESSAGE_07) from None
         raise AdapterError(TAG_MESSAGE_06 if schema_06 else TAG_MESSAGE) from None
 
 

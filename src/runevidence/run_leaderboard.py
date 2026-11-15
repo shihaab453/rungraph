@@ -10,6 +10,7 @@ import json
 import math
 from typing import Any, Literal
 
+from .histogram_display import value_to_json
 from .models import Manifest
 
 
@@ -52,7 +53,7 @@ def rank_runs(
             raise LeaderboardError(
                 f"run {result.run_id!r} has multiple results named {metric!r}; refusing ambiguous leaderboard"
             )
-        values[result.run_id] = result.value
+        values[result.run_id] = value_to_json(result.value)
 
     eligible: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []

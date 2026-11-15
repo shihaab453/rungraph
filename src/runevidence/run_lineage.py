@@ -10,6 +10,7 @@ from collections import defaultdict, deque
 import json
 from typing import Any
 
+from .histogram_display import value_to_json
 from .models import Manifest, RelationshipType as T, locator_to_json
 from .run_claim import ClaimDetailsError, claim_details, _display_row, _json_safe
 
@@ -52,7 +53,7 @@ def _node(identifier: str, index: dict[str, tuple[str, Any]]) -> dict[str, Any]:
         row["details"] = {"path": obj.path, "kind": obj.kind, "run_id": obj.run_id,
                           "sha256": obj.sha256, "volatile": obj.volatile}
     elif kind == "result":
-        row["details"] = {"name": obj.name, "value": obj.value,
+        row["details"] = {"name": obj.name, "value": value_to_json(obj.value),
                           "run_id": obj.run_id, "artifact_id": obj.artifact_id,
                           "locator": locator_to_json(obj.locator)}
     return row

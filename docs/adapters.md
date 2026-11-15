@@ -343,6 +343,10 @@ How it reads the folder:
   `DT_STRING` summaries as `tensorboard-string` results in a schema 0.6
   manifest. Without the flag the adapter writes schema 0.5 and ignores them.
   The per-value cap is 64 KiB and selected string bytes share a 16 MiB budget.
+- **Histograms (0.7):** `init --include-histograms` records legacy
+  `HistogramProto` summaries as structured `HistogramValue` results in schema
+  0.7, with 1,024 buckets and a 16 MiB histogram-JSON budget. TF2 `[k,3]`
+  tensor histograms are not recorded.
 
 The adapter emits `Manifest05`, so `runevidence validate` verifies the scalar
 locators. See

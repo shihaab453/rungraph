@@ -17,6 +17,7 @@ free-form ``metadata`` / ``params`` dictionaries.
 from __future__ import annotations
 
 import copy
+import math
 import re
 from datetime import datetime
 from enum import Enum
@@ -51,6 +52,9 @@ SCHEMA_VERSION_0_5 = "0.5"
 # 0.6 adds TensorBoard string-tensor locators. It is only reached through the
 # manifest dispatcher; the base Manifest stays at 0.1-0.3.
 SCHEMA_VERSION_0_6 = "0.6"
+# 0.7 adds TensorBoard histogram locators. Only the manifest dispatcher reaches
+# Manifest07; the base Manifest stays at 0.1-0.3.
+SCHEMA_VERSION_0_7 = "0.7"
 SCHEMA_VERSIONS = (SCHEMA_VERSION, SCHEMA_VERSION_0_2, SCHEMA_VERSION_0_3)
 MAX_JSONL_LINE = 2**63 - 1
 MAX_CSV_CELL_HEADER = 65536
@@ -904,6 +908,122 @@ class TensorboardStringLocator(_Strict):
         return value
 
 
+class HistogramValue(_Strict):
+    """Structured schema-0.7 TensorBoard histogram value.
+
+    All eight keys are required. Numbers are finite binary64; JSON integers are
+    accepted only when exactly representable. Limits are strictly increasing,
+    arrays match, and there are at most 1,024 pairs.
+    """
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    kind: Literal["histogram"] = Field(
+        description="Value kind; 0.7 admits histogram."
+    )
+    min: float
+    max: float
+    num: float
+    sum: float
+    sum_squares: float
+    bucket_limit: list[float]
+    bucket: list[float]
+
+    @field_validator("min", "max", "sum", "sum_squares", mode="before")
+    @classmethod
+    def _finite_float(cls, value: Any) -> float:
+        return _exact_binary64(value)
+
+    @field_validator("num", mode="before")
+    @classmethod
+    def _finite_nonnegative_num(cls, value: Any) -> float:
+        return _exact_binary64(value, nonnegative=True)
+
+    @field_validator("bucket_limit", "bucket", mode="before")
+    @classmethod
+    def _float_array(cls, value: Any) -> list[float]:
+        if type(value) is not list:
+            raise ValueError("a histogram array must be a list")
+        return [_exact_binary64(item) for item in value]
+
+    @field_validator("bucket", mode="after")
+    @classmethod
+    def _counts_nonnegative(cls, value: list[float]) -> list[float]:
+        if any(item < 0 for item in value):
+            raise ValueError("histogram counts must be nonnegative")
+        return value
+
+    @model_validator(mode="after")
+    def _shape(self) -> "HistogramValue":
+        if len(self.bucket_limit) != len(self.bucket):
+            raise ValueError("histogram bucket arrays must have equal lengths")
+        if len(self.bucket_limit) > 1024:
+            raise ValueError("histogram has more than 1024 buckets")
+        if any(a >= b for a, b in zip(self.bucket_limit, self.bucket_limit[1:])):
+            raise ValueError("histogram bucket limits must be strictly increasing")
+        return self
+
+
+def _exact_binary64(value: Any, *, nonnegative: bool = False) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("histogram numbers must be JSON numbers, not booleans or strings")
+    if type(value) is int:
+        try:
+            converted = float(value)
+        except OverflowError:
+            raise ValueError("histogram integer is outside binary64") from None
+        if converted != value:
+            raise ValueError("histogram integer is not exactly representable as binary64")
+        value = converted
+    if not math.isfinite(value):
+        raise ValueError("histogram numbers must be finite")
+    if nonnegative and value < 0:
+        raise ValueError("histogram num must be nonnegative")
+    return 0.0 if value == 0.0 else value
+
+
+class TensorboardHistogramLocator(_Strict):
+    """Structured 0.7 locator for one supported TensorBoard histogram."""
+
+    kind: Literal["tensorboard-histogram"] = Field(
+        description="Locator kind; 0.7 admits tensorboard-histogram."
+    )
+    tag: StrictStr = Field(
+        min_length=1,
+        max_length=MAX_TENSORBOARD_TAG,
+        description=(
+            "Exact event tag, at most 4,096 code points and at most 4,096 "
+            "UTF-8 bytes. A lone surrogate is rejected."
+        ),
+    )
+    step: StrictInt = Field(
+        ge=-(2**63),
+        le=2**63 - 1,
+        description="Signed 64-bit event step; an absent Event.step means 0.",
+    )
+    occurrence: StrictInt = Field(
+        ge=0,
+        le=MAX_TENSORBOARD_OCCURRENCE,
+        description=(
+            "Required zero-based occurrence among conforming histograms with "
+            "this exact (tag, step) in this artifact."
+        ),
+    )
+
+    @field_validator("tag", mode="after")
+    @classmethod
+    def _tag_is_utf8_encodable_and_bounded(cls, value: str) -> str:
+        try:
+            encoded = value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise PydanticCustomError(
+                "string_unicode", "tag contains a lone surrogate"
+            ) from None
+        if len(encoded) > MAX_TENSORBOARD_TAG:
+            raise ValueError("tag must be at most 4096 UTF-8 bytes")
+        return value
+
+
 _LOCATOR_ADAPTER_05 = TypeAdapter(
     Annotated[
         Union[JsonlLocator, CsvCellLocator, TensorboardLocator],
@@ -957,6 +1077,20 @@ def _dispatch_locator_05(value: Any) -> Any:
         # and the discriminator tag in ``loc`` for the error-aware walker.
         return _LOCATOR_ADAPTER_05.validate_python(value)
     raise ValueError("locator must be a string, an object, or null")
+
+
+_LOCATOR_ADAPTER_07 = TypeAdapter(
+    Annotated[
+        Union[
+            JsonlLocator,
+            CsvCellLocator,
+            TensorboardLocator,
+            TensorboardStringLocator,
+            TensorboardHistogramLocator,
+        ],
+        Field(discriminator="kind"),
+    ]
+)
 
 
 def _dispatch_locator_06(value: Any) -> Any:
@@ -1067,6 +1201,36 @@ class Result05(Result):
         raise ValueError("locator must be a string, an object, or null")
 
 
+def _dispatch_locator_07(value: Any) -> Any:
+    """Normalize a 0.7 locator before the field union validates it."""
+    if value is None:
+        return None
+    if type(value) is str:
+        if not is_valid_locator_pointer(value):
+            raise ValueError("locator must be empty or use the JSON Pointer grammar")
+        return value
+    if isinstance(
+        value,
+        (
+            JsonlLocator,
+            CsvCellLocator,
+            TensorboardLocator,
+            TensorboardStringLocator,
+            TensorboardHistogramLocator,
+        ),
+    ):
+        return value
+    if type(value) is dict:
+        return _LOCATOR_ADAPTER_07.validate_python(value)
+    raise ValueError("locator must be a string, an object, or null")
+
+
+def _dispatch_value_07(value: Any) -> Any:
+    if type(value) is dict and value.get("kind") == "histogram":
+        return HistogramValue.model_validate(value)
+    return value
+
+
 class Result06(Result):
     """0.6 result: 0.5 locators plus the ``tensorboard-string`` object."""
 
@@ -1099,6 +1263,55 @@ class Result06(Result):
         ):
             return value
         raise ValueError("locator must be a string, an object, or null")
+
+
+class Result07(Result):
+    """0.7 result: 0.6 locators plus ``tensorboard-histogram`` and a histogram value."""
+
+    value: Annotated[
+        Union[Scalar, HistogramValue], BeforeValidator(_dispatch_value_07)
+    ] = None
+    locator: Annotated[
+        Optional[
+            Union[
+                StrictStr,
+                JsonlLocator,
+                CsvCellLocator,
+                TensorboardLocator,
+                TensorboardStringLocator,
+                TensorboardHistogramLocator,
+            ]
+        ],
+        BeforeValidator(_dispatch_locator_07),
+    ] = None
+
+    @field_validator("locator", mode="before")
+    @classmethod
+    def _locator_scalar_shape(cls, value: Any) -> Any:
+        if value is None or type(value) is str or type(value) is dict:
+            return value
+        if isinstance(
+            value,
+            (
+                JsonlLocator,
+                CsvCellLocator,
+                TensorboardLocator,
+                TensorboardStringLocator,
+                TensorboardHistogramLocator,
+            ),
+        ):
+            return value
+        raise ValueError("locator must be a string, an object, or null")
+
+    @model_validator(mode="after")
+    def _histogram_value_locator(self) -> "Result07":
+        if isinstance(self.value, HistogramValue):
+            locator = self.locator
+            if locator is not None and getattr(locator, "kind", None) != "tensorboard-histogram":
+                raise ValueError(
+                    "a histogram value requires a tensorboard-histogram or null locator"
+                )
+        return self
 
 
 class EvidenceReference(_Strict):
@@ -1150,6 +1363,7 @@ class Manifest(_Strict):
             SCHEMA_VERSION_0_4,
             SCHEMA_VERSION_0_5,
             SCHEMA_VERSION_0_6,
+            SCHEMA_VERSION_0_7,
         ):
             # Default fields keep their normal 0.1 spelling. The per-model
             # presence overrides already removed only unset 0.2+ members.
@@ -1250,6 +1464,33 @@ class Manifest(_Strict):
                         "a csv-cell object, a tensorboard object, or a "
                         "tensorboard-string object"
                     )
+        elif self.schema_version == SCHEMA_VERSION_0_7:
+            for result in self.results:
+                locator = result.locator
+                if locator is None:
+                    continue
+                if result.artifact_id is None:
+                    raise ValueError("a schema 0.7 locator requires artifact_id")
+                if type(locator) is str:
+                    if not is_valid_locator_pointer(locator):
+                        raise ValueError(
+                            "a schema 0.7 string locator must be empty or a JSON Pointer"
+                        )
+                elif not isinstance(
+                    locator,
+                    (
+                        JsonlLocator,
+                        CsvCellLocator,
+                        TensorboardLocator,
+                        TensorboardStringLocator,
+                        TensorboardHistogramLocator,
+                    ),
+                ):
+                    raise ValueError(
+                        "a schema 0.7 locator must be a string, a jsonl object, "
+                        "a csv-cell object, a tensorboard object, a "
+                        "tensorboard-string object, or a tensorboard-histogram object"
+                    )
         else:
             for result in self.results:
                 if isinstance(result.locator, JsonlLocator):
@@ -1278,9 +1519,18 @@ class Manifest06(Manifest):
     results: list[Result06] = Field(default_factory=list)
 
 
+class Manifest07(Manifest):
+    """Schema 0.7 manifest: 0.6 locators plus tensorboard-histogram."""
+
+    schema_version: Literal["0.7"]
+    results: list[Result07] = Field(default_factory=list)
+
+
 def is_manifest(value: object) -> bool:
     """True for every manifest model the dispatcher can return."""
-    return isinstance(value, (Manifest, Manifest04, Manifest05, Manifest06))
+    return isinstance(
+        value, (Manifest, Manifest04, Manifest05, Manifest06, Manifest07)
+    )
 
 
 def _strip_0_2_keys(data: dict[str, Any]) -> None:
@@ -1804,4 +2054,164 @@ def json_schema_0_6() -> dict[str, Any]:
     _pin_schema_version(schema, SCHEMA_VERSION_0_6, required=True)
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     schema["$id"] = f"urn:runevidence:manifest:{SCHEMA_VERSION_0_6}"
+    return schema
+
+
+def _generated_schema_0_7() -> dict[str, Any]:
+    schema = Manifest07.model_json_schema()
+    _canonicalize_schema(schema)
+    _add_artifact_type_rules(schema["$defs"]["Artifact"])
+    return schema
+
+
+def _rewrite_06_descriptions(value: Any) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key == "description" and isinstance(child, str):
+                value[key] = child.replace("0.6", "0.7")
+            else:
+                _rewrite_06_descriptions(child)
+    elif isinstance(value, list):
+        for child in value:
+            _rewrite_06_descriptions(child)
+
+
+def json_schema_0_7() -> dict[str, Any]:
+    """JSON Schema for the 0.7 manifest (adds ``tensorboard-histogram``)."""
+    schema = _generated_schema_0_7()
+    _publish_common_0_2(schema)
+    _rewrite_descriptions(schema)
+    _rewrite_06_descriptions(schema)
+    for definition in schema["$defs"].values():
+        if isinstance(definition, dict):
+            for key in ("description",):
+                if isinstance(definition.get(key), str):
+                    definition[key] = (
+                        definition[key]
+                        .replace("0.6", "0.7")
+                        .replace("0.5", "0.7")
+                        .replace("0.4", "0.7")
+                        .replace("0.3", "0.7")
+                    )
+    defs = schema["$defs"]
+    jsonl = defs["JsonlLocator"]
+    jsonl["description"] = (
+        "Structured 0.7 jsonl locator for one physical JSONL line and a JSON "
+        "Pointer. 0.7 admits jsonl/csv-cell/tensorboard/tensorboard-string/"
+        "tensorboard-histogram; ``line`` is one-based and uses ``StrictInt``."
+    )
+    jsonl["properties"]["kind"]["description"] = (
+        "Locator kind; 0.7 admits jsonl/csv-cell/tensorboard/tensorboard-string/"
+        "tensorboard-histogram."
+    )
+    jsonl["properties"]["pointer"]["pattern"] = _LOCATOR_POINTER_JSON_PATTERN
+    csv_cell = defs["CsvCellLocator"]
+    csv_cell["description"] = (
+        "Structured 0.7 csv-cell locator for one CSV data cell. ``row`` is "
+        "one-based over data records and ``column`` one-based over the header."
+    )
+    csv_cell["properties"]["kind"]["description"] = "Locator kind; 0.7 admits csv-cell."
+    text = defs["TensorboardStringLocator"]
+    text["description"] = (
+        "Structured 0.7 tensorboard-string locator for one supported string "
+        "tensor. ``tag`` is exact; ``occurrence`` is per artifact."
+    )
+    hist = defs["TensorboardHistogramLocator"]
+    hist["description"] = (
+        "Structured 0.7 tensorboard-histogram locator for one supported "
+        "histogram. ``occurrence`` is per artifact among conforming histograms."
+    )
+    value = defs["HistogramValue"]
+    value["required"] = [
+        "kind",
+        "min",
+        "max",
+        "num",
+        "sum",
+        "sum_squares",
+        "bucket_limit",
+        "bucket",
+    ]
+    value["additionalProperties"] = False
+    value["properties"]["kind"] = {"const": "histogram", "type": "string"}
+    for name in ("min", "max", "num", "sum", "sum_squares"):
+        value["properties"][name]["type"] = "number"
+    value["properties"]["num"]["minimum"] = 0
+    value["properties"]["bucket_limit"]["type"] = "array"
+    value["properties"]["bucket_limit"]["maxItems"] = 1024
+    value["properties"]["bucket_limit"]["items"] = {"type": "number"}
+    value["properties"]["bucket"]["type"] = "array"
+    value["properties"]["bucket"]["maxItems"] = 1024
+    value["properties"]["bucket"]["items"] = {"type": "number", "minimum": 0}
+
+    defs["Result07"]["properties"]["locator"] = {
+        "oneOf": [
+            {
+                "type": "string",
+                "pattern": _LOCATOR_POINTER_JSON_PATTERN,
+                "description": "Empty or a JSON Pointer into a .json artifact.",
+            },
+            {"$ref": "#/$defs/JsonlLocator"},
+            {"$ref": "#/$defs/CsvCellLocator"},
+            {"$ref": "#/$defs/TensorboardLocator"},
+            {"$ref": "#/$defs/TensorboardStringLocator"},
+            {"$ref": "#/$defs/TensorboardHistogramLocator"},
+            {"type": "null"},
+        ],
+        "default": None,
+        "title": "Locator",
+        "description": (
+            "RFC 6901 pointer, a structured jsonl/csv-cell/tensorboard/"
+            "tensorboard-string/tensorboard-histogram object, or null. In 0.7 "
+            "any non-null locator requires artifact_id."
+        ),
+    }
+    defs["Result07"]["properties"]["value"] = {
+        "anyOf": [
+            {"type": "boolean"},
+            {"type": "integer"},
+            {"type": "number"},
+            {"type": "string"},
+            {"type": "null"},
+            {"$ref": "#/$defs/HistogramValue"},
+        ],
+        "default": None,
+        "title": "Value",
+        "description": "A scalar or a structured histogram value.",
+    }
+    defs["Result07"]["allOf"] = [
+        {
+            "if": {
+                "required": ["locator"],
+                "properties": {"locator": {"not": {"type": "null"}}},
+            },
+            "then": {
+                "required": ["artifact_id"],
+                "properties": {"artifact_id": {"type": "string"}},
+            },
+        },
+        {
+            "if": {
+                "required": ["value"],
+                "properties": {"value": {"type": "object"}},
+            },
+            "then": {
+                "properties": {
+                    "locator": {
+                        "anyOf": [
+                            {"type": "null"},
+                            {
+                                "type": "object",
+                                "required": ["kind"],
+                                "properties": {"kind": {"const": "tensorboard-histogram"}},
+                            },
+                        ]
+                    }
+                }
+            },
+        },
+    ]
+    _pin_schema_version(schema, SCHEMA_VERSION_0_7, required=True)
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["$id"] = f"urn:runevidence:manifest:{SCHEMA_VERSION_0_7}"
     return schema

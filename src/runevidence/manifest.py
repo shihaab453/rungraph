@@ -20,6 +20,7 @@ from .models import (
     SCHEMA_VERSION_0_4,
     SCHEMA_VERSION_0_6,
     SCHEMA_VERSION_0_5,
+    SCHEMA_VERSION_0_7,
     Artifact,
     CsvCellLocator,
     JsonlLocator,
@@ -27,6 +28,9 @@ from .models import (
     Manifest04,
     Manifest05,
     Manifest06,
+    Manifest07,
+    HistogramValue,
+    TensorboardHistogramLocator,
     TensorboardLocator,
     TensorboardStringLocator,
 )
@@ -79,6 +83,7 @@ _LOCATOR_TAGS: dict[str, type[BaseModel]] = {
     "csv-cell": CsvCellLocator,
     "tensorboard": TensorboardLocator,
     "tensorboard-string": TensorboardStringLocator,
+    "tensorboard-histogram": TensorboardHistogramLocator,
 }
 
 
@@ -138,7 +143,7 @@ def _issue_location(
                 if match is None:
                     return None
                 if (index == len(loc) - 1
-                        and all(a in (bool, int, float, str) for a in options)):
+                        and all(a in (bool, int, float, str, HistogramValue) for a in options)):
                     return "".join("/" + component for component in parts)
                 annotation = match
                 continue
@@ -292,6 +297,8 @@ def validate_manifest(raw: object) -> Manifest:
             return Manifest05.model_validate(raw)
         if version == SCHEMA_VERSION_0_6:
             return Manifest06.model_validate(raw)
+        if version == SCHEMA_VERSION_0_7:
+            return Manifest07.model_validate(raw)
     return Manifest.model_validate(raw)
 
 
@@ -305,6 +312,8 @@ def _root_model_for(raw: object) -> type[BaseModel]:
             return Manifest05
         if version == SCHEMA_VERSION_0_6:
             return Manifest06
+        if version == SCHEMA_VERSION_0_7:
+            return Manifest07
     return Manifest
 
 
@@ -411,7 +420,7 @@ def artifact_to_dict(artifact: Artifact, schema_version: str = "0.1") -> dict:
     ``digest_format`` are omitted). ``dataset_id`` is 0.2+ and is emitted only
     when it was supplied; an omitted label stays omitted.
     """
-    if schema_version not in ("0.1", "0.2", "0.3", "0.4", "0.5", "0.6"):
+    if schema_version not in ("0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7"):
         raise ValueError(f"unsupported schema version {schema_version!r}")
     data = artifact.model_dump(mode="json", exclude_defaults=False)
     # Written only when set, so manifests from before the field existed

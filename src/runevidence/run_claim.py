@@ -10,6 +10,7 @@ import math
 from typing import Any
 
 from .locator_profiles import display_locator
+from .histogram_display import histogram_display, value_to_json
 from .models import Manifest, RelationshipType, locator_to_json
 
 
@@ -34,7 +35,16 @@ def _display_details(details: dict[str, Any]) -> dict[str, Any]:
         if isinstance(locator, dict)
         else getattr(locator, "kind", None)
     )
-    if kind in ("csv-cell", "tensorboard", "tensorboard-string"):
+    value = details.get("value")
+    hist = histogram_display(value)
+    if hist is not None:
+        details = {**details, "value": hist}
+    if kind in (
+        "csv-cell",
+        "tensorboard",
+        "tensorboard-string",
+        "tensorboard-histogram",
+    ):
         return {**details, "locator": display_locator(locator)}
     return details
 
@@ -80,7 +90,7 @@ def _target(identifier: str, index: dict[str, tuple[str, Any]]) -> dict[str, Any
         details = {"path": obj.path, "kind": obj.kind, "run_id": obj.run_id,
                    "volatile": obj.volatile, "sha256": obj.sha256}
     else:
-        details = {"name": obj.name, "value": obj.value, "run_id": obj.run_id,
+        details = {"name": obj.name, "value": value_to_json(obj.value), "run_id": obj.run_id,
                    "artifact_id": obj.artifact_id, "locator": locator_to_json(obj.locator)}
     return {"id": identifier, "status": "recorded", "kind": kind, "details": details}
 
