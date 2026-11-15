@@ -506,11 +506,16 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
     try:
         for record in iterator:
             is_text = isinstance(record, StringRecord)
+            if is_text and not state.include_strings:
+                continue
             is_hist = isinstance(record, HistogramRecord)
             kind = "histogram" if is_hist else ("text" if is_text else "scalar")
             try:
                 tag = _decoded_tag(
-                    record.tag, state.include_histograms, state.include_strings, text=is_text or is_hist
+                    record.tag,
+                    state.include_strings,
+                    state.include_histograms,
+                    text=is_text or is_hist,
                 )
             except AdapterError as exc:
                 if state.tag_filter is None:

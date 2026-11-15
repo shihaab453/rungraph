@@ -1145,7 +1145,10 @@ def _decode_histogram(data, ranges):
     values = [0.0, 0.0, 0.0, 0.0, 0.0]
     limits: list[float] = []
     counts: list[float] = []
-    for start, end in ranges:
+    for item in ranges:
+        if item is None:
+            return None
+        start, end = item
         values, limits, counts, ok = _decode_histogram_part(
             data, start, end, values, limits, counts
         )
@@ -1198,7 +1201,10 @@ def _decode_histogram_part(data, start, end, values, limits, counts):
                     target.append(_F64.unpack_from(data, position)[0])
                 position += 8
             elif wire == 2:
-                packed_start, packed_end = _read_length(data, position, end)
+                try:
+                    packed_start, packed_end = _read_length(data, position, end)
+                except EventFileError:
+                    return values, limits, counts, False
                 length = packed_end - packed_start
                 if length % 8:
                     return values, limits, counts, False
@@ -1253,7 +1259,10 @@ def _parse_value_07(data, start, end, step):
             histo_start, histo_end = _read_length(data, position, end)
             kind = 5
             tensor_restart = histo_end
-            histo_ranges.append((histo_start, histo_end))
+            if len(histo_ranges) < _HISTOGRAM_RETAIN:
+                histo_ranges.append((histo_start, histo_end))
+            else:
+                histo_ranges.append(None)
             position = histo_end
         elif field_number == 7:
             if wire_type != 2:
@@ -1310,46 +1319,59 @@ def _iter_winning_summaries_07(data, start, end, step):
 
 
 def _iter_event_values_07(data, start, end):
-    summary_total = 0
-    last_other_end = start
-    what = 0
     step = 0
+    what = 0
+    last_other_end = start
+    summary_bytes = 0
     position = start
     while position < end:
         field_number, wire_type, position = _read_key(data, position, end)
-        if field_number == 2:
+        if field_number == 1:  # wall_time
+            if wire_type != 1 or end - position < 8:
+                _refuse()
+            position += 8
+        elif field_number == 2:  # step
             if wire_type != 0:
                 _refuse()
-            step, position = _read_varint(data, position, end)
-        elif field_number == 5:
+            raw, position = _read_varint(data, position, end)
+            step = _signed_int64(raw)
+        elif 3 <= field_number <= 9:
+            if wire_type != 2:
+                _refuse()
+            payload_start, payload_end = _read_length(data, position, end)
+            if field_number == 5:
+                what = 5
+                summary_bytes += payload_end - payload_start
+            else:
+                what = field_number
+                last_other_end = payload_end
+                summary_bytes = 0
+            position = payload_end
+        else:
+            position = _skip_field(data, position, end, wire_type)
+    if what != 5:
+        return
+    if summary_bytes > MAX_SUMMARY_BYTES:
+        _refuse()
+    yield from _iter_winning_summaries_07(
+        data, last_other_end, end, step
+    )
+
+
+def _iter_winning_summaries_07(data, start, end, step):
+    position = start
+    while position < end:
+        field_number, wire_type, position = _read_key(data, position, end)
+        if field_number == 5:
             if wire_type != 2:
                 _refuse()
             summary_start, summary_end = _read_length(data, position, end)
-            summary_total += summary_end - summary_start
-            what = 5
+            yield from _iter_summary_values_07(
+                data, summary_start, summary_end, step
+            )
             position = summary_end
         else:
-            if wire_type == 2:
-                _, payload_end = _read_length(data, position, end)
-                position = payload_end
-            elif wire_type == 0:
-                _, position = _read_varint(data, position, end)
-            elif wire_type == 1:
-                if end - position < 8:
-                    _refuse()
-                position += 8
-            elif wire_type == 5:
-                if end - position < 4:
-                    _refuse()
-                position += 4
-            else:
-                _refuse()
-            last_other_end = position
-    if what != 5:
-        return
-    if summary_total > MAX_SUMMARY_BYTES:
-        _refuse()
-    yield from _iter_winning_summaries_07(data, last_other_end, end, step)
+            position = _skip_field(data, position, end, wire_type)
 
 
 @dataclass(frozen=True, slots=True)

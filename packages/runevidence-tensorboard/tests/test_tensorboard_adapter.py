@@ -1829,6 +1829,193 @@ def test_migrate_06_to_07_is_identity(tmp_path, capsys):
     assert before == after
 
 
+def test_histogram_event_grammar_step_and_wall_time(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    hist = _histo_value(b"w", _histo_tensor([0.5], [2.0]))
+    event = (
+        _key(1, 1)
+        + struct.pack("<d", 1.0)  # wall_time
+        + _varint_field(2, -1 if False else (1 << 64) - 1)  # step = -1
+        + _bytes_field(5, _summary(hist))
+    )
+    _write(root / "e.tfevents", _records(event))
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["results"][0]["locator"]["step"] == -1
+    assert document["results"][0]["name"] == "w @ -1 (histogram)"
+
+
+def test_histograms_only_skips_string_entries(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(
+        root / "e.tfevents",
+        _records(_string_event(b"cfg", b"x"), _histo_event(b"w")),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert [r["locator"]["kind"] for r in document["results"]] == [
+        "tensorboard-histogram"
+    ]
+
+
+def test_truncated_packed_histogram_length_is_entry_local(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    broken = _key(6, 2) + b"\x7f"  # length 127 with no bytes
+    _write(
+        root / "e.tfevents",
+        _records(
+            _scalar_event(b"loss", 0.5, step=1),
+            _event(summary_bytes=_summary(_histo_value(b"bad", broken))),
+        ),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert [r["name"] for r in document["results"]] == ["loss @ 1"]
+
+
+def test_many_empty_histogram_occurrences_stay_bounded(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    payload = b"".join(_key(5, 2) + b"\x00" for _ in range(1100))
+    _write(
+        root / "e.tfevents",
+        _records(_event(summary_bytes=_summary(_bytes_field(1, b"w") + payload))),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["results"] == []
+
+
+def test_scalar_tag_messages_follow_the_flag(tmp_path, capsys):
+    for flags, expected in (
+        (["--include-strings"], "schema 0.6"),
+        (["--include-histograms"], "schema 0.7"),
+    ):
+        root = tmp_path / ("exp" + expected.replace(" ", ""))
+        _write(root / "e.tfevents", _records(_scalar_event(b"", 0.5)))
+        assert (
+            main(["init", str(root), "--adapter", "tensorboard", *flags]) == 2
+        )
+        assert expected in capsys.readouterr().out
+
+
+def test_compare_parameters_keep_histogram_shaped_dicts(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    parameter = {"kind": "histogram", "bucket": [1, 2], "num": 3}
+    document = {
+        "schema_version": "0.7",
+        "project": {"id": "p", "name": "P"},
+        "runs": [
+            {"id": "ra", "name": "ra", "params": {"p": parameter}},
+            {"id": "rb", "name": "rb", "params": {"p": parameter}},
+        ],
+        "artifacts": [],
+        "results": [],
+        "evidence": [],
+    }
+    root.mkdir(parents=True)
+    (root / MANIFEST_FILENAME).write_text(json.dumps(document), encoding="utf-8")
+    assert main(["compare", "--base", "ra", "--target", "rb", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "histogram(2 buckets" not in out
+    assert '"kind": "histogram"' in out
+
+
+def test_histogram_bucket_boundaries_and_empty(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(
+        root / "a.tfevents",
+        _records(
+            _histo_event(b"k1024", list(range(1024)), [1.0] * 1024),
+            _histo_event(b"k1025", list(range(1025)), [1.0] * 1025),
+            _histo_event(
+                b"empty",
+                (),
+                (),
+                minimum=1.7976931348623157e308,
+                maximum=-1.7976931348623157e308,
+                num=0.0,
+            ),
+        ),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert {r["locator"]["tag"] for r in document["results"]} == {"k1024", "empty"}
+
+
+def test_histogram_packed_and_unpacked_are_equivalent(tmp_path):
+    from runevidence.tensorboard_events import iter_supported_histograms
+
+    limits = [0.5, 1.0]
+    counts = [2.0, 3.0]
+    packed = (
+        _double_field(1, 0.0)
+        + _double_field(2, 1.0)
+        + _double_field(3, 5.0)
+        + _double_field(4, 0.0)
+        + _double_field(5, 0.0)
+        + _bytes_field(6, struct.pack("<2d", *limits))
+        + _bytes_field(7, struct.pack("<2d", *counts))
+    )
+    unpacked = _histo_tensor(limits, counts)
+    packed_event = _event(summary_bytes=_summary(_histo_value(b"w", packed)))
+    unpacked_event = _event(summary_bytes=_summary(_histo_value(b"w", unpacked)))
+    packed_value = list(iter_supported_histograms(_records(packed_event)))[0].value
+    unpacked_value = list(iter_supported_histograms(_records(unpacked_event)))[0].value
+    assert packed_value == unpacked_value
+
+
+def test_histogram_selection_ladder_direct():
+    from runevidence.tensorboard_events import ScalarOutcome, scan_tensorboard_07
+
+    good = _records(_histo_event(b"w"))
+    scalar, _strings, hist = scan_tensorboard_07(
+        good, [(b"w", 0, 0)], [], [(b"w", 0, 0)]
+    )
+    assert hist[(b"w", 0, 0)].outcome is ScalarOutcome.value
+    assert scalar[(b"w", 0, 0)].outcome is ScalarOutcome.unsupported_value
+
+    beyond, _s, hist = scan_tensorboard_07(
+        good, [], [], [(b"w", 0, 1)]
+    )
+    assert hist[(b"w", 0, 1)].outcome is ScalarOutcome.mismatch
+
+    broken = _records(
+        _event(
+            summary_bytes=_summary(
+                _histo_value(b"bad", _key(6, 2) + b"\x7f")
+            )
+        )
+    )
+    _s, _t, hist = scan_tensorboard_07(broken, [], [], [(b"bad", 0, 0)])
+    assert hist[(b"bad", 0, 0)].outcome is ScalarOutcome.unsupported_scalar
+
+    empty_member = _records(
+        _event(summary_bytes=_summary(_bytes_field(1, b"empty")))
+    )
+    _s, _t, hist = scan_tensorboard_07(empty_member, [], [], [(b"empty", 0, 0)])
+    assert hist[(b"empty", 0, 0)].outcome is ScalarOutcome.unsupported_value
+
+
 def test_strings_are_ignored_without_the_flag(tmp_path, capsys):
     root = _string_folder(tmp_path)
     assert main(["init", str(root), "--adapter", "tensorboard"]) == 0
