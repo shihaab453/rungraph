@@ -3,6 +3,12 @@
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A design gate and an owner schema-admission decision (D2) are required before any code.
 
+> **Current amendment.** `docs/tensorboard-multifile-tags-rfc.md` amends §2, §9 and §13 of
+> this document and supersedes §16 for two features only: one run per log directory (instead of
+> one per event file) and `init --tags`. §14's "one-file-one-run and no tag filtering" risk and
+> §15 D7's "all scalars in v1" are stale after that amendment. Everything else here stands as
+> accepted.
+
 ## 0. Changes in v0.11 (post-acceptance editorial)
 
 - **§6 cap unit**: names the winning `summary` occurrence payload bytes after the last other
