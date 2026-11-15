@@ -45,11 +45,13 @@ TARGET_VERSION = "0.2"
 TARGET_VERSION_0_3 = "0.3"
 TARGET_VERSION_0_4 = "0.4"
 TARGET_VERSION_0_5 = "0.5"
+TARGET_VERSION_0_6 = "0.6"
 TARGET_VERSIONS = (
     TARGET_VERSION,
     TARGET_VERSION_0_3,
     TARGET_VERSION_0_4,
     TARGET_VERSION_0_5,
+    TARGET_VERSION_0_6,
 )
 
 # The CLI adds INVALID_ARGUMENTS and UNSUPPORTED_TARGET before calling this
@@ -237,7 +239,11 @@ def _migrate_manifest(
     elif target_version == TARGET_VERSION_0_3:
         # --to 0.3 is additive from 0.1 or 0.2; a 0.3 source is a no-op above.
         # A loaded 0.4 or 0.5 source is a downgrade, never an internal failure.
-        if source_version in (TARGET_VERSION_0_4, TARGET_VERSION_0_5):
+        if source_version in (
+            TARGET_VERSION_0_4,
+            TARGET_VERSION_0_5,
+            TARGET_VERSION_0_6,
+        ):
             raise MigrationError("DOWNGRADE_UNSUPPORTED")
         if source_version not in (SOURCE_VERSION, TARGET_VERSION):
             raise MigrationError("INTERNAL_ERROR")
@@ -249,9 +255,20 @@ def _migrate_manifest(
         # downgrade, never an internal failure.
         if source_version in (SOURCE_VERSION, TARGET_VERSION):
             _check_locator_migration(loaded.manifest)
-        elif source_version == TARGET_VERSION_0_5:
+        elif source_version in (TARGET_VERSION_0_5, TARGET_VERSION_0_6):
             raise MigrationError("DOWNGRADE_UNSUPPORTED")
         elif source_version != TARGET_VERSION_0_3:
+            raise MigrationError("INTERNAL_ERROR")
+    elif target_version == TARGET_VERSION_0_6:
+        # --to 0.6 is additive from every earlier version. 0.1/0.2 keep the
+        # manifest-only locator precheck; 0.3/0.4/0.5 are version-only bumps.
+        if source_version in (SOURCE_VERSION, TARGET_VERSION):
+            _check_locator_migration(loaded.manifest)
+        elif source_version not in (
+            TARGET_VERSION_0_3,
+            TARGET_VERSION_0_4,
+            TARGET_VERSION_0_5,
+        ):
             raise MigrationError("INTERNAL_ERROR")
     else:
         # --to 0.5 is additive from every earlier version. 0.1/0.2 keep the
@@ -259,6 +276,8 @@ def _migrate_manifest(
         # version-only bumps because 0.5 admits every locator they admit.
         if source_version in (SOURCE_VERSION, TARGET_VERSION):
             _check_locator_migration(loaded.manifest)
+        elif source_version == TARGET_VERSION_0_6:
+            raise MigrationError("DOWNGRADE_UNSUPPORTED")
         elif source_version not in (TARGET_VERSION_0_3, TARGET_VERSION_0_4):
             raise MigrationError("INTERNAL_ERROR")
 

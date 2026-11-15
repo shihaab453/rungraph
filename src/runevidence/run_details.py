@@ -190,6 +190,22 @@ def format_run_details(data: dict[str, Any]) -> str:
     def shown(value: Any) -> str:
         return json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True)
 
+    def shown_result_value(row: dict[str, Any]) -> str:
+        value = row["value"]
+        locator = row.get("locator")
+        kind = (
+            locator.get("kind")
+            if isinstance(locator, dict)
+            else getattr(locator, "kind", None)
+        )
+        if (
+            kind == "tensorboard-string"
+            and isinstance(value, str)
+            and len(value) > 120
+        ):
+            return json.dumps(value[:120], ensure_ascii=True, allow_nan=False) + "..."
+        return shown(value)
+
     def shown_locator(value: Any) -> str:
         if value is None:
             return "None"
@@ -211,7 +227,7 @@ def format_run_details(data: dict[str, Any]) -> str:
         ("Parameters", [{"key": key, "value": value} for key, value in sorted(run["params"].items())],
          lambda x: f"  {shown(x['key'])}: {shown(x['value'])}"),
         ("Results", data["results"],
-         lambda x: f"  {shown(x['id'])} {shown(x['name'])}: {shown(x['value'])} (artifact: {shown(x['artifact_id'])}, locator: {shown_locator(x['locator'])})"
+         lambda x: f"  {shown(x['id'])} {shown(x['name'])}: {shown_result_value(x)} (artifact: {shown(x['artifact_id'])}, locator: {shown_locator(x['locator'])})"
          + source_suffix(x)),
         ("Produced artifacts", data["produced_artifacts"],
          lambda x: f"  {shown(x['id'])}: {shown(x['path'])} (volatile: {x['volatile']})"),

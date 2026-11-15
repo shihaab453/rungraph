@@ -119,6 +119,14 @@ def compare_runs(manifest: Manifest, baseline_id: str, target_id: str, *, manife
         },
         "note": "Recorded manifest values only. Artifact contents and result locators were not revalidated.",
     }
+    text_names = sorted(
+        result.name
+        for result in manifest.results
+        if getattr(getattr(result, "locator", None), "kind", None)
+        == "tensorboard-string"
+    )
+    if text_names:
+        data["text_names"] = text_names
     try:
         json.dumps(data, allow_nan=False)
     except (ValueError, TypeError, OverflowError) as exc:
@@ -128,6 +136,12 @@ def compare_runs(manifest: Manifest, baseline_id: str, target_id: str, *, manife
 
 def _visible(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True)
+
+
+def _display_value(value: Any, *, text: bool) -> str:
+    if text and isinstance(value, str) and len(value) > 120:
+        return json.dumps(value[:120], ensure_ascii=True, allow_nan=False) + "..."
+    return _visible(value)
 
 
 def format_comparison(data: dict[str, Any]) -> str:
@@ -141,18 +155,23 @@ def format_comparison(data: dict[str, Any]) -> str:
         f"Target: {data['target']['id']} ({_visible(data['target']['name'])})",
         "Recorded values only, not validated against artifact files.",
     ]
+    text_names = set(data.get("text_names", ()))
     for field, heading in (("parameters", "Parameters"), ("results", "Results")):
         items = data[field]
         lines.append(f"\n{heading} ({len(items)}):")
         for row in items:
             name = _visible(row["name"])
             status = row["status"]
+            is_text = row["name"] in text_names
             if status == "baseline_only":
-                msg = f"baseline only {_visible(row['baseline'])}"
+                msg = f"baseline only {_display_value(row['baseline'], text=is_text)}"
             elif status == "target_only":
-                msg = f"target only {_visible(row['target'])}"
+                msg = f"target only {_display_value(row['target'], text=is_text)}"
             else:
-                msg = f"{_visible(row['baseline'])} -> {_visible(row['target'])} [{status}]"
+                msg = (
+                    f"{_display_value(row['baseline'], text=is_text)} -> "
+                    f"{_display_value(row['target'], text=is_text)} [{status}]"
+                )
                 if "delta" in row:
                     delta = row["delta"]
                     readable_delta = f"{delta:+.12g}" if isinstance(delta, float) else f"{delta:+d}"

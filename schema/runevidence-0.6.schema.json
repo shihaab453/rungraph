@@ -1,0 +1,826 @@
+{
+  "$defs": {
+    "Artifact": {
+      "additionalProperties": false,
+      "else": {
+        "properties": {
+          "digest_format": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "artifact_type": {
+            "const": "directory"
+          }
+        },
+        "required": [
+          "artifact_type"
+        ]
+      },
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path relative to the manifest's folder, using forward slashes.",
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "artifact_type": {
+          "default": "file",
+          "description": "What the path names on disk. Omitted means file. 'directory' records a folder checked with --directory-artifacts and authored with add --directory or rehash --directory.",
+          "enum": [
+            "file",
+            "directory"
+          ],
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "digest_format": {
+          "anyOf": [
+            {
+              "const": "runevidence-directory-v1",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How sha256 was computed for a directory. Required for directories, absent for files.",
+          "title": "Digest Format"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "size_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Bytes"
+        },
+        "volatile": {
+          "default": false,
+          "description": "Content is expected to change on every rerun (e.g. a log with timestamps). Only the file's existence is checked; sha256 and size_bytes are ignored.",
+          "title": "Volatile",
+          "type": "boolean"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Free-form label, e.g. dataset, config, checkpoint, metrics, log.",
+          "title": "Kind"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Run that produced this file.",
+          "title": "Run Id"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "dataset_id": {
+          "minLength": 1,
+          "type": "string",
+          "title": "Dataset Id",
+          "description": "Semantic dataset label (schema 0.2). Not an artifact ID; multiple artifacts may share it.",
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "then": {
+        "properties": {
+          "digest_format": {
+            "const": "runevidence-directory-v1"
+          }
+        },
+        "required": [
+          "digest_format"
+        ]
+      },
+      "title": "Artifact",
+      "type": "object"
+    },
+    "CsvCellLocator": {
+      "additionalProperties": false,
+      "description": "Structured 0.4 locator for one CSV data cell.\n\n``row`` is one-based over data records (the header is never selectable) and\n``column`` is one-based over the parsed header. Both use ``StrictInt`` at\nruntime (the JSON Schema draft integer accepts ``1.0``; the model rejects\nit and booleans). ``header`` is the recorded header assertion at that\ncolumn; it never appears in a finding or human display.",
+      "properties": {
+        "kind": {
+          "const": "csv-cell",
+          "description": "Locator kind; 0.4 admits csv-cell.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "row": {
+          "description": "One-based data record. StrictInt runtime: 1.0 is schema-valid under draft 2020-12 but model-rejected; true/string are rejected.",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Row",
+          "type": "integer"
+        },
+        "column": {
+          "description": "One-based column in the parsed header. StrictInt runtime: 1.0 is schema-valid under draft 2020-12 but model-rejected; true/string are rejected.",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Column",
+          "type": "integer"
+        },
+        "header": {
+          "description": "Recorded header assertion at this column, in code points. A lone surrogate is rejected.",
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Header",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "row",
+        "column",
+        "header"
+      ],
+      "title": "CsvCellLocator",
+      "type": "object"
+    },
+    "EvaluationProtocol": {
+      "additionalProperties": false,
+      "description": "A recorded evaluation protocol, resolved as a whole value.",
+      "properties": {
+        "protocol_id": {
+          "minLength": 1,
+          "title": "Protocol Id",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          ],
+          "title": "Version"
+        }
+      },
+      "required": [
+        "protocol_id"
+      ],
+      "title": "EvaluationProtocol",
+      "type": "object"
+    },
+    "EvidenceReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "claim": {
+          "description": "The statement being made, in plain words.",
+          "minLength": 1,
+          "title": "Claim",
+          "type": "string"
+        },
+        "supports": {
+          "description": "IDs of results, artifacts or runs backing the claim.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Supports",
+          "type": "array"
+        },
+        "contradicts": {
+          "description": "IDs of results, artifacts or runs that cut against it.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Contradicts",
+          "type": "array"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where the claim is made, e.g. 'README.md#results'.",
+          "title": "Source"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "claim"
+      ],
+      "title": "EvidenceReference",
+      "type": "object"
+    },
+    "JsonlLocator": {
+      "additionalProperties": false,
+      "description": "Structured 0.3 locator for one physical JSONL line and a JSON Pointer.\n\nOnly the ``jsonl`` kind is admitted by 0.3. ``line`` is one-based and uses\n``StrictInt`` at runtime (the JSON Schema draft integer accepts ``1.0``;\nthe model rejects it and booleans). ``pointer`` is empty or a slash-prefixed\npointer using only ``~0``/``~1`` escapes.",
+      "properties": {
+        "kind": {
+          "const": "jsonl",
+          "description": "Locator kind; 0.3 admits only jsonl.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "line": {
+          "description": "One-based physical JSONL line. StrictInt runtime: 1.0 is schema-valid under draft 2020-12 but model-rejected; true/string are rejected.",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Line",
+          "type": "integer"
+        },
+        "pointer": {
+          "description": "JSON Pointer inside the selected line; empty or /-prefixed, ~0/~1 only.",
+          "title": "Pointer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "line",
+        "pointer"
+      ],
+      "title": "JsonlLocator",
+      "type": "object"
+    },
+    "MetricDefinition": {
+      "additionalProperties": false,
+      "description": "A recorded metric definition, resolved as a whole value.",
+      "properties": {
+        "definition_id": {
+          "minLength": 1,
+          "title": "Definition Id",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "higher_is_better": {
+          "type": "boolean",
+          "title": "Higher Is Better"
+        },
+        "averaging": {
+          "minLength": 1,
+          "type": "string",
+          "title": "Averaging",
+          "pattern": "\\S"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          ],
+          "title": "Version"
+        }
+      },
+      "required": [
+        "definition_id"
+      ],
+      "title": "MetricDefinition",
+      "type": "object"
+    },
+    "Project": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "Project",
+      "type": "object"
+    },
+    "Relationship": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/RelationshipType"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "type"
+      ],
+      "title": "Relationship",
+      "type": "object"
+    },
+    "RelationshipType": {
+      "enum": [
+        "produced_by",
+        "input_to",
+        "result_of",
+        "reported_in",
+        "derived_from",
+        "supports",
+        "contradicts"
+      ],
+      "title": "RelationshipType",
+      "type": "string"
+    },
+    "Result06": {
+      "additionalProperties": false,
+      "description": "0.6 result: 0.6 locators plus the ``tensorboard-string`` object.",
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "run_id": {
+          "description": "Run this result belongs to.",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "name": {
+          "description": "What was measured, e.g. 'accuracy' or 'val_loss'.",
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "artifact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Artifact the value was read from (e.g. a metrics file).",
+          "title": "Artifact Id"
+        },
+        "locator": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(?![\\s\\S]*[\\r\\n\\u2028\\u2029])(?:/(?:[^~]|~[01])*)?$",
+              "description": "Empty or a JSON Pointer string with only ~0/~1 escapes into a .json artifact."
+            },
+            {
+              "$ref": "#/$defs/JsonlLocator"
+            },
+            {
+              "$ref": "#/$defs/CsvCellLocator"
+            },
+            {
+              "$ref": "#/$defs/TensorboardLocator"
+            },
+            {
+              "$ref": "#/$defs/TensorboardStringLocator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Locator",
+          "description": "RFC 6901 JSON Pointer string, a structured jsonl, csv-cell, tensorboard or tensorboard-string locator object, or null. In 0.6 any non-null locator requires artifact_id."
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "metric_definition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "run_id",
+        "name"
+      ],
+      "title": "Result06",
+      "type": "object",
+      "if": {
+        "required": [
+          "locator"
+        ],
+        "properties": {
+          "locator": {
+            "not": {
+              "type": "null"
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "artifact_id"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Run": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "params": {
+          "additionalProperties": true,
+          "description": "Hyperparameters or settings, free-form.",
+          "title": "Params",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "conditions": {
+          "$ref": "#/$defs/RunConditions"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Run",
+      "type": "object"
+    },
+    "RunConditions": {
+      "additionalProperties": false,
+      "description": "First-class recorded run conditions (schema 0.2).\n\nOmitted members fall back to legacy metadata. Explicit null means recorded\nUNKNOWN for the split/protocol/source_revision/environment dimensions;\nselector nulls and a null parent are invalid.",
+      "properties": {
+        "evaluation_split": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string",
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evaluation Split"
+        },
+        "evaluation_protocol": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvaluationProtocol"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evaluation_dataset_artifact_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "type": "string",
+          "title": "Evaluation Dataset Artifact Id"
+        },
+        "model_checkpoint_artifact_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "type": "string",
+          "title": "Model Checkpoint Artifact Id"
+        },
+        "source_revision": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string",
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Revision"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Environment"
+        }
+      },
+      "title": "RunConditions",
+      "type": "object"
+    },
+    "TensorboardLocator": {
+      "additionalProperties": false,
+      "description": "Structured 0.6 locator for one supported TensorBoard scalar.\n\n``tag`` is the exact event tag (no normalization or glob), at most 4,096\ncode points and at most 4,096 UTF-8 bytes; a lone surrogate is rejected.\n``step`` is a signed 64-bit integer; an absent ``Event.step`` means 0.\n``occurrence`` is the required zero-based position among supported scalar\nentries with that exact ``(tag, step)`` in file order.",
+      "properties": {
+        "kind": {
+          "const": "tensorboard",
+          "description": "Locator kind; 0.6 admits tensorboard.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tag": {
+          "description": "Exact event tag, at most 4,096 code points and at most 4,096 UTF-8 bytes. A lone surrogate is rejected.",
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Tag",
+          "type": "string"
+        },
+        "step": {
+          "description": "Signed 64-bit event step; an absent Event.step means 0. StrictInt runtime: 1.0 is schema-valid under draft 2020-12 but model-rejected; true/string are rejected.",
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Step",
+          "type": "integer"
+        },
+        "occurrence": {
+          "description": "Required zero-based occurrence among supported scalars with this exact (tag, step). StrictInt runtime: 1.0 is schema-valid under draft 2020-12 but model-rejected; true/string are rejected.",
+          "maximum": 2147483647,
+          "minimum": 0,
+          "title": "Occurrence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "tag",
+        "step",
+        "occurrence"
+      ],
+      "title": "TensorboardLocator",
+      "type": "object"
+    },
+    "TensorboardStringLocator": {
+      "additionalProperties": false,
+      "description": "Structured 0.6 tensorboard-string locator for one supported string tensor. ``tag`` is the exact event tag; ``step`` is a signed 64-bit integer; ``occurrence`` is the zero-based position among conforming string entries with that exact (tag, step) in this artifact.",
+      "properties": {
+        "kind": {
+          "const": "tensorboard-string",
+          "description": "Locator kind; 0.6 admits tensorboard-string.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tag": {
+          "description": "Exact event tag, at most 4,096 code points and at most 4,096 UTF-8 bytes. A lone surrogate is rejected.",
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Tag",
+          "type": "string"
+        },
+        "step": {
+          "description": "Signed 64-bit event step; an absent Event.step means 0.",
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Step",
+          "type": "integer"
+        },
+        "occurrence": {
+          "description": "Required zero-based occurrence among conforming string entries with this exact (tag, step) in this artifact.",
+          "maximum": 2147483647,
+          "minimum": 0,
+          "title": "Occurrence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "tag",
+        "step",
+        "occurrence"
+      ],
+      "title": "TensorboardStringLocator",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Schema 0.6 manifest: 0.6 locators plus tensorboard-string.",
+  "properties": {
+    "schema_version": {
+      "const": "0.6",
+      "default": "0.6",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "project": {
+      "$ref": "#/$defs/Project"
+    },
+    "runs": {
+      "items": {
+        "$ref": "#/$defs/Run"
+      },
+      "title": "Runs",
+      "type": "array"
+    },
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/Artifact"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "results": {
+      "items": {
+        "$ref": "#/$defs/Result06"
+      },
+      "title": "Results",
+      "type": "array"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/EvidenceReference"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "relationships": {
+      "items": {
+        "$ref": "#/$defs/Relationship"
+      },
+      "title": "Relationships",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "project"
+  ],
+  "title": "Manifest06",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:runevidence:manifest:0.6"
+}

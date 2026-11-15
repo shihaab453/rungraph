@@ -320,6 +320,11 @@ class _TensorState:
         "float_value",
         "double_count",
         "double_value",
+        "string_count",
+        "string_start",
+        "string_end",
+        "string_wrong_wire",
+        "other_typed",
     )
 
     def __init__(self) -> None:
@@ -333,6 +338,11 @@ class _TensorState:
         self.float_value = 0.0
         self.double_count = 0
         self.double_value = 0.0
+        self.string_count = 0
+        self.string_start = -1
+        self.string_end = -1
+        self.string_wrong_wire = False
+        self.other_typed = 0
 
 
 def _parse_dimension(data: bytes | bytearray, start: int, end: int) -> int:
@@ -442,6 +452,42 @@ def _parse_tensor(
                     state.double_value = _F64.unpack_from(data, position)[0]
                 state.double_count += 1
                 position += 8
+            else:
+                _refuse()
+        elif field_number == 8:  # string_val, repeated bytes
+            if wire_type == 2:
+                value_start, value_end = _read_length(data, position, end)
+                if state.string_count == 0:
+                    state.string_start = value_start
+                    state.string_end = value_end
+                state.string_count += 1
+                position = value_end
+            elif wire_type in (0, 1, 5):
+                state.string_wrong_wire = True
+                position = _skip_field(data, position, end, wire_type)
+            else:
+                _refuse()
+        elif field_number in (
+            7,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+        ):  # typed values that are not part of the string profile
+            if wire_type == 2:
+                value_start, value_end = _read_length(data, position, end)
+                if value_end > value_start:
+                    state.other_typed += 1
+                position = value_end
+            elif wire_type in (0, 1, 5):
+                state.other_typed += 1
+                position = _skip_field(data, position, end, wire_type)
             else:
                 _refuse()
         else:
@@ -828,3 +874,212 @@ def scan_scalars(
         else:
             results[key] = ScalarSelection(ScalarOutcome.mismatch)
     return results
+
+
+# --- string tensors (schema 0.6) --------------------------------------------
+
+MAX_STRING_VALUE_BYTES = 65_536
+
+_STRING_SUPPORTED = 0
+_STRING_FAILING = 1
+_STRING_OTHER = 2
+
+
+@dataclass(frozen=True, slots=True)
+class StringRecord:
+    """One conforming TensorBoard string tensor.
+
+    ``tag`` is the exact event tag bytes, ``step`` the signed Event step, and
+    ``value`` the raw UTF-8 bytes (validated, at most 64 KiB).
+    """
+
+    tag: bytes
+    step: int
+    value: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class StringSelection:
+    """The outcome of one string request, with bytes only for ``value``."""
+
+    outcome: ScalarOutcome
+    value: bytes | None = None
+
+
+def _classify_string(
+    data: bytes | bytearray, kind: int, tensor: _TensorState | None
+) -> tuple[int, bytes | None]:
+    if kind != 8 or tensor is None:
+        return _STRING_OTHER, None
+    if tensor.unknown_rank:
+        return _STRING_OTHER, None
+    if tensor.dim_count > 1 or (
+        tensor.dim_count == 1 and tensor.first_dim_size != 1
+    ):
+        return _STRING_OTHER, None
+    if tensor.dtype != 7:
+        return _STRING_OTHER, None
+    if (
+        _content_length(tensor)
+        or tensor.float_count
+        or tensor.double_count
+        or tensor.other_typed
+        or tensor.string_count != 1
+        or tensor.string_wrong_wire
+    ):
+        return _STRING_FAILING, None
+    raw = data[tensor.string_start : tensor.string_end]
+    if type(raw) is not bytes:
+        raw = bytes(raw)
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return _STRING_FAILING, None
+    if len(raw) > MAX_STRING_VALUE_BYTES:
+        return _STRING_FAILING, None
+    return _STRING_SUPPORTED, raw
+
+
+def iter_supported_strings(data: bytes | bytearray) -> Iterator[StringRecord]:
+    """Yield every conforming string tensor in file order."""
+    for tag_start, tag_end, step, kind, _simple, tensor in _iter_winning_values(data):
+        category, value = _classify_string(data, kind, tensor)
+        if category == _STRING_SUPPORTED:
+            yield StringRecord(
+                tag=_tag_bytes(data, tag_start, tag_end), step=step, value=value
+            )
+
+
+def iter_supported_summaries(
+    data: bytes | bytearray,
+) -> Iterator[ScalarRecord | StringRecord]:
+    """Yield supported scalars and strings in one pass, in record order."""
+    for tag_start, tag_end, step, kind, simple_value, tensor in _iter_winning_values(
+        data
+    ):
+        category, value, float32 = _classify(data, kind, simple_value, tensor)
+        if category == _SUPPORTED:
+            yield ScalarRecord(
+                tag=_tag_bytes(data, tag_start, tag_end),
+                step=step,
+                value=value,
+                float32=float32,
+            )
+        string_category, raw = _classify_string(data, kind, tensor)
+        if string_category == _STRING_SUPPORTED:
+            yield StringRecord(
+                tag=_tag_bytes(data, tag_start, tag_end), step=step, value=raw
+            )
+
+
+def scan_tensorboard_06(
+    data: bytes | bytearray,
+    scalar_requests: Iterable[tuple[bytes, int, int]],
+    string_requests: Iterable[tuple[bytes, int, int]],
+) -> tuple[
+    dict[tuple[bytes, int, int], ScalarSelection],
+    dict[tuple[bytes, int, int], StringSelection],
+]:
+    """Select scalar and string requests in one traversal."""
+    scalar_states, scalar_by_tag, scalar_lengths = _normalise_requests(
+        scalar_requests
+    )
+    string_states, string_by_tag, string_lengths = _normalise_requests(
+        string_requests
+    )
+    if not scalar_states and not string_states:
+        return {}, {}
+
+    for tag_start, tag_end, step, kind, simple_value, tensor in _iter_winning_values(
+        data
+    ):
+        tag_length = 0 if tag_start < 0 else tag_end - tag_start
+        tag = b"" if tag_start < 0 else data[tag_start:tag_end]
+        if type(tag) is not bytes:
+            tag = bytes(tag)
+
+        scalar_state = None
+        if tag_length in scalar_lengths:
+            by_step = scalar_by_tag.get(tag)
+            if by_step is not None:
+                scalar_state = by_step.get(step)
+        if scalar_state is not None:
+            category, value, float32 = _classify(
+                data, kind, simple_value, tensor
+            )
+            if category == _SUPPORTED:
+                occurrence = scalar_state.supported
+                scalar_state.supported += 1
+                if occurrence in scalar_state.wanted:
+                    scalar_state.values[occurrence] = (value, float32)
+            elif category == _UNSUPPORTED_SCALAR:
+                scalar_state.unsupported = True
+            else:
+                scalar_state.non_scalar = True
+
+        string_state = None
+        if tag_length in string_lengths:
+            by_step = string_by_tag.get(tag)
+            if by_step is not None:
+                string_state = by_step.get(step)
+        if string_state is not None:
+            category, value = _classify_string(data, kind, tensor)
+            if category == _STRING_SUPPORTED:
+                occurrence = string_state.supported
+                string_state.supported += 1
+                if occurrence in string_state.wanted:
+                    string_state.values[occurrence] = value
+            elif category == _STRING_FAILING:
+                string_state.unsupported = True
+            else:
+                string_state.non_scalar = True
+
+    scalar_results: dict[tuple[bytes, int, int], ScalarSelection] = {}
+    for key, state in scalar_states.items():
+        occurrence = key[2]
+        if occurrence >= 0 and state.supported > occurrence:
+            value, float32 = state.values[occurrence]
+            scalar_results[key] = ScalarSelection(
+                ScalarOutcome.value, value, float32
+            )
+        elif state.supported:
+            scalar_results[key] = ScalarSelection(ScalarOutcome.mismatch)
+        elif state.unsupported:
+            scalar_results[key] = ScalarSelection(
+                ScalarOutcome.unsupported_scalar
+            )
+        elif state.non_scalar:
+            scalar_results[key] = ScalarSelection(
+                ScalarOutcome.unsupported_value
+            )
+        else:
+            scalar_results[key] = ScalarSelection(ScalarOutcome.mismatch)
+
+    string_results: dict[tuple[bytes, int, int], StringSelection] = {}
+    for key, state in string_states.items():
+        occurrence = key[2]
+        if occurrence >= 0 and state.supported > occurrence:
+            string_results[key] = StringSelection(
+                ScalarOutcome.value, state.values[occurrence]
+            )
+        elif state.supported:
+            string_results[key] = StringSelection(ScalarOutcome.mismatch)
+        elif state.unsupported:
+            string_results[key] = StringSelection(
+                ScalarOutcome.unsupported_scalar
+            )
+        elif state.non_scalar:
+            string_results[key] = StringSelection(
+                ScalarOutcome.unsupported_value
+            )
+        else:
+            string_results[key] = StringSelection(ScalarOutcome.mismatch)
+    return scalar_results, string_results
+
+
+def scan_strings(
+    data: bytes | bytearray,
+    requests: Iterable[tuple[bytes, int, int]],
+) -> dict[tuple[bytes, int, int], StringSelection]:
+    """Select requested string tensors in one pass."""
+    return scan_tensorboard_06(data, (), requests)[1]

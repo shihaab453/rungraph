@@ -104,6 +104,14 @@ def metric_matrix(
         },
         "note": "Recorded manifest values only. Artifact bytes and result locators were not verified.",
     }
+    text_metrics = sorted(
+        result.name
+        for result in manifest.results
+        if getattr(getattr(result, "locator", None), "kind", None)
+        == "tensorboard-string"
+    )
+    if text_metrics:
+        data["text_metrics"] = text_metrics
     try:
         json.dumps(data, ensure_ascii=True, allow_nan=False)
     except (ValueError, TypeError, OverflowError) as exc:
@@ -113,6 +121,12 @@ def metric_matrix(
 
 def _shown(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True)
+
+
+def _display_value(value: Any, *, text: bool) -> str:
+    if text and isinstance(value, str) and len(value) > 120:
+        return json.dumps(value[:120], ensure_ascii=True, allow_nan=False) + "..."
+    return _shown(value)
 
 
 def format_metric_matrix(data: dict[str, Any]) -> str:
@@ -126,10 +140,16 @@ def format_metric_matrix(data: dict[str, Any]) -> str:
         lines.append("No runs selected.")
     elif not data["metrics"]:
         lines.append("No recorded metrics for the selected runs.")
+    text_metrics = set(data.get("text_metrics", ()))
     for row in data["runs"]:
         lines.append(f"  {row['run_id']} ({_shown(row['run_name'])}):")
         for cell in row["values"]:
-            value = _shown(cell["value"]) if cell["status"] == "recorded" else f"({cell['status']})"
+            if cell["status"] == "recorded":
+                value = _display_value(
+                    cell["value"], text=cell["metric"] in text_metrics
+                )
+            else:
+                value = f"({cell['status']})"
             lines.append(f"    {_shown(cell['metric'])}: {value}")
     lines.append(
         f"Missing cells: {summary['missing_cells']}. Nonfinite cells: {summary['nonfinite_cells']}."

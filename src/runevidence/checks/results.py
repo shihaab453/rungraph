@@ -31,12 +31,19 @@ from ..models import (
     SCHEMA_VERSION_0_3,
     SCHEMA_VERSION_0_4,
     SCHEMA_VERSION_0_5,
+    SCHEMA_VERSION_0_6,
     CsvCellLocator,
     JsonlLocator,
     Manifest,
     TensorboardLocator,
+    TensorboardStringLocator,
 )
-from ..tensorboard_events import EventFileError, ScalarOutcome, scan_scalars
+from ..tensorboard_events import (
+    EventFileError,
+    ScalarOutcome,
+    scan_scalars,
+    scan_tensorboard_06,
+)
 from .csv import (
     CsvNotNumeric,
     CsvNumberOverflow,
@@ -122,7 +129,7 @@ def _extension_matches(artifact_path: str, locator: Any) -> bool:
         return lowered.endswith(".json")
     if isinstance(locator, CsvCellLocator):
         return lowered.endswith(".csv")
-    if isinstance(locator, TensorboardLocator):
+    if isinstance(locator, (TensorboardLocator, TensorboardStringLocator)):
         return _tensorboard_path_matches(artifact_path)
     return lowered.endswith(".jsonl")
 
@@ -132,7 +139,7 @@ def _expected_extension(locator: Any) -> str:
         return ".json"
     if isinstance(locator, CsvCellLocator):
         return ".csv"
-    if isinstance(locator, TensorboardLocator):
+    if isinstance(locator, (TensorboardLocator, TensorboardStringLocator)):
         return "TensorBoard event"
     return ".jsonl"
 
@@ -452,7 +459,74 @@ def _check_one_tensorboard(
     return findings, False
 
 
+def _check_one_tensorboard_string(
+    result, artifact_path: str, locator: TensorboardStringLocator, selection
+) -> tuple[list[Finding], bool]:
+    """Map one selected TensorBoard string to its fixed outcome."""
+    findings: list[Finding] = []
+    outcome = selection.outcome
+    if outcome is ScalarOutcome.mismatch:
+        findings.append(
+            _value_error(
+                result,
+                artifact_path,
+                locator,
+                Code.locator_mismatch,
+                "was not found",
+            )
+        )
+        return findings, True
+    if outcome is ScalarOutcome.unsupported_scalar:
+        findings.append(
+            _value_error(
+                result,
+                artifact_path,
+                locator,
+                Code.locator_unsupported_value,
+                "selects an unsupported scalar encoding",
+            )
+        )
+        return findings, True
+    if outcome is not ScalarOutcome.value or selection.value is None:
+        findings.append(
+            _value_error(
+                result,
+                artifact_path,
+                locator,
+                Code.locator_unsupported_value,
+                "selects an unsupported value",
+            )
+        )
+        return findings, True
+    if type(result.value) is not str:
+        findings.append(
+            _value_error(
+                result,
+                artifact_path,
+                locator,
+                Code.locator_unsupported_value,
+                "selects an unsupported value",
+            )
+        )
+        return findings, True
+    actual = selection.value.decode("utf-8")
+    if result.value != actual:
+        findings.append(
+            _value_error(
+                result,
+                artifact_path,
+                locator,
+                Code.result_value_mismatch,
+                "does not match the recorded value",
+            )
+        )
+        return findings, True
+    return findings, False
+
+
 def _locator_kind(locator: Any) -> str:
+    if isinstance(locator, TensorboardStringLocator):
+        return "tensorboard-string"
     if isinstance(locator, TensorboardLocator):
         return "tensorboard"
     if isinstance(locator, CsvCellLocator):
@@ -480,7 +554,7 @@ def check_targeted_results(
         return findings, broken, False
 
     if target_check.state == "directory":
-        if manifest.schema_version == SCHEMA_VERSION_0_5:
+        if manifest.schema_version in (SCHEMA_VERSION_0_5, SCHEMA_VERSION_0_6):
             directory_hint = (
                 "Point the result at a single JSON, JSONL, CSV or TensorBoard event "
                 "file artifact, or drop the locator."
@@ -565,7 +639,7 @@ def check_targeted_results(
                     hint=None,
                 )
             )
-            capped_kinds.add("tensorboard")
+            capped_kinds.update({"tensorboard", "tensorboard-string"})
             capped_artifact = True
         if csv_cell_capped and csv_cell_eligible:
             findings.append(
@@ -601,7 +675,7 @@ def check_targeted_results(
         kind = _locator_kind(result.locator)
         if kind in capped_kinds:
             continue
-        if kind == "tensorboard":
+        if kind in ("tensorboard", "tensorboard-string"):
             if file_over_cap_128:
                 findings.append(
                     _value_error(
@@ -689,21 +763,42 @@ def check_targeted_results(
     # artifact supplies every tensorboard result. A structural refusal is
     # per-kind and never stops string/jsonl/csv-cell results.
     tensorboard_results = [
-        result for result in usable if isinstance(result.locator, TensorboardLocator)
+        result
+        for result in usable
+        if isinstance(
+            result.locator, (TensorboardLocator, TensorboardStringLocator)
+        )
     ]
     tensorboard_refused: set[str] = set()
-    selections = None
+    scalar_selections = None
+    text_selections = None
     if tensorboard_results:
-        requests = [
+        scalar_requests = [
             (
                 result.locator.tag.encode("utf-8"),
                 result.locator.step,
                 result.locator.occurrence,
             )
             for result in tensorboard_results
+            if isinstance(result.locator, TensorboardLocator)
+        ]
+        text_requests = [
+            (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+            )
+            for result in tensorboard_results
+            if isinstance(result.locator, TensorboardStringLocator)
         ]
         try:
-            selections = scan_scalars(data, requests)
+            if text_requests:
+                scalar_selections, text_selections = scan_tensorboard_06(
+                    data, scalar_requests, text_requests
+                )
+            else:
+                scalar_selections = scan_scalars(data, scalar_requests)
+                text_selections = None
         except EventFileError:
             for result in tensorboard_results:
                 finding = _value_error(
@@ -751,14 +846,24 @@ def check_targeted_results(
         if result.id in tensorboard_refused:
             continue
         if isinstance(result.locator, TensorboardLocator):
-            assert selections is not None
+            assert scalar_selections is not None
             key = (
                 result.locator.tag.encode("utf-8"),
                 result.locator.step,
                 result.locator.occurrence,
             )
             result_findings, failed = _check_one_tensorboard(
-                result, artifact.path, result.locator, selections[key]
+                result, artifact.path, result.locator, scalar_selections[key]
+            )
+        elif isinstance(result.locator, TensorboardStringLocator):
+            assert text_selections is not None
+            key = (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+            )
+            result_findings, failed = _check_one_tensorboard_string(
+                result, artifact.path, result.locator, text_selections[key]
             )
         elif isinstance(result.locator, CsvCellLocator):
             result_findings, failed = _check_one_csv_cell(
@@ -804,6 +909,7 @@ def check_results(
         SCHEMA_VERSION_0_3,
         SCHEMA_VERSION_0_4,
         SCHEMA_VERSION_0_5,
+        SCHEMA_VERSION_0_6,
     )
 
     def unverifiable(res_id: str, msg: str) -> None:

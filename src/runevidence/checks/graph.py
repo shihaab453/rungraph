@@ -16,6 +16,7 @@ from ..findings import Code, Finding, Severity
 from ..models import (
     SCHEMA_VERSION_0_4,
     SCHEMA_VERSION_0_5,
+    SCHEMA_VERSION_0_6,
     Manifest,
     RelationshipType as T,
 )
@@ -143,7 +144,11 @@ def check_graph(
     # keeps the delivered 0.3 bytes.
     locator_schema = (
         manifest.schema_version
-        if manifest.schema_version in (SCHEMA_VERSION_0_4, SCHEMA_VERSION_0_5)
+        if manifest.schema_version in (
+            SCHEMA_VERSION_0_4,
+            SCHEMA_VERSION_0_5,
+            SCHEMA_VERSION_0_6,
+        )
         else "0.3"
     )
     capped = capped or set()
@@ -409,7 +414,10 @@ def check_graph(
                     hint=(
                         "a resource cap is not a change; narrow the manifest or "
                         "raise the limit"
-                        if manifest.schema_version == SCHEMA_VERSION_0_5
+                        if manifest.schema_version in (
+                            SCHEMA_VERSION_0_5,
+                            SCHEMA_VERSION_0_6,
+                        )
                         and any(ident in capped for ident in at_risk)
                         else f"Claim: {ev.claim!r}"
                     ),

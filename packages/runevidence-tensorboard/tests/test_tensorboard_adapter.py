@@ -167,6 +167,21 @@ def _scalar_event(tag: bytes, number: float, *, step: int | None = None) -> byte
     return _event(step=step, summary_bytes=_summary(_value(tag, simple_value=number)))
 
 
+
+
+def _string_tensor(text: bytes, *, dtype: int = 7, extra: bytes = b"", shape: bytes = b"") -> bytes:
+    parts = [_varint_field(1, dtype)]
+    if shape:
+        parts.append(_bytes_field(2, shape))
+    parts.append(extra)
+    parts.append(_bytes_field(8, text))
+    return b"".join(parts)
+
+
+def _string_event(tag: bytes, text: bytes, *, step: int = 0, tensor: bytes | None = None) -> bytes:
+    payload = tensor if tensor is not None else _string_tensor(text)
+    return _event(step=step, summary_bytes=_summary(_value(tag, tensor_bytes=payload)))
+
 def _tensor_scalar(number: float) -> bytes:
     """A rank-0 DT_FLOAT TensorProto with one float_val (a plugin pseudo-scalar)."""
     tensor = _varint_field(1, 1) + _bytes_field(2, b"") + _float_field(5, number)
@@ -209,8 +224,11 @@ def _run_id(dir_rel: str) -> str:
     return f"tb-run-{_short(dir_rel.encode('utf-8'))}"
 
 
-def _name_digest(artifact_id: str, occurrence: int) -> str:
-    return _short(artifact_id.encode("utf-8") + b"\x00" + str(occurrence).encode("ascii"))
+def _name_digest(artifact_id: str, occurrence: int, kind: str = "scalar") -> str:
+    payload = artifact_id.encode("utf-8") + b"\x00" + str(occurrence).encode("ascii")
+    if kind == "text":
+        payload += b"\x00text"
+    return _short(payload)
 
 
 def _res_id(run_id: str, artifact_id: str, tag: str, step: int, occurrence: int) -> str:
@@ -939,7 +957,7 @@ def test_surrogate_path_is_refused_before_any_read(tmp_path):
 
 
 def test_duplicate_generated_result_name_is_refused(tmp_path, monkeypatch):
-    monkeypatch.setattr(adapter_module, "_name_digest", lambda artifact_id, occurrence: "0" * 16)
+    monkeypatch.setattr(adapter_module, "_name_digest", lambda artifact_id, occurrence, kind="scalar": "0" * 16)
     root = tmp_path / "experiment"
     _write(
         root / "logs" / "a.tfevents",
@@ -1605,3 +1623,161 @@ def test_cli_warning_order_ascii_escaping_and_repeats(tmp_path, capsys):
     assert '"nomatch\'one"' in lines[0]
     assert '"nomatch\'one"' in lines[1]
     assert "'\\xe9?'" in lines[2]
+
+
+# --- string tensors (schema 0.6) -------------------------------------------
+
+
+def _string_folder(tmp_path):
+    root = tmp_path / "experiment"
+    _write(
+        root / "logs" / "e.tfevents",
+        _records(
+            _scalar_event(b"loss", 0.5, step=1),
+            _string_event(b"config", b"lr=3e-4\nbatch=64", step=0),
+        ),
+    )
+    return root
+
+
+def test_strings_are_ignored_without_the_flag(tmp_path, capsys):
+    root = _string_folder(tmp_path)
+    assert main(["init", str(root), "--adapter", "tensorboard"]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.5"
+    assert [r["locator"]["kind"] for r in document["results"]] == ["tensorboard"]
+
+
+def test_include_strings_writes_schema_06_and_validates(tmp_path, capsys):
+    root = _string_folder(tmp_path)
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.6"
+    text = [r for r in document["results"] if r["locator"]["kind"] == "tensorboard-string"]
+    assert len(text) == 1
+    assert text[0]["name"] == "config @ 0 (text)"
+    assert text[0]["value"] == "lr=3e-4\nbatch=64"
+    assert text[0]["id"].startswith("tb-res-")
+    assert main(["validate", str(root)]) == 0
+
+
+def test_text_value_mismatch_is_result_value_mismatch(tmp_path, capsys):
+    root = _string_folder(tmp_path)
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 0
+    )
+    capsys.readouterr()
+    path = root / MANIFEST_FILENAME
+    document = json.loads(path.read_text(encoding="utf-8"))
+    for result in document["results"]:
+        if result["locator"]["kind"] == "tensorboard-string":
+            result["value"] = "different"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert main(["validate", str(root)]) == 1
+    out = capsys.readouterr().out
+    assert "result-value-mismatch" in out or "does not match the recorded value" in out
+
+
+def test_nonconforming_string_tensors_are_skipped(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    rank2_shape = _bytes_field(2, _bytes_field(2, _varint_field(2, 2)))  # dim size 2
+    typed = _float_field(5, 1.5)
+    _write(
+        root / "e.tfevents",
+        _records(
+            _event(summary_bytes=_summary(_value(b"rank2", tensor_bytes=_string_tensor(b"x", shape=rank2_shape)))),
+            _event(summary_bytes=_summary(_value(b"typed", tensor_bytes=_string_tensor(b"x", extra=typed)))),
+            _event(summary_bytes=_summary(_value(b"two", tensor_bytes=_varint_field(1, 7) + _bytes_field(8, b"a") + _bytes_field(8, b"b")))),
+            _event(summary_bytes=_summary(_value(b"content", tensor_bytes=_varint_field(1, 7) + _bytes_field(4, b"x")))),
+            _string_event(b"good", b"ok"),
+        ),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert [r["locator"]["tag"] for r in document["results"]] == ["good"]
+    assert main(["validate", str(root)]) == 0
+
+
+def test_text_tag_filter_and_no_match_warning(tmp_path, capsys):
+    root = _string_folder(tmp_path)
+    assert (
+        main(
+            [
+                "init",
+                str(root),
+                "--adapter",
+                "tensorboard",
+                "--include-strings",
+                "--tags",
+                "config",
+            ]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "WARNING" not in out
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert [r["locator"]["kind"] for r in document["results"]] == ["tensorboard-string"]
+
+
+def test_text_display_is_truncated_in_human_output(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    long_text = "é" * 200
+    _write(
+        root / "train" / "a.tfevents",
+        _records(_string_event(b"cfg", long_text.encode("utf-8"))),
+    )
+    _write(
+        root / "train" / "z.tfevents",
+        _records(_string_event(b"cfg", long_text.encode("utf-8"))),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 0
+    )
+    capsys.readouterr()
+    assert main(["matrix", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "..." in out
+    assert long_text not in out
+    assert main(["matrix", str(root), "--json"]) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert any(
+        cell.get("value") == long_text
+        for row in document["runs"]
+        for cell in row["values"]
+    )
+
+
+def test_schema_06_text_locator_requires_artifact_id(tmp_path, capsys):
+    root = _string_folder(tmp_path)
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 0
+    )
+    path = root / MANIFEST_FILENAME
+    document = json.loads(path.read_text(encoding="utf-8"))
+    for result in document["results"]:
+        if result["locator"]["kind"] == "tensorboard-string":
+            result["artifact_id"] = None
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert main(["validate", str(root)]) == 2
+    assert "schema-invalid" in capsys.readouterr().out
+
+
+def test_migrate_05_to_06_is_identity(tmp_path, capsys):
+    root = _string_folder(tmp_path)
+    assert main(["init", str(root), "--adapter", "tensorboard"]) == 0
+    capsys.readouterr()
+    path = root / MANIFEST_FILENAME
+    before = json.loads(path.read_text(encoding="utf-8"))
+    assert main(["migrate", str(root), "--to", "0.6"]) == 0
+    after = json.loads(path.read_text(encoding="utf-8"))
+    assert after["schema_version"] == "0.6"
+    before["schema_version"] = "0.6"
+    assert before == after
