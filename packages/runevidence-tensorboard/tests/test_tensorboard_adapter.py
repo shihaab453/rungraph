@@ -1233,3 +1233,25 @@ def test_reinit_produces_byte_identical_manifests(tmp_path, capsys):
     assert main(["init", str(root), "--adapter", "tensorboard", "--tags", "loss"]) == 0
     capsys.readouterr()
     assert (root / MANIFEST_FILENAME).read_bytes() == first
+
+
+@pytest.mark.skipif(adapter_module.os.name == "nt", reason="POSIX-only path rule")
+def test_cli_refuses_a_posix_event_path_with_a_backslash(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "a\\b.tfevents", _records(_scalar_event(b"loss", 0.5)))
+    assert main(["init", str(root), "--adapter", "tensorboard"]) == 2
+    out = capsys.readouterr().out
+    assert "an event path contains a backslash; nothing was written" in out
+    assert not (root / MANIFEST_FILENAME).exists()
+
+
+@pytest.mark.skipif(adapter_module.os.name == "nt", reason="POSIX-only surrogate path")
+def test_cli_refuses_a_surrogate_path(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    (root / "logs").mkdir(parents=True)
+    name = adapter_module.os.fsdecode(b"bad-\xff.tfevents")
+    (root / "logs" / name).write_bytes(_records(_scalar_event(b"loss", 0.5)))
+    assert main(["init", str(root), "--adapter", "tensorboard"]) == 2
+    out = capsys.readouterr().out
+    assert "a path is not valid UTF-8; nothing was written" in out
+    assert not (root / MANIFEST_FILENAME).exists()
