@@ -1153,3 +1153,72 @@ def test_result_cap_counts_only_selected_scalars(tmp_path):
 
     manifest = _extract(root, TagFilter(["keep"]))
     assert [result.locator.tag for result in manifest.results] == ["keep"]
+
+
+def test_crafted_delimiter_tags_never_collide(tmp_path):
+    root = tmp_path / "experiment"
+    a = "logs/q.tfevents] @ 5 [r.tfevents"
+    b = "logs/r.tfevents"
+    _write(
+        root / a,
+        _records(
+            _scalar_event(b"loss", 1.0, step=1),
+            _scalar_event(b"loss @ 1 [q.tfevents]", 5.0, step=5),
+        ),
+    )
+    _write(
+        root / b,
+        _records(
+            _scalar_event(b"loss", 2.0, step=1),
+            _scalar_event(b"loss @ 1 [q.tfevents]", 6.0, step=5),
+        ),
+    )
+    manifest = _extract(root)
+    assert len(manifest.results) == 4
+    assert len({result.name for result in manifest.results}) == 4
+    assert len({result.id for result in manifest.results}) == 4
+
+
+def test_exact_result_and_tag_byte_boundaries(tmp_path):
+    root = tmp_path / "experiment"
+    ten_thousand = [
+        _scalar_event(f"tag{i}".encode(), float(i), step=i) for i in range(10_000)
+    ]
+    _write(root / "ten-k.tfevents", _records(*ten_thousand))
+    manifest = _extract(root)
+    assert len(manifest.results) == 10_000
+
+    exact = [
+        _scalar_event(("x" * 4092 + f"{i:04d}").encode(), 1.0, step=i)
+        for i in range(4096)
+    ]
+    _write(root / "exact-16mib.tfevents", _records(*exact))
+    manifest = _extract(root, TagFilter(["x*"]))
+    assert len(manifest.results) == 4096
+
+    extra = [*exact, _scalar_event(b"y", 1.0, step=9999)]
+    _write(root / "over-16mib.tfevents", _records(*extra))
+    with pytest.raises(AdapterError) as excinfo:
+        _extract(root, TagFilter(["x*", "y"]))
+    assert str(excinfo.value) == BUDGET_MESSAGE
+
+
+def test_surrogate_path_outranks_a_posix_backslash_event_path(tmp_path):
+    adapter = TensorboardAdapter()
+    discovery = adapter.discover(tmp_path)
+    discovery.files = ["logs/\udcff.tfevents", "logs/a\\b.tfevents"]
+    with pytest.raises(AdapterError) as excinfo:
+        adapter.extract(tmp_path, discovery, project_id="p", project_name="P")
+    assert str(excinfo.value) == adapter_module.SURROGATE_MESSAGE
+
+
+@pytest.mark.skipif(adapter_module.os.name == "nt", reason="POSIX-only path rule")
+def test_backslash_path_outranks_a_corrupt_file_without_reading_it(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "broken.tfevents", b"not an event file")
+    adapter = TensorboardAdapter()
+    discovery = adapter.discover(root)
+    discovery.files = ["logs/a\\b.tfevents", "logs/broken.tfevents"]
+    with pytest.raises(AdapterError) as excinfo:
+        adapter.extract(root, discovery, project_id="p", project_name="P")
+    assert str(excinfo.value) == adapter_module.BACKSLASH_MESSAGE
