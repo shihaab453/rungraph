@@ -2054,7 +2054,11 @@ def test_histogram_selection_ladder_direct():
 
 def test_histogram_consumers_use_compact_display(tmp_path, capsys):
     root = tmp_path / "experiment"
-    _write(root / "e.tfevents", _records(_histo_event(b"w")))
+    _write(root / "trainA" / "e.tfevents", _records(_histo_event(b"w")))
+    _write(
+        root / "trainB" / "e.tfevents",
+        _records(_histo_event(b"w", (0.5, 1.0), (2.0, 3.0))),
+    )
     assert (
         main(["init", str(root), "--adapter", "tensorboard", "--include-histograms"])
         == 0
@@ -2062,22 +2066,39 @@ def test_histogram_consumers_use_compact_display(tmp_path, capsys):
     capsys.readouterr()
     path = root / MANIFEST_FILENAME
     document = json.loads(path.read_text(encoding="utf-8"))
+    runs = {run["name"]: run["id"] for run in document["runs"]}
+    first = next(r for r in document["results"] if r["run_id"] == runs["trainA"])
+    first["id"] = "res"
     document["evidence"] = [{"id": "e1", "claim": "weights", "supports": ["res"]}]
-    for result in document["results"]:
-        result["id"] = "res"
     path.write_text(json.dumps(document), encoding="utf-8")
 
     for argv in (
         ["inspect", str(root)],
         ["claim", "--id", "e1", str(root)],
         ["lineage", "--id", "e1", str(root)],
+        ["run", "--id", runs["trainA"], str(root)],
     ):
         assert main(argv) == 0
         out = capsys.readouterr().out
         assert "histogram(1 buckets, num=2.0)" in out
-        assert '"kind": "tensorboard-histogram"' not in out
-    metric = document["results"][0]["name"]
-    assert main(["leaderboard", "--metric", metric, "--direction", "min", str(root)]) == 0
+        assert "bucket_limit" not in out
+
+    assert (
+        main(["compare", "--base", runs["trainA"], "--target", runs["trainB"], str(root)])
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "histogram(1 buckets, num=2.0)" in out
+    assert "histogram(2 buckets, num=5.0)" in out
+    assert "bucket_limit" not in out
+
+    assert main(["matrix", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "histogram(1 buckets, num=2.0)" in out
+    assert "histogram(2 buckets, num=5.0)" in out
+    assert "bucket_limit" not in out
+
+    assert main(["leaderboard", "--metric", first["name"], "--direction", "min", str(root)]) == 0
     out = capsys.readouterr().out
     assert "non_numeric" in out or "Eligible: 0" in out
 
