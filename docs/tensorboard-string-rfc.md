@@ -1,17 +1,17 @@
-# TensorBoard string tensors — design draft (v0.10)
+# TensorBoard string tensors — design draft (v0.11)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.6 admission decision are required before any code.
 Schema 0.1–0.5, their readers/checkers and every delivered behavior stay frozen.
 
-## 0. Changes in v0.10
+## 0. Changes in v0.11
 
-- Folds the round-3 review (DeepSeek): the 120-character rule is guarded on `str`; wrong wire
-  types on TensorProto fields 7 and 9–18 are semantic non-strings, never structural; the
-  verification plan gains comparability, typed-field, text-only cap, interleaving and
-  caps-tier vectors.
-- Keeps the v0.9 edits: claim/lineage 256 rule, `edit.py` has no version refusal, digest-based
-  name proof, 0.6 scalar-tag text.
+- Folds the round-4 review (Opus): the volatile check is explicitly path-based per the multifile
+  RFC (and must include both locator kinds if a legacy result-targeted form remains); a
+  text-only volatile vector is added.
+- Clarifies `TensorProto field 8`, limits "other deviation" to the fields in scope, fixes a
+  blank line, and cites the full precedence order.
+- Keeps the v0.10 edits: guarded 120 rule, fields 7/9–18 semantic, expanded vectors.
 
 ## 1. Problem and scope
 
@@ -56,8 +56,8 @@ traversal too; a wrong wire type on `Summary.Value` field 8 (the `tensor` member
 structural.
 
 The string rules below are semantic: they make an entry non-string but never add a structural
-refusal. A field-8 key with wire type 0, 1 or 5 is skipped and makes the entry non-string; wire
-types 3/4/6/7 on field 8 remain the structural refusal above. A valid `string_val` plus a
+refusal. A **TensorProto field 8 (`string_val`)** key with wire type 0, 1 or 5 is skipped and makes the
+entry non-string; wire types 3/4/6/7 on that field remain the structural refusal above. A valid `string_val` plus a
 field-8 occurrence with wire type 0/1/5 is **non-string** (the wrong occurrence wins); a
 3/4/6/7 occurrence is structural.
 
@@ -79,7 +79,9 @@ For a `Summary.Value` whose winning oneof member is `tensor` (field 8):
   tensor**, not "the text plugin": TF2 writes plugin metadata on a tag's first event only.
 
 A `string_val` with wire type 0, 1 or 5 makes **the entry** non-string; it never changes 0.5
-structure. Any other deviation makes the entry non-string. Extraction skips non-string entries.
+structure. A deviation in any field named in this profile makes the entry non-string; fields outside the
+profile (for example `version_number` 3) are skipped by the delivered grammar and do not change
+classification. Extraction skips non-string entries.
 
 **Conforming set.** For a `(tag, step)`, conforming strings are the §3-profile entries in record
 order, then `Summary.Value` order. `occurrence` indexes exactly this list. A scalar-shaped
@@ -152,7 +154,6 @@ to every locator of both kinds. Exact outcomes and texts:
 | structural file refusal | unreadable | existing structural outcome for both kinds |
 
 Selection runs before the recorded-value type check.
-
 
 No tolerance, no NFC/NFD, no case folding, no newline normalization, no markdown.
 
@@ -273,8 +274,11 @@ Names, parameters, JSON-locator strings and every 0.1–0.5 value keep their del
   `_csv_cell_cap` 0.6 branch, the shared cap and 128 MiB snapshot sets; locator routing
   (`_extension_matches`, `_expected_extension`, `_locator_kind`, `display_locator`); the
   `init --force` declared tuple; `_event_artifact_is_volatile` accepting `Manifest05` and
-  `Manifest06`; `TensorboardStringLocator` is **not** a subclass of `TensorboardLocator`
-  (routing and caps use `isinstance`); `json_schema_0_6()` rewrites every inherited 0.3/0.4/0.5
+  `Manifest06` and checking **every regular-file event artifact by path**, independent of
+  locator kind (the multifile RFC's rule); if a legacy result-targeted form remains, its
+  targeted set must include both `TensorboardLocator` and `TensorboardStringLocator`;
+  `TensorboardStringLocator` is **not** a subclass of `TensorboardLocator` (routing and caps use
+  `isinstance`); `json_schema_0_6()` rewrites every inherited 0.3/0.4/0.5
   description to 0.6, gives `Result06.properties.locator.oneOf` six branches and the `if`/`then`
   `artifact_id` rule; the frozen 0.5 schema pin and the new 0.6 pin.
 - `checks/results.py`: `SCHEMA_VERSION_0_6` gets the directory hint
@@ -308,8 +312,10 @@ Names, parameters, JSON-locator strings and every 0.1–0.5 value keep their del
 - `checks/__init__.py`: shared caps, `_csv_cell_cap` 0.6, 128 MiB eligibility.
 - `checks/graph.py`: 0.6 locator schema and cap hint.
 - `locator_profiles.py`: text comparison, `display_locator`.
-- `run_compare.py`, `run_matrix.py`, `run_details.py`, `run_claim.py`, `run_lineage.py`: scoped
-  display truncation and `tensorboard-string` in `_display_details`.
+- `run_compare.py`, `run_matrix.py`, `run_details.py`: the guarded 120-code-point rendering for
+  `tensorboard-string` result values.
+- `run_claim.py`, `run_lineage.py`: keep the delivered 256-character rule; add
+  `tensorboard-string` to `_display_details` (lineage reuses it via `_display_row`).
 - `edit.py`: no new 0.6 version refusal; `add` and `rehash` keep the delivered 0.4/0.5 rules.
 - `run_comparability.py`: its deny-list must include 0.6 explicitly; a missing entry would
   silently admit the manifest.
@@ -364,8 +370,10 @@ exact everywhere.
   beyond; text and scalar at one tag/step; forced text-name digest collision; NUL/ESC/newline
   values; `--tags` matching only a text tag with and without the flag; nonconforming text tag;
   the 0.6 scalar-tag refusal text; a non-empty typed field beside `string_val`; wrong-wire
-  field 7/9–18; text-only 0.6 cap cardinality; scalar/text interleaving order; the caps-tier
-  precedence (too-expensive > caps > id collision > name collision > volatile);
+  field 7/9–18; a text-only event file matched by `--volatile` is refused; text-only 0.6 cap
+  cardinality; scalar/text interleaving order; the full §7 caps-tier precedence (path > profile
+  > unrepresentable scalar tag > too-expensive > caps > fixed-id collision > result-name
+  collision > volatile);
   comparability 0.6 refusal; `add --directory`/`rehash --directory` on 0.6; `run_details.py`
   and claim/lineage display; a 0.5 value keeps its delivered rendering.
 - Consumers: compare/matrix/run/claim/lineage/details/leaderboard on a string restart fixture;
