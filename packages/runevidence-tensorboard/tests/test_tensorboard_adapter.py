@@ -1849,6 +1849,22 @@ def test_histogram_event_grammar_step_and_wall_time(tmp_path, capsys):
     assert document["results"][0]["name"] == "w @ -1 (histogram)"
 
 
+def test_07_wall_time_wire_and_truncation_are_structural(tmp_path, capsys):
+    for payload in (
+        _key(1, 0) + _varint(1) + _bytes_field(5, _summary(_histo_value(b"w", _histo_tensor([0.5], [1.0])))),
+        _key(1, 1) + b"\x00\x00\x00\x00",
+    ):
+        root = tmp_path / ("exp" + str(len(payload)))
+        _write(root / "e.tfevents", _records(payload))
+        assert (
+            main(
+                ["init", str(root), "--adapter", "tensorboard", "--include-histograms"]
+            )
+            == 2
+        )
+        capsys.readouterr()
+
+
 def test_histograms_only_skips_string_entries(tmp_path, capsys):
     root = tmp_path / "experiment"
     _write(
@@ -1898,7 +1914,8 @@ def test_many_empty_histogram_occurrences_stay_bounded(tmp_path, capsys):
     )
     capsys.readouterr()
     document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
-    assert document["results"] == []
+    assert len(document["results"]) == 1
+    assert document["results"][0]["value"]["bucket"] == []
 
 
 def test_scalar_tag_messages_follow_the_flag(tmp_path, capsys):

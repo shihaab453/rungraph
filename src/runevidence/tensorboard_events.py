@@ -1140,33 +1140,24 @@ def _read_key_lenient(data, position, end):
     return field, wire, position
 
 
-def _decode_histogram(data, ranges):
-    """Decode winning HistogramProto ranges; ``None`` means failing."""
-    values = [0.0, 0.0, 0.0, 0.0, 0.0]
-    limits: list[float] = []
-    counts: list[float] = []
-    for item in ranges:
-        if item is None:
-            return None
-        start, end = item
-        values, limits, counts, ok = _decode_histogram_part(
-            data, start, end, values, limits, counts
-        )
-        if not ok:
-            return None
-    if len(limits) > MAX_HISTOGRAM_BUCKETS or len(counts) > MAX_HISTOGRAM_BUCKETS:
-        return None
-    if len(limits) != len(counts):
-        return None
-    if any(not math.isfinite(v) for v in values):
-        return None
-    if values[2] < 0:
-        return None
-    if any(not math.isfinite(v) or v < 0 for v in counts):
-        return None
-    if any(not math.isfinite(v) for v in limits):
-        return None
-    if any(a >= b for a, b in zip(limits, limits[1:])):
+@dataclass(frozen=True, slots=True)
+class _HistoResult:
+    present: bool
+    value: dict | None
+
+
+def _finalize_histogram(values, limits, counts, failed):
+    if (
+        failed
+        or len(limits) > MAX_HISTOGRAM_BUCKETS
+        or len(counts) > MAX_HISTOGRAM_BUCKETS
+        or len(limits) != len(counts)
+        or any(not math.isfinite(v) for v in values)
+        or values[2] < 0
+        or any(not math.isfinite(v) or v < 0 for v in counts)
+        or any(not math.isfinite(v) for v in limits)
+        or any(a >= b for a, b in zip(limits, limits[1:]))
+    ):
         return None
     return {
         "kind": "histogram",
@@ -1228,7 +1219,11 @@ def _parse_value_07(data, start, end, step):
     kind = 0
     simple_value = 0.0
     tensor_restart = start
-    histo_ranges: list[tuple[int, int]] = []
+    hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+    hist_limits: list[float] = []
+    hist_counts: list[float] = []
+    hist_present = False
+    hist_failed = False
     position = start
     while position < end:
         field_number, wire_type, position = _read_key(data, position, end)
@@ -1243,7 +1238,11 @@ def _parse_value_07(data, start, end, step):
             simple_value = _F32.unpack_from(data, position)[0]
             kind = 2
             tensor_restart = position + 4
-            histo_ranges.clear()
+            hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+            hist_limits = []
+            hist_counts = []
+            hist_present = False
+            hist_failed = False
             position += 4
         elif field_number in (3, 4, 6):
             if wire_type != 2:
@@ -1251,7 +1250,11 @@ def _parse_value_07(data, start, end, step):
             _, payload_end = _read_length(data, position, end)
             kind = field_number
             tensor_restart = payload_end
-            histo_ranges.clear()
+            hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+            hist_limits = []
+            hist_counts = []
+            hist_present = False
+            hist_failed = False
             position = payload_end
         elif field_number == 5:
             if wire_type != 2:
@@ -1259,10 +1262,19 @@ def _parse_value_07(data, start, end, step):
             histo_start, histo_end = _read_length(data, position, end)
             kind = 5
             tensor_restart = histo_end
-            if len(histo_ranges) < _HISTOGRAM_RETAIN:
-                histo_ranges.append((histo_start, histo_end))
-            else:
-                histo_ranges.append(None)
+            hist_present = True
+            if not hist_failed:
+                hist_values, hist_limits, hist_counts, ok = (
+                    _decode_histogram_part(
+                        data,
+                        histo_start,
+                        histo_end,
+                        hist_values,
+                        hist_limits,
+                        hist_counts,
+                    )
+                )
+                hist_failed = not ok
             position = histo_end
         elif field_number == 7:
             if wire_type != 2:
@@ -1273,7 +1285,11 @@ def _parse_value_07(data, start, end, step):
                 _refuse()
             _, payload_end = _read_length(data, position, end)
             kind = 8
-            histo_ranges.clear()
+            hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+            hist_limits = []
+            hist_counts = []
+            hist_present = False
+            hist_failed = False
             position = payload_end
         elif field_number == 9:
             if wire_type != 2:
@@ -1285,7 +1301,15 @@ def _parse_value_07(data, start, end, step):
     if kind == 8:
         tensor = _TensorState()
         _scan_tensor_region(data, tensor_restart, end, tensor, strings=True)
-    return tag_start, tag_end, step, kind, simple_value, tensor, histo_ranges
+    hist = _HistoResult(
+        hist_present,
+        _finalize_histogram(
+            hist_values, hist_limits, hist_counts, hist_failed
+        )
+        if hist_present
+        else None,
+    )
+    return tag_start, tag_end, step, kind, simple_value, tensor, hist
 
 
 def _iter_summary_values_07(data, start, end, step):
@@ -1358,22 +1382,6 @@ def _iter_event_values_07(data, start, end):
     )
 
 
-def _iter_winning_summaries_07(data, start, end, step):
-    position = start
-    while position < end:
-        field_number, wire_type, position = _read_key(data, position, end)
-        if field_number == 5:
-            if wire_type != 2:
-                _refuse()
-            summary_start, summary_end = _read_length(data, position, end)
-            yield from _iter_summary_values_07(
-                data, summary_start, summary_end, step
-            )
-            position = summary_end
-        else:
-            position = _skip_field(data, position, end, wire_type)
-
-
 @dataclass(frozen=True, slots=True)
 class HistogramRecord:
     tag: bytes
@@ -1392,23 +1400,15 @@ def _iter_winning_values_07(data):
         yield from _iter_event_values_07(data, payload_start, payload_end)
 
 
-def _histogram_value(data, histo_ranges):
-    if not histo_ranges:
-        return None
-    return _decode_histogram(data, histo_ranges)
-
-
 def iter_supported_histograms(data):
     for tag_start, tag_end, step, kind, _simple, _tensor, ranges in _iter_winning_values_07(
         data
     ):
-        if kind != 5:
+        if kind != 5 or not ranges.present or ranges.value is None:
             continue
-        value = _histogram_value(data, ranges)
-        if value is not None:
-            yield HistogramRecord(
-                tag=_tag_bytes(data, tag_start, tag_end), step=step, value=value
-            )
+        yield HistogramRecord(
+            tag=_tag_bytes(data, tag_start, tag_end), step=step, value=ranges.value
+        )
 
 
 def iter_supported_summaries_07(data):
@@ -1428,12 +1428,12 @@ def iter_supported_summaries_07(data):
             yield StringRecord(
                 tag=_tag_bytes(data, tag_start, tag_end), step=step, value=raw
             )
-        if kind == 5:
-            hist = _histogram_value(data, ranges)
-            if hist is not None:
-                yield HistogramRecord(
-                    tag=_tag_bytes(data, tag_start, tag_end), step=step, value=hist
-                )
+        if kind == 5 and ranges.present and ranges.value is not None:
+            yield HistogramRecord(
+                tag=_tag_bytes(data, tag_start, tag_end),
+                step=step,
+                value=ranges.value,
+            )
 
 
 def scan_tensorboard_07(data, scalar_requests, string_requests, histogram_requests):
@@ -1492,14 +1492,16 @@ def scan_tensorboard_07(data, scalar_requests, string_requests, histogram_reques
             if by_step is not None:
                 hist_state = by_step.get(step)
         if hist_state is not None:
-            value = _histogram_value(data, ranges) if kind == 5 else None
-            if value is not None:
-                occurrence = hist_state.supported
-                hist_state.supported += 1
-                if occurrence in hist_state.wanted:
-                    hist_state.values[occurrence] = value
+            if kind == 5 and ranges.present:
+                if ranges.value is not None:
+                    occurrence = hist_state.supported
+                    hist_state.supported += 1
+                    if occurrence in hist_state.wanted:
+                        hist_state.values[occurrence] = ranges.value
+                else:
+                    hist_state.unsupported = True
             elif kind == 5:
-                hist_state.unsupported = True
+                hist_state.non_scalar = True
             else:
                 hist_state.non_scalar = True
 

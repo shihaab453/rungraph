@@ -271,6 +271,8 @@ def _migrate_manifest(
         # manifest-only locator precheck; 0.3/0.4/0.5 are version-only bumps.
         if source_version in (SOURCE_VERSION, TARGET_VERSION):
             _check_locator_migration(loaded.manifest)
+        elif source_version == TARGET_VERSION_0_7:
+            raise MigrationError("DOWNGRADE_UNSUPPORTED")
         elif source_version not in (
             TARGET_VERSION_0_3,
             TARGET_VERSION_0_4,
