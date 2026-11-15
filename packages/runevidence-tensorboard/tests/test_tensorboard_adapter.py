@@ -2024,16 +2024,39 @@ def test_compare_and_matrix_use_each_result_locator(tmp_path, capsys):
     # baseline string-locator result is shortened.
     assert main(["compare", "--base", "ra", "--target", "rb", str(root)]) == 0
     out = capsys.readouterr().out
-    assert long_text in out
-    assert "..." in out
+    section = None
+    parameter_line = None
+    result_line = None
+    for line in out.splitlines():
+        if line.startswith("Parameters"):
+            section = "parameters"
+        elif line.startswith("Results"):
+            section = "results"
+        elif line.startswith("  ") and section == "parameters":
+            parameter_line = line
+        elif line.startswith("  ") and section == "results":
+            result_line = line
+    full = json.dumps(long_text)
+    shortened = json.dumps(long_text[:120]) + "..."
+    assert parameter_line is not None and full in parameter_line
+    assert "..." not in parameter_line
+    assert result_line is not None
+    assert shortened in result_line and full in result_line
+
     # Matrix: ra's text cell is shortened, rb's null-locator cell stays full.
     assert main(["matrix", str(root), "--run", "ra", "--run", "rb"]) == 0
     out = capsys.readouterr().out
-    assert long_text in out
-    assert "..." in out
-    ra_line = next(line for line in out.splitlines() if '"ra"' in line)
-    assert "..." not in ra_line  # run name line, not the cells
-    assert any("..." in line for line in out.splitlines())
+    cells: dict[str, str] = {}
+    run = None
+    for line in out.splitlines():
+        if line.startswith("  ") and '("ra")' in line:
+            run = "ra"
+        elif line.startswith("  ") and '("rb")' in line:
+            run = "rb"
+        elif line.startswith("    ") and run is not None:
+            cells[run] = line
+    assert shortened in cells["ra"] and full not in cells["ra"]
+    assert full in cells["rb"] and "..." not in cells["rb"]
 
 
 def test_scanner_dispatch_is_per_schema(tmp_path, capsys, monkeypatch):
