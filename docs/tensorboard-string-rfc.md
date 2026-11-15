@@ -1,17 +1,15 @@
-# TensorBoard string tensors — design draft (v0.11)
+# TensorBoard string tensors — design draft (v0.12)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.6 admission decision are required before any code.
 Schema 0.1–0.5, their readers/checkers and every delivered behavior stay frozen.
 
-## 0. Changes in v0.11
+## 0. Changes in v0.12
 
-- Folds the round-4 review (Opus): the volatile check is explicitly path-based per the multifile
-  RFC (and must include both locator kinds if a legacy result-targeted form remains); a
-  text-only volatile vector is added.
-- Clarifies `TensorProto field 8`, limits "other deviation" to the fields in scope, fixes a
-  blank line, and cites the full precedence order.
-- Keeps the v0.10 edits: guarded 120 rule, fields 7/9–18 semantic, expanded vectors.
+- Folds the round-5 review (Opus): fields 7/9–18 with wire types 0/1/5 are semantic non-strings
+  while 3/4/6/7 stay structural; the deviation sentence is subject to the structural refusals;
+  the vector is split; the duplicate 256 sentence and the `run`/`details` wording are fixed.
+- Keeps the v0.11 edits: path-based volatile rule, field-8 naming, 120/256 inventory split.
 
 ## 1. Problem and scope
 
@@ -72,16 +70,17 @@ For a `Summary.Value` whose winning oneof member is `tensor` (field 8):
   15 `variant_val`, 16 `uint32_val`, 17 `uint64_val`, 18 `float8_val`. "Set" means any
   occurrence after merge except a zero-length wire-2 payload. Fields 5 and 6 keep the delivered
   structural refusal on a wrong wire type; fields 7 and 9–18 are skipped by the delivered
-  grammar, so a wrong wire type there makes the entry **non-string** and is never structural;
+  grammar, so a wire type 0/1/5 there makes the entry **non-string**, while wire types 3/4/6/7
+  remain the `_read_key` structural refusal;
 - the single value is strict UTF-8 (a leading BOM is kept), at most 65,536 bytes; an empty
   string is valid;
 - `SummaryMetadata` and `plugin_data.plugin_name` are never read. The kind is a **string
   tensor**, not "the text plugin": TF2 writes plugin metadata on a tag's first event only.
 
-A `string_val` with wire type 0, 1 or 5 makes **the entry** non-string; it never changes 0.5
-structure. A deviation in any field named in this profile makes the entry non-string; fields outside the
-profile (for example `version_number` 3) are skipped by the delivered grammar and do not change
-classification. Extraction skips non-string entries.
+Subject to the structural refusals above, a semantic deviation in any field named in this
+profile makes the entry non-string; fields outside the profile (for example `version_number` 3)
+are skipped by the delivered grammar and do not change classification. Extraction skips
+non-string entries.
 
 **Conforming set.** For a `(tag, step)`, conforming strings are the §3-profile entries in record
 order, then `Summary.Value` order. `occurrence` indexes exactly this list. A scalar-shaped
@@ -102,7 +101,8 @@ empty member, and so on) is *other*.
   exact 0.5 semantics.
 - `Result06.value` does **not** constrain its type by locator kind. A recorded non-`str` is
   reachable and reported by the checker; a recorded string is not length-bounded by the model.
-- Every non-null 0.6 locator requires an `artifact_id`, exactly as 0.5 object locators do. The
+- Every non-null 0.6 locator requires an `artifact_id`, as every non-null 0.5 locator
+  (including string pointers) does. The
   0.5 schema and loader reject a `tensorboard-string` object; `Manifest06` is a distinct root
   model, not a subclass of `Manifest05`.
 - `schema/runevidence-0.6.schema.json` is generated with `$id urn:runevidence:manifest:0.6`,
@@ -114,7 +114,7 @@ empty member, and so on) is *other*.
 - **Occurrence is per `(artifact_id, kind, tag, step)` — within one event file.** Text
   occurrence counts conforming strings in that file only. Scalar occurrences, ids and names are
   unchanged. The adapter keeps one per-file counter; the checker scans one artifact.
-- **Text result id**: the 0.5 payload plus `NUL + "text"`:
+- **Text result id**: the multifile-updated 0.5 payload plus `NUL + "text"`:
   `UTF-8(run_id) + NUL + UTF-8(artifact_id) + NUL + UTF-8(tag) + NUL + ASCII(step) +
   NUL + ASCII(occurrence) + NUL + "text"`, SHA-256, 16 hex, `tb-res-…`. Scalar ids have no
   suffix and are unchanged.
@@ -168,15 +168,15 @@ metadata); no TensorBoard value was read`. The 0.5 cap text is unchanged.
 
 Human display: `tensorboard-string:step=<step>,occurrence=<n>`. Findings never echo the text.
 `run_claim._display_details` must add `tensorboard-string` so the raw locator dict never leaks;
-`run_lineage` reuses it through `_display_row`. `run` details for a `tensorboard-string` value use the scoped truncation;
-`claim` and `lineage` keep their existing 256-character shortening.
+`run_lineage` reuses it through `_display_row`.
 
 **Truncation scope**: only results whose locator is `tensorboard-string`, and only in human
 output of `compare`, `matrix` and `run`. When `isinstance(value, str) and len(value) > 120`,
 render `json.dumps(value[:120], ensure_ascii=True) + "..."`; otherwise, including every non-`str`
 recorded value reachable under §4, keep the delivered rendering.
 `claim` and `lineage` keep their existing 256-character shortening (the marker stays inside the
-quotes) and only gain the `tensorboard-string` locator display. `--json` keeps the exact value.
+quotes) and only gain the `tensorboard-string` locator display; `run` is the `run_details.py`
+surface. `--json` keeps the exact value.
 Names, parameters, JSON-locator strings and every 0.1–0.5 value keep their delivered rendering.
 
 `leaderboard` keeps excluding non-numeric values as `non_numeric_or_nonfinite`.
@@ -319,6 +319,8 @@ Names, parameters, JSON-locator strings and every 0.1–0.5 value keep their del
 - `edit.py`: no new 0.6 version refusal; `add` and `rehash` keep the delivered 0.4/0.5 rules.
 - `run_comparability.py`: its deny-list must include 0.6 explicitly; a missing entry would
   silently admit the manifest.
+- `packages/runevidence-tensorboard/src/runevidence_tensorboard/adapter.py`: the §7
+  `supports_include_strings`/`include_strings` contract, 0.6 emission, budgets and interleaving.
 - `cli.py`/`migrate.py` help and docstrings that still say "0.5" gain 0.6.
 - `schema/runevidence-0.6.schema.json`: generated and frozen.
 - Tests that use `"0.6"` as the rejected unknown version move to `"0.7"`.
@@ -369,14 +371,15 @@ exact everywhere.
   65,537; merged oneof/tensor interleaving; metadata after tensor; text vs absent/occurrence
   beyond; text and scalar at one tag/step; forced text-name digest collision; NUL/ESC/newline
   values; `--tags` matching only a text tag with and without the flag; nonconforming text tag;
-  the 0.6 scalar-tag refusal text; a non-empty typed field beside `string_val`; wrong-wire
-  field 7/9–18; a text-only event file matched by `--volatile` is refused; text-only 0.6 cap
-  cardinality; scalar/text interleaving order; the full §7 caps-tier precedence (path > profile
-  > unrepresentable scalar tag > too-expensive > caps > fixed-id collision > result-name
-  collision > volatile);
+  the 0.6 scalar-tag refusal text; a non-empty typed field beside `string_val`; field 7/9–18
+  wire 0/1/5 is non-string; field 7/9–18 wire 3/4/6/7 is structural; a text-only event file
+  matched by `--volatile` is refused; text-only 0.6 cap cardinality; scalar/text interleaving
+  order; the full §7 caps-tier precedence (path > profile > unrepresentable scalar tag >
+  too-expensive > caps > fixed-id collision > result-name collision > volatile);
   comparability 0.6 refusal; `add --directory`/`rehash --directory` on 0.6; `run_details.py`
   and claim/lineage display; a 0.5 value keeps its delivered rendering.
-- Consumers: compare/matrix/run/claim/lineage/details/leaderboard on a string restart fixture;
+- Consumers: compare/matrix/run (details)/claim/lineage/leaderboard on a string restart
+  fixture;
   truncation exactly at 120/121 and with astral/combining characters; claim/lineage keep their
   256-character rule; a 0.5 value keeps its delivered rendering.
 - Full matrices 3.10/3.12/3.14, pydantic 2.6/2.14, Windows, packaging, 0.5 regression pins.
