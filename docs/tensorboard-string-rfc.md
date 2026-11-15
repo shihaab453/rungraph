@@ -1,18 +1,17 @@
-# TensorBoard string tensors — design draft (v0.7)
+# TensorBoard string tensors — design draft (v0.10)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.6 admission decision are required before any code.
 Schema 0.1–0.5, their readers/checkers and every delivered behavior stay frozen.
 
-## 0. Changes in v0.7
+## 0. Changes in v0.10
 
-- Folds the round-2 review (DeepSeek): occurrence is explicitly per artifact; the cap wiring
-  names `_locator_kind`, `capped_kinds`, `_csv_cell_cap`, both TensorBoard cap helpers and the
-  128 MiB branch; the name-family proof is corrected; the 0.5 byte-identity pin replaces the
-  false "printed in full" wording; migrate help, `run_comparability.py` and the text-locator
-  fallback are added to the inventory.
-- Keeps the v0.6 fixes: add/rehash follow 0.4/0.5, combined 0.6 scanner, TagFilter classifies
-  before matching, schema-description parity.
+- Folds the round-3 review (DeepSeek): the 120-character rule is guarded on `str`; wrong wire
+  types on TensorProto fields 7 and 9–18 are semantic non-strings, never structural; the
+  verification plan gains comparability, typed-field, text-only cap, interleaving and
+  caps-tier vectors.
+- Keeps the v0.9 edits: claim/lineage 256 rule, `edit.py` has no version refusal, digest-based
+  name proof, 0.6 scalar-tag text.
 
 ## 1. Problem and scope
 
@@ -45,19 +44,22 @@ The 0.6 path uses a **combined scanner**, `scan_tensorboard_06` (the adapter's
 `iter_supported_summaries`): one traversal of the protected snapshot classifies scalars and
 strings with the identical structural grammar. The delivered `scan_scalars` and
 `iter_supported_scalars` are untouched and remain the 0.5 and default-`init` paths; they never
-execute string code and keep today's skip/refusal behavior, so a 0.5 file containing a malformed
-string tensor next to a valid scalar still reads that scalar.
+execute string code and keep today's skip/refusal behavior, so a 0.5 file containing a semantically malformed
+string tensor (not a structural wire refusal) next to a valid scalar still reads that scalar.
 
 Structural failures that already refuse a file remain whole-file refusals and map to every
-locator of both kinds. The delivered grammar refuses: wire types 3, 4, 6 and 7 on any field
-(`_read_key`); wrong wire types on fields 1, 2, 4, 5 and 6; and a packed `float_val`/`double_val`
-whose length is not a multiple of 4/8. Those refusals are unchanged and apply to the 0.6
-traversal too.
+locator of both kinds. The delivered grammar refuses: wire types 3, 4, 6 and 7 on any field (`_read_key`); wrong wire types on **TensorProto**
+fields 1, 2, 4, 5 and 6; and a packed `float_val`/`double_val` whose length is not a multiple of
+4/8. Event/Summary/Summary.Value/Shape/Dim wire checks, framing, CRC and the 16 MiB summary cap
+are covered by the same general rule. Those refusals are unchanged and apply to the 0.6
+traversal too; a wrong wire type on `Summary.Value` field 8 (the `tensor` member) stays
+structural.
 
 The string rules below are semantic: they make an entry non-string but never add a structural
 refusal. A field-8 key with wire type 0, 1 or 5 is skipped and makes the entry non-string; wire
 types 3/4/6/7 on field 8 remain the structural refusal above. A valid `string_val` plus a
-wrong-wire field-8 occurrence is **non-string** (the wrong occurrence wins).
+field-8 occurrence with wire type 0/1/5 is **non-string** (the wrong occurrence wins); a
+3/4/6/7 occurrence is structural.
 
 For a `Summary.Value` whose winning oneof member is `tensor` (field 8):
 
@@ -68,8 +70,9 @@ For a `Summary.Value` whose winning oneof member is `tensor` (field 8):
 - no typed value field is set: 5 `float_val`, 6 `double_val`, 7 `int_val`, 9 `scomplex_val`,
   10 `int64_val`, 11 `bool_val`, 12 `dcomplex_val`, 13 `half_val`, 14 `resource_handle_val`,
   15 `variant_val`, 16 `uint32_val`, 17 `uint64_val`, 18 `float8_val`. "Set" means any
-  occurrence after merge except a zero-length wire-2 payload; a wrong wire type on these fields
-  is governed by the structural rules above;
+  occurrence after merge except a zero-length wire-2 payload. Fields 5 and 6 keep the delivered
+  structural refusal on a wrong wire type; fields 7 and 9–18 are skipped by the delivered
+  grammar, so a wrong wire type there makes the entry **non-string** and is never structural;
 - the single value is strict UTF-8 (a leading BOM is kept), at most 65,536 bytes; an empty
   string is valid;
 - `SummaryMetadata` and `plugin_data.plugin_name` are never read. The kind is a **string
@@ -121,12 +124,12 @@ empty member, and so on) is *other*.
 - Groups are keyed by `(run_id, kind, tag, step)`. A scalar and a string may share a tag and
   step; the `(text)` marker and the id suffix keep names and ids distinct. The run-level
   duplicate-name check still refuses an actual duplicate.
-- Name families stay disjoint because every text name contains ` (text)` immediately before
-  the optional ` #occurrence` / ` [basename] #digest` suffix, and a scalar name never carries
-  that suffix. A scalar tag may itself contain `(text)`, but then the integer step follows it
-  (`foo (text) @ 1`), which is not the text form. A crafted tag/basename can force the same
-  qualified digest only within one kind; the kind in the digest and the `(text)` marker keep
-  the families apart.
+- Name families are disjoint by the digest, not by a syntactic suffix. A crafted tag/basename
+  can make a scalar name and a text name share a prefix (for example a scalar tag containing
+  `(text) [x.tfevents`), but equal names would force equal trailing 16-hex digests, and the
+  text digest payload includes `NUL + "text"` while the scalar payload does not. The families
+  therefore meet only through a 2^-64 truncation collision, which the run-level duplicate-name
+  refusal catches within a run.
 - **Result order with `--include-strings`**: one interleaved list in discovery order (event files
   sorted by path), then record order, then `Summary.Value` order. Scalar positions are unchanged
   relative to each other; text results appear at their record position.
@@ -163,13 +166,14 @@ kinds, including when the manifest has only scalar locators, with
 metadata); no TensorBoard value was read`. The 0.5 cap text is unchanged.
 
 Human display: `tensorboard-string:step=<step>,occurrence=<n>`. Findings never echo the text.
-`run_claim` and `run_lineage` `_display_details` must add `tensorboard-string` so the raw locator
-dict never leaks. `run`/`claim`/`lineage` details for a `tensorboard-string` value use the same
-scoped truncation.
+`run_claim._display_details` must add `tensorboard-string` so the raw locator dict never leaks;
+`run_lineage` reuses it through `_display_row`. `run` details for a `tensorboard-string` value use the scoped truncation;
+`claim` and `lineage` keep their existing 256-character shortening.
 
 **Truncation scope**: only results whose locator is `tensorboard-string`, and only in human
-output of `compare`, `matrix` and `run`. When `len(value) > 120`, render
-`json.dumps(value[:120], ensure_ascii=True) + "..."`; otherwise keep the delivered rendering.
+output of `compare`, `matrix` and `run`. When `isinstance(value, str) and len(value) > 120`,
+render `json.dumps(value[:120], ensure_ascii=True) + "..."`; otherwise, including every non-`str`
+recorded value reachable under §4, keep the delivered rendering.
 `claim` and `lineage` keep their existing 256-character shortening (the marker stays inside the
 quotes) and only gain the `tensorboard-string` locator display. `--json` keeps the exact value.
 Names, parameters, JSON-locator strings and every 0.1–0.5 value keep their delivered rendering.
@@ -213,6 +217,9 @@ Names, parameters, JSON-locator strings and every 0.1–0.5 value keep their del
   `--tags` is present, the `tag_filter` signature contract, pattern validation,
   discovery/selection.
 - Fixed errors:
+  - a scalar with an unrepresentable tag under `--include-strings` uses
+    `a scalar tag cannot be represented in schema 0.6; nothing was written`; the delivered 0.5
+    text is unchanged without the flag;
   - `ERROR: adapter {adapter.name!r} does not support --include-strings. Nothing was written.`
   - `ERROR: adapter {adapter.name!r} cannot apply --include-strings. Nothing was written.`
   - the existing `--tags` unsupported/contract errors are unchanged.
@@ -250,9 +257,10 @@ Names, parameters, JSON-locator strings and every 0.1–0.5 value keep their del
   - `rehash` keeps `type(result.locator) is not str`: a 0.6 manifest containing any object
     locator, including `tensorboard-string`, refuses with the delivered
     `ERROR (LOCATOR_REFRESH_UNSUPPORTED): rehash cannot refresh a manifest that contains an
-    object locator. Nothing was written.` A 0.6 manifest with only string/JSON-pointer or null
-    locators is rehashable, exactly like 0.4/0.5.
-  - the delivered no-digest hint stays correct because string-only 0.6 can be rehashed.
+    object locator. Nothing was written.` A 0.6 manifest with only JSON-pointer strings or null
+    locators is rehashable, exactly like 0.4/0.5; a `tensorboard-string` is an object locator
+    and therefore refuses.
+  - the delivered no-digest hint stays correct for JSON-pointer/null-only 0.6 manifests.
 - **0.6 cap wiring** (part of the checklist below): `_locator_kind` returns
   `tensorboard-string`; `capped_kinds` contains both TensorBoard kinds so neither is skipped;
   `_csv_cell_cap`, `_tensorboard_cap` and `_tensorboard_snapshot_ids` include 0.6; the
@@ -302,7 +310,7 @@ Names, parameters, JSON-locator strings and every 0.1–0.5 value keep their del
 - `locator_profiles.py`: text comparison, `display_locator`.
 - `run_compare.py`, `run_matrix.py`, `run_details.py`, `run_claim.py`, `run_lineage.py`: scoped
   display truncation and `tensorboard-string` in `_display_details`.
-- `edit.py`: 0.6 refusals by version.
+- `edit.py`: no new 0.6 version refusal; `add` and `rehash` keep the delivered 0.4/0.5 rules.
 - `run_comparability.py`: its deny-list must include 0.6 explicitly; a missing entry would
   silently admit the manifest.
 - `cli.py`/`migrate.py` help and docstrings that still say "0.5" gain 0.6.
@@ -341,7 +349,8 @@ exact everywhere.
 - Schema/migration: 0.6 validates; 0.5 rejects 0.6 and a `tensorboard-string` object; 0.6
   rejects a text locator without `artifact_id`; a `tensorboard-string` on a non-`.tfevents`
   artifact reports the TensorBoard extension, not `.csv`/`.jsonl`; `add` on 0.6 succeeds;
-  `rehash` succeeds on string-only 0.6 and refuses when any object locator is present; identity
+  `rehash` succeeds on JSON-pointer/null-only 0.6 and refuses when any object locator, including
+  `tensorboard-string`, is present; identity
   migration preserves 0.2-only fields;
   0.3/0.4→0.6 with jsonl/csv-cell locators; downgrade codes; init refusal; event-volatile;
   migrate/conditions/results/graph 0.6 texts; unknown-version tests moved to 0.7.
@@ -354,7 +363,11 @@ exact everywhere.
   65,537; merged oneof/tensor interleaving; metadata after tensor; text vs absent/occurrence
   beyond; text and scalar at one tag/step; forced text-name digest collision; NUL/ESC/newline
   values; `--tags` matching only a text tag with and without the flag; nonconforming text tag;
-  `run_details.py`/claim/lineage display; a 0.5 value keeps its delivered rendering.
+  the 0.6 scalar-tag refusal text; a non-empty typed field beside `string_val`; wrong-wire
+  field 7/9–18; text-only 0.6 cap cardinality; scalar/text interleaving order; the caps-tier
+  precedence (too-expensive > caps > id collision > name collision > volatile);
+  comparability 0.6 refusal; `add --directory`/`rehash --directory` on 0.6; `run_details.py`
+  and claim/lineage display; a 0.5 value keeps its delivered rendering.
 - Consumers: compare/matrix/run/claim/lineage/details/leaderboard on a string restart fixture;
   truncation exactly at 120/121 and with astral/combining characters; claim/lineage keep their
   256-character rule; a 0.5 value keeps its delivered rendering.
@@ -373,8 +386,8 @@ exact everywhere.
 - **D6:** 64 KiB/value, 16 MiB text bytes, 10,000 shared results.
 - **D7:** exact comparison, seven selection rows plus the structural row, scoped truncation,
   no new finding codes.
-- **D8:** identity migration, `INIT_0_6_REFUSAL`, 0.6 refusals by schema version, fixed 0.6
-  texts.
+- **D8:** identity migration, `INIT_0_6_REFUSAL`, version refusals by comparability/fingerprint/
+  conditions, add/rehash per 0.4/0.5, fixed 0.6 texts.
 - **D9:** every 0.6 admission gate in §8 is part of the slice, including save/load dispatch,
   `_version_specific_shape`, caps, routing, `init --force` and event-volatile; 0.5 output and
   schema bytes stay unchanged.
