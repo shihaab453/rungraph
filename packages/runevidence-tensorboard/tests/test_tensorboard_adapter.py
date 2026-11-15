@@ -28,10 +28,14 @@ from runevidence.adapters import AdapterError, available_adapters  # noqa: E402
 from runevidence.adapters.generic import GenericAdapter  # noqa: E402
 from runevidence.checks import EXIT_INVALID  # noqa: E402
 from runevidence.checks import files as files_module  # noqa: E402
-from runevidence.cli import main  # noqa: E402
+from runevidence.cli import _event_artifact_is_volatile, main  # noqa: E402
 from runevidence.models import (  # noqa: E402
     MANIFEST_FILENAME,
+    SCHEMA_VERSION_0_5,
+    Artifact,
     Manifest05,
+    Project,
+    Run,
     TensorboardLocator,
 )
 from runevidence.tag_filter import TagFilter, TagPatternTooExpensive  # noqa: E402
@@ -1303,3 +1307,134 @@ def test_absolute_root_does_not_change_ids_names_or_digests(tmp_path):
     first = _extract(first_root).model_dump()
     second = _extract(second_root).model_dump()
     assert first == second
+
+
+# --- remaining RFC vectors --------------------------------------------------
+
+
+def test_volatile_predicate_ignores_directory_artifacts():
+    directory = Manifest05(
+        schema_version=SCHEMA_VERSION_0_5,
+        project=Project(id="p", name="P"),
+        runs=[],
+        artifacts=[
+            Artifact(
+                id="d",
+                path="x.tfevents",
+                artifact_type="directory",
+                digest_format="runevidence-directory-v1",
+            )
+        ],
+        results=[],
+        evidence=[],
+    )
+    assert not _event_artifact_is_volatile(directory, ["x.tfevents"])
+
+    file_artifact = Manifest05(
+        schema_version=SCHEMA_VERSION_0_5,
+        project=Project(id="p", name="P"),
+        runs=[Run(id="r", name=".")],
+        artifacts=[Artifact(id="f", path="x.tfevents", sha256="a" * 64, size_bytes=1)],
+        results=[],
+        evidence=[],
+    )
+    assert _event_artifact_is_volatile(file_artifact, ["x.tfevents"])
+
+
+def test_signature_failure_maps_to_the_contract_error(monkeypatch, tmp_path, capsys):
+    class BrokenSignature:
+        name = "fake"
+        supports_tag_filters = True
+        extract = 42
+
+    from runevidence import cli as cli_module
+
+    monkeypatch.setattr(cli_module, "get_adapter", lambda name: BrokenSignature())
+    root = _two_tag_folder(tmp_path)
+    assert main(["init", str(root), "--adapter", "fake", "--tags", "loss"]) == 2
+    out = capsys.readouterr().out
+    assert "ERROR: adapter 'fake' cannot apply --tags. Nothing was written." in out
+
+
+def test_adapter_internal_type_error_is_not_mislabeled(monkeypatch, tmp_path):
+    class InternalTypeError:
+        name = "fake"
+        supports_tag_filters = True
+
+        def discover(self, root):
+            return adapter_module.Discovery(root=root, files=[])
+
+        def extract(self, root, discovery, *, project_id, project_name, tag_filter=None):
+            raise TypeError("adapter bug")
+
+    from runevidence import cli as cli_module
+
+    monkeypatch.setattr(cli_module, "get_adapter", lambda name: InternalTypeError())
+    root = _two_tag_folder(tmp_path)
+    with pytest.raises(TypeError, match="adapter bug"):
+        main(["init", str(root), "--adapter", "fake", "--tags", "loss"])
+
+
+def test_restart_fixture_passes_compare_matrix_and_leaderboard(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    for run, base in (("trainA", 1.0), ("trainB", 2.0)):
+        for name, delta in (("a.tfevents", 0.0), ("z.tfevents", 0.5)):
+            _write(
+                root / run / name,
+                _records(_scalar_event(b"loss", base + delta, step=1)),
+            )
+    assert main(["init", str(root), "--adapter", "tensorboard"]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    runs = {run["name"]: run["id"] for run in document["runs"]}
+    metric = document["results"][0]["name"]
+    assert main(["compare", "--base", runs["trainA"], "--target", runs["trainB"], str(root)]) == 0
+    capsys.readouterr()
+    assert main(["matrix", str(root)]) == 0
+    capsys.readouterr()
+    assert main(["leaderboard", "--metric", metric, "--direction", "min", str(root)]) == 0
+
+
+def test_cross_run_qualified_names_do_not_align_on_different_paths(tmp_path):
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    for root in (first, second):
+        _write(root / "trainA" / "e.tfevents", _records(_scalar_event(b"loss", 1.0, step=1)))
+        _write(root / "trainA" / "z.tfevents", _records(_scalar_event(b"loss", 2.0, step=1)))
+    first_names = {result.name for result in _extract(first).results}
+    second_names = {result.name for result in _extract(second).results}
+    assert first_names == second_names  # same relative paths align
+
+    other = tmp_path / "three"
+    _write(other / "trainB" / "e.tfevents", _records(_scalar_event(b"loss", 1.0, step=1)))
+    _write(other / "trainB" / "z.tfevents", _records(_scalar_event(b"loss", 2.0, step=1)))
+    other_names = {result.name for result in _extract(other).results}
+    assert first_names.isdisjoint(other_names)
+
+
+def test_a_directory_named_tfevents_is_not_an_event_file(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "x.tfevents" / "notes.txt", b"not an event file\n")
+    manifest = _extract(root)
+    assert manifest.runs == []
+    assert [artifact.path for artifact in manifest.artifacts] == ["x.tfevents/notes.txt"]
+
+    _write(root / "x.tfevents" / "e.tfevents", _records(_scalar_event(b"loss", 0.5)))
+    manifest = _extract(root)
+    assert [run.name for run in manifest.runs] == ["x.tfevents"]
+
+
+def test_result_cap_does_not_outrank_a_profile_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(adapter_module, "MAX_RESULTS", 1)
+    root = tmp_path / "experiment"
+    _write(
+        root / "a.tfevents",
+        _records(
+            _scalar_event(b"loss", 1.0, step=1),
+            _scalar_event(b"loss", 2.0, step=2),
+        ),
+    )
+    _write(root / "z.tfevents", _record(_scalar_event(b"loss", 3.0))[:-3])
+    with pytest.raises(AdapterError) as excinfo:
+        _extract(root)
+    assert str(excinfo.value) == PROFILE_MESSAGE

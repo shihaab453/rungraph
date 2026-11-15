@@ -130,8 +130,8 @@ HISTORICAL_READER_DIGEST_23 = (
 # pin is an exact byte SHA-256. Nothing is normalized during checking. Static
 # != plugin safety.
 CLI_HASH = frozenset({
-    "a4b596f1966af4dc3d02e1767ec278ff3dbda338a6cd0c21e42262c6b930c0d4",  # LF
-    "1d23e08aa60f2bbd8dbee27873d78a2bd25d9c3b0c5048ed18a68da77bdc5d04",  # CRLF
+    "3f2aa14be57a04bf00c5182a831757fb6a49900b650fa065c097ea8237d35dd7",  # LF
+    "6d7072e2a89989c113e25afa5240f611a64fc802b31ecfc7df2442f201620b58",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.

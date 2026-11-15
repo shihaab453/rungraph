@@ -2509,7 +2509,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATTERN",
         help=(
             "only record scalars whose tag matches this full-string glob (repeatable; "
-            "* and ? wildcards, backslash escapes, no [...] classes; "
+            "quote it so the shell does not expand the wildcards; * and ? wildcards, "
+            "backslash escapes, no [...] classes, unlike --volatile; "
             "use --tags=PATTERN for a leading '-')"
         ),
     )

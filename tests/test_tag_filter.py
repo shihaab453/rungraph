@@ -75,7 +75,7 @@ def test_wildcard_segment_charges_the_same_as_find():
     assert TagFilter(["x?z*"]).matches("xyz")
 
 
-def test_cache_prevents_double_charging_and_repeats_are_separate_patterns():
+def test_cache_prevents_double_charging_and_repeated_text_is_one_pair():
     tag_filter = TagFilter(["*ab*b"])
     assert not tag_filter.matches("xxxx")
     assert tag_filter.spent == 4
@@ -84,8 +84,10 @@ def test_cache_prevents_double_charging_and_repeats_are_separate_patterns():
 
     duplicate = TagFilter(["ab", "ab"])
     assert duplicate.matches("ab")
-    # Two pattern positions are two evaluated pairs.
-    assert duplicate.spent == 4
+    # The pair is keyed by pattern text, so repeating it charges once; both
+    # command-line positions still count as matched for the warning pass.
+    assert duplicate.spent == 2
+    assert duplicate.unmatched_patterns() == ()
 
 
 def test_or_selection_does_not_short_circuit_later_patterns():
@@ -199,3 +201,11 @@ def test_warning_pass_reads_the_cache():
     assert tag_filter.spent == 47_139_750
     assert tag_filter.unmatched_patterns() == (EXPENSIVE,)
 
+
+
+def test_repeated_expensive_pattern_text_stays_within_budget():
+    repeated = TagFilter([EXPENSIVE, EXPENSIVE])
+    for tag in TAGS[:15]:
+        assert not repeated.matches(tag)
+    assert repeated.spent == 47_139_750
+    assert repeated.unmatched_patterns() == (EXPENSIVE, EXPENSIVE)

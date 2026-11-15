@@ -173,7 +173,7 @@ class TagFilter:
         self._patterns = tuple(_compile(pattern) for pattern in self._sources)
         self._budget = budget
         self._spent = 0
-        self._cache: dict[tuple[str, int], bool] = {}
+        self._cache: dict[tuple[str, str], bool] = {}
         self._matched = [False] * len(self._patterns)
         self._exhausted = False
 
@@ -208,7 +208,7 @@ class TagFilter:
 
         selected = False
         for index, pattern in enumerate(self._patterns):
-            key = (tag, index)
+            key = (tag, pattern.source)
             cached = self._cache.get(key)
             if cached is None:
                 cost, hit = _evaluate(pattern, tag)

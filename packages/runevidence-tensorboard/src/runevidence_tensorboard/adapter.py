@@ -103,7 +103,7 @@ class TensorboardAdapter(Adapter):
     name = "tensorboard"
     supports_tag_filters = True
     description = (
-        "TensorBoard log directories: one run per directory, every supported scalar as a result."
+        "TensorBoard log directories: one run per directory, selected scalars as results."
     )
 
     def discover(self, root: Path) -> Discovery:
