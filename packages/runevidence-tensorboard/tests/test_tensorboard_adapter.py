@@ -899,8 +899,8 @@ def test_filter_budget_is_the_core_exception_not_an_adapter_error(tmp_path):
 
 def test_profile_failure_outranks_too_expensive(tmp_path):
     root = tmp_path / "experiment"
-    _write(root / "a.tfevents", _record(_scalar_event(b"loss", 0.5))[:-3])
-    _write(root / "b.tfevents", _records(_scalar_event(b"ab", 1.0)))
+    _write(root / "a.tfevents", _records(_scalar_event(b"ab", 1.0)))
+    _write(root / "z.tfevents", _record(_scalar_event(b"loss", 0.5))[:-3])
     with pytest.raises(AdapterError) as excinfo:
         _extract(root, TagFilter(["ab"], budget=1))
     assert str(excinfo.value) == PROFILE_MESSAGE
@@ -1139,3 +1139,17 @@ def test_cli_tags_repeatable_or_and_leading_dash(tmp_path, capsys):
     assert "WARNING: --tags pattern '-acc'" in out
     document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
     assert [result["locator"]["tag"] for result in document["results"]] == ["loss"]
+
+
+def test_result_cap_counts_only_selected_scalars(tmp_path):
+    root = tmp_path / "experiment"
+    records = [_scalar_event(b"skip", index * 0.5, step=index) for index in range(10_001)]
+    records.append(_scalar_event(b"keep", 1.0))
+    _write(root / "events.out.tfevents.1", _records(*records))
+
+    with pytest.raises(AdapterError) as excinfo:
+        _extract(root)
+    assert str(excinfo.value) == BUDGET_MESSAGE
+
+    manifest = _extract(root, TagFilter(["keep"]))
+    assert [result.locator.tag for result in manifest.results] == ["keep"]
