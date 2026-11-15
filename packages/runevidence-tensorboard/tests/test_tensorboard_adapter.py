@@ -1997,17 +1997,14 @@ def test_compare_and_matrix_use_each_result_locator(tmp_path, capsys):
         "runs": [
             {"id": "ra", "name": "ra", "params": {"notes": long_text}},
             {"id": "rb", "name": "rb", "params": {"notes": long_text}},
-            {"id": "rc", "name": "rc"},
         ],
         "artifacts": [
             {"id": "a", "path": "e.tfevents", "sha256": "a" * 64, "size_bytes": 1}
         ],
         "results": [
-            {"id": "r1", "run_id": "ra", "name": "notes", "value": long_text},
-            {"id": "r2", "run_id": "rb", "name": "notes", "value": long_text},
             {
-                "id": "r3",
-                "run_id": "rc",
+                "id": "r1",
+                "run_id": "ra",
                 "name": "notes",
                 "value": long_text,
                 "artifact_id": "a",
@@ -2018,20 +2015,25 @@ def test_compare_and_matrix_use_each_result_locator(tmp_path, capsys):
                     "occurrence": 0,
                 },
             },
+            {"id": "r2", "run_id": "rb", "name": "notes", "value": long_text},
         ],
         "evidence": [],
     }
     (root / MANIFEST_FILENAME).write_text(json.dumps(document), encoding="utf-8")
+    # Compare: the parameter and the null-locator target stay full; only the
+    # baseline string-locator result is shortened.
     assert main(["compare", "--base", "ra", "--target", "rb", str(root)]) == 0
     out = capsys.readouterr().out
     assert long_text in out
-    assert "..." not in out
-    assert (
-        main(["matrix", str(root), "--run", "ra", "--run", "rb"]) == 0
-    )
+    assert "..." in out
+    # Matrix: ra's text cell is shortened, rb's null-locator cell stays full.
+    assert main(["matrix", str(root), "--run", "ra", "--run", "rb"]) == 0
     out = capsys.readouterr().out
     assert long_text in out
-    assert "..." not in out
+    assert "..." in out
+    ra_line = next(line for line in out.splitlines() if '"ra"' in line)
+    assert "..." not in ra_line  # run name line, not the cells
+    assert any("..." in line for line in out.splitlines())
 
 
 def test_scanner_dispatch_is_per_schema(tmp_path, capsys, monkeypatch):
