@@ -1066,3 +1066,34 @@ def test_cli_volatile_refuses_an_empty_event_file(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "an event artifact cannot be volatile; nothing was written" in out
     assert not (root / MANIFEST_FILENAME).exists()
+
+
+def test_real_tensorboard_fixtures_in_one_directory_share_a_run(tmp_path):
+    data = Path(__file__).resolve().parents[3] / "tests" / "data" / "tensorboard"
+    root = tmp_path / "experiment"
+    (root / "logs").mkdir(parents=True)
+    for name in ("legacy-simple-value.tfevents", "tensor-content.tfevents"):
+        (root / "logs" / name).write_bytes((data / name).read_bytes())
+    manifest = _extract(root)
+    assert [run.name for run in manifest.runs] == ["logs"]
+    assert {artifact.path for artifact in manifest.artifacts} == {
+        "logs/legacy-simple-value.tfevents",
+        "logs/tensor-content.tfevents",
+    }
+    assert manifest.results
+
+
+def test_discovery_order_cannot_change_ids_names_or_output(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "logs" / "a.tfevents", _records(_scalar_event(b"loss", 1.0, step=1)))
+    _write(root / "logs" / "z.tfevents", _records(_scalar_event(b"loss", 2.0, step=1)))
+    adapter = TensorboardAdapter()
+    discovery = adapter.discover(root)
+    first = adapter.extract(
+        root, discovery, project_id="p", project_name="P"
+    ).model_dump()
+    discovery.files.reverse()
+    second = adapter.extract(
+        root, discovery, project_id="p", project_name="P"
+    ).model_dump()
+    assert first == second
