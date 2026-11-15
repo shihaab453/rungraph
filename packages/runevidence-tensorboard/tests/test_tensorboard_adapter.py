@@ -1285,3 +1285,21 @@ def test_nul_in_a_tag_keeps_the_id_payload_unambiguous(tmp_path):
     assert [result.locator.tag for result in manifest.results] == ["loss", "loss\x00raw"]
     assert len({result.id for result in manifest.results}) == 2
     assert len({result.name for result in manifest.results}) == 2
+
+
+def test_non_ascii_directory_names_are_recorded_verbatim(tmp_path):
+    root = tmp_path / "experiment"
+    _write(root / "lögs" / "e.tfevents", _records(_scalar_event(b"loss", 0.5, step=1)))
+    manifest = _extract(root)
+    assert [run.name for run in manifest.runs] == ["lögs"]
+    assert manifest.runs[0].id == _run_id("lögs")
+
+
+def test_absolute_root_does_not_change_ids_names_or_digests(tmp_path):
+    first_root = tmp_path / "one" / "experiment"
+    second_root = tmp_path / "two" / "experiment"
+    for root in (first_root, second_root):
+        _write(root / "logs" / "a.tfevents", _records(_scalar_event(b"loss", 0.5, step=1)))
+    first = _extract(first_root).model_dump()
+    second = _extract(second_root).model_dump()
+    assert first == second
