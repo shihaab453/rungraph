@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from runevidence.workspace import WORKSPACE_FILENAME, load_workspace
+from runevidence.workspace_consumers import impact_data
 from runevidence.workspace_graph import (
     build_graph,
     claim_states,
@@ -307,3 +308,69 @@ def test_a_cited_run_with_no_dependencies_stays_in_the_closure(tmp_path: Path):
     member_claim = next(item for item in result if item.member == "a")
     assert {"unresolved", "at-risk"} <= set(member_claim.labels)
     assert "run:a#r" in claim_support_closure(graph, "evidence:a#e", {"supports"})
+
+
+def test_impact_from_a_run_input_names_the_citing_claims(tmp_path: Path):
+    root = make_workspace(tmp_path)
+    manifest_path = root / "a" / "runevidence.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"].append(
+        {"id": "input", "path": "missing.csv", "sha256": "0" * 64, "size_bytes": 1}
+    )
+    manifest["relationships"] = [{"source": "input", "target": "r", "type": "input_to"}]
+    manifest["results"] = [{"id": "acc", "run_id": "r", "name": "accuracy", "value": 0.9}]
+    manifest["evidence"] = [
+        {"id": "claim", "claim": "accuracy holds", "supports": ["acc"], "contradicts": []}
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    claims = [
+        {
+            "id": "w1",
+            "claim": "workspace accuracy holds",
+            "supports": [{"member": "a", "id": "acc"}],
+            "contradicts": [],
+        }
+    ]
+    (root / "rungraph.json").write_text(
+        json.dumps(
+            {
+                "format": "rungraph-workspace",
+                "version": "0.1",
+                "id": "study",
+                "name": "Study",
+                "members": [{"id": "a", "path": "a"}],
+                "claims": claims,
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = load_workspace(root)
+    graph = build_graph(loaded)
+    checks = run_member_checks(loaded)
+    states = claim_states(loaded, graph, checks["findings"])
+    data = impact_data(loaded, graph, states, "artifact:a#input")
+    assert {item["id"] for item in data["claims"]} == {"claim", "w1"}
+
+
+def test_the_closure_keeps_every_recorded_producer(tmp_path: Path):
+    root = make_workspace(tmp_path)
+    manifest_path = root / "a" / "runevidence.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["runs"] = [{"id": "r"}, {"id": "r2"}]
+    manifest["artifacts"] = [
+        {"id": "art", "path": "art.bin", "sha256": "0" * 64, "size_bytes": 1, "run_id": "r"},
+        {"id": "input2", "path": "in2.bin", "sha256": "0" * 64, "size_bytes": 1},
+    ]
+    manifest["relationships"] = [
+        {"source": "art", "target": "r2", "type": "produced_by"},
+        {"source": "input2", "target": "r2", "type": "input_to"},
+    ]
+    manifest["evidence"] = [
+        {"id": "e", "claim": "art holds", "supports": ["art"], "contradicts": []}
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    graph, result = states(root)
+    member_claim = next(item for item in result if item.member == "a")
+    assert "at-risk" in member_claim.labels
+    closure = claim_support_closure(graph, "evidence:a#e", {"supports"})
+    assert {"run:a#r", "run:a#r2", "artifact:a#input2"} <= closure
