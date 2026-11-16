@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, Iterable, Optional
@@ -200,7 +201,11 @@ def _claim_ref_target(graph: Graph, loaded: LoadedWorkspace, ref: Ref) -> str:
             graph.nodes[target] = Node(target, "claim", loaded.document.id, ref.claim, "unresolved")
             graph.unresolved.append(target)
         return target
-    if ref.member not in loaded.members or loaded.members[ref.member].manifest is None:
+    if (
+        ref.member not in loaded.members
+        or loaded.members[ref.member].manifest is None
+        or ref.member in graph.ambiguous_members
+    ):
         unresolved = f"unresolved:{ref.member}#{ref.id}"
         graph.nodes.setdefault(
             unresolved, Node(unresolved, "unresolved", ref.member, ref.id, "unresolved")
@@ -215,7 +220,9 @@ def _claim_ref_target(graph: Graph, loaded: LoadedWorkspace, ref: Ref) -> str:
 def _claim_ref(graph: Graph, loaded: LoadedWorkspace, source: str, ref: Ref, relation: T, origin: str) -> None:
     target = _claim_ref_target(graph, loaded, ref)
     node = graph.nodes.get(target)
-    if node is not None and node.kind in ("artifact", "run", "project"):
+    if node is None:
+        return
+    if node.kind in ("artifact", "run", "project"):
         graph.context.append({"source": source, "target": target, "relation": relation.value})
         return
     _add_edge(graph, source, target, relation, origin)
@@ -300,28 +307,91 @@ def _finding_touches(findings: dict[str, list[Finding]], node: str) -> bool:
     return any(item.severity == Severity.error for item in findings.get(node, ()))
 
 
-def _closure(graph: Graph, start: str) -> set[str]:
-    seen: set[str] = set()
-    stack = [start]
-    outgoing = graph.outgoing()
-    while stack:
-        node = stack.pop()
-        if node in seen:
-            continue
-        seen.add(node)
-        for edge in outgoing.get(node, ()):
-            if edge.relation not in ("contains",):
-                stack.append(edge.target)
-    return seen
+def _dependency_maps(graph: Graph):
+    """Recorded dependency relations, with input_to read in its dependency direction."""
+    reported: dict[str, set[str]] = defaultdict(set)
+    producer: dict[str, str] = {}
+    produced: dict[str, set[str]] = defaultdict(set)
+    inputs: dict[str, set[str]] = defaultdict(set)
+    derived: dict[str, set[str]] = defaultdict(set)
+    citations: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for edge in graph.edges:
+        if edge.relation == "reported_in":
+            reported[edge.source].add(edge.target)
+        elif edge.relation == "result_of":
+            producer[edge.source] = edge.target
+        elif edge.relation == "produced_by":
+            producer[edge.source] = edge.target
+            produced[edge.target].add(edge.source)
+        elif edge.relation == "input_to":
+            inputs[edge.target].add(edge.source)
+        elif edge.relation == "derived_from":
+            derived[edge.source].add(edge.target)
+        elif edge.relation in ("supports", "contradicts"):
+            citations[edge.source].append((edge.relation, edge.target))
+    return reported, producer, produced, inputs, derived, citations
 
 
 def claim_support_closure(graph: Graph, start: str, relations: set[str]) -> set[str]:
-    """The support closure reached from one claim node through named relations."""
-    spans: set[str] = set()
-    for edge in graph.edges:
-        if edge.source == start and edge.relation in relations:
-            spans |= _closure(graph, edge.target)
-    return spans
+    """The support closure reached from one claim node through named relations.
+
+    Mirrors the delivered manifest lineage: a result reaches its source files and
+    the inputs of its run, an artifact reaches its producing run and
+    derived_from ancestors, and a run reaches its inputs. ``input_to`` is read
+    in its dependency direction (run to artifact), not its stored direction.
+    """
+    reported, producer, produced, inputs, derived, citations = _dependency_maps(graph)
+
+    def kind(node: str) -> str:
+        item = graph.nodes.get(node)
+        return item.kind if item is not None else "unresolved"
+
+    def foundations(node: str) -> set[str]:
+        current = kind(node)
+        if current == "result":
+            found = {node} | set(reported.get(node, ()))
+            run = producer.get(node)
+            if run is not None:
+                found |= set(inputs.get(run, ()))
+            return found
+        if current == "run":
+            return set(produced.get(node, ())) | set(inputs.get(node, ()))
+        return {node}
+
+    def upstream(node: str) -> set[str]:
+        current = kind(node)
+        found: set[str] = set()
+        if current == "result":
+            found |= set(reported.get(node, ()))
+            run = producer.get(node)
+            if run is not None:
+                found.add(run)
+        elif current == "artifact":
+            run = producer.get(node)
+            if run is not None:
+                found.add(run)
+            found |= set(derived.get(node, ()))
+        elif current == "run":
+            found |= set(inputs.get(node, ())) | set(derived.get(node, ()))
+        elif current in ("claim", "evidence"):
+            found |= {target for relation, target in citations.get(node, ()) if relation in relations}
+        return found
+
+    seeds = [edge.target for edge in graph.edges if edge.source == start and edge.relation in relations]
+    reached: set[str] = set()
+    queue: deque[str] = deque()
+    for seed in seeds:
+        for item in sorted(foundations(seed)):
+            if item not in reached:
+                reached.add(item)
+                queue.append(item)
+    while queue:
+        node = queue.popleft()
+        for item in sorted(upstream(node)):
+            if item not in reached:
+                reached.add(item)
+                queue.append(item)
+    return reached
 
 
 def claim_states(
@@ -363,25 +433,21 @@ def claim_states(
             return ClaimState(claim_id, None, claim.claim, ["unresolved", "at-risk"])
         visiting.add(key)
         labels: set[str] = set()
-        closure: set[str] = set()
         cited = False
         for ref in claim.supports + claim.contradicts:
             target = _claim_ref_target(graph, loaded, ref)
-            if target is None or graph.nodes.get(target, Node("", "", None, None)).status == "unresolved":
+            node = graph.nodes.get(target)
+            if node is None or node.status == "unresolved":
                 labels.add("unresolved")
                 labels.add("at-risk")
                 continue
-            node = graph.nodes[target]
             if node.kind in ("artifact", "run", "project"):
                 continue
             cited = True
-            closure |= _closure(graph, target)
             if node.kind == "claim":
                 inherited = workspace_state(node.local or "") if (node.local or "") in {c.id for c in loaded.document.claims} else cache.get(target)
                 if inherited is not None:
                     labels |= set(inherited.labels)
-            elif any(_finding_touches(by_node, item) for item in closure):
-                labels.add("at-risk")
             if ref in claim.contradicts and node.status == "recorded":
                 labels.add("contradiction-recorded")
         whole = claim_support_closure(graph, key, {"supports", "contradicts"})

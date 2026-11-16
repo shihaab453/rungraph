@@ -633,22 +633,30 @@ def _apply_operation(raw: dict[str, Any], operation: dict[str, Any]) -> None:
     raise _patch_error(f"unknown patch operation {kind!r}")
 
 
-def _manifest_index(manifest: Manifest) -> set[str]:
-    ids = {manifest.project.id}
-    ids |= {item.id for item in manifest.runs}
-    ids |= {item.id for item in manifest.artifacts}
-    ids |= {item.id for item in manifest.results}
-    ids |= {item.id for item in manifest.evidence}
-    return ids
+def _manifest_index(manifest: Manifest) -> tuple[set[str], set[str]]:
+    ids: set[str] = set()
+    duplicates: set[str] = set()
+    for identifier in (
+        [manifest.project.id]
+        + [item.id for item in manifest.runs]
+        + [item.id for item in manifest.artifacts]
+        + [item.id for item in manifest.results]
+        + [item.id for item in manifest.evidence]
+    ):
+        if identifier in ids:
+            duplicates.add(identifier)
+        ids.add(identifier)
+    return ids, duplicates
 
 
 def _validate_refs(loaded_members: dict[str, LoadedMember], document: Workspace) -> None:
     claim_ids = {claim.id for claim in document.claims}
     indexes = {}
+    duplicates: dict[str, set[str]] = {}
     for member_id, item in loaded_members.items():
         if item.manifest is None:
             raise _patch_error(f"member {member_id!r} has no readable manifest")
-        indexes[member_id] = _manifest_index(item.manifest)
+        indexes[member_id], duplicates[member_id] = _manifest_index(item.manifest)
     for claim in document.claims:
         for ref in claim.supports + claim.contradicts:
             if ref.claim is not None:
@@ -659,6 +667,10 @@ def _validate_refs(loaded_members: dict[str, LoadedMember], document: Workspace)
                     raise _patch_error(f"claim {claim.id!r}: unknown member {ref.member!r}")
                 if ref.id not in indexes[ref.member]:
                     raise _patch_error(f"claim {claim.id!r}: {ref.member}#{ref.id} does not resolve")
+                if ref.id in duplicates[ref.member]:
+                    raise _patch_error(
+                        f"claim {claim.id!r}: {ref.member}#{ref.id} does not resolve unambiguously"
+                    )
     for relationship in document.relationships:
         for ref in (relationship.source, relationship.target):
             if ref.claim is not None:
@@ -669,6 +681,10 @@ def _validate_refs(loaded_members: dict[str, LoadedMember], document: Workspace)
                     raise _patch_error(f"relationship {relationship.id!r}: unknown member {ref.member!r}")
                 if ref.id not in indexes[ref.member]:
                     raise _patch_error(f"relationship {relationship.id!r}: {ref.member}#{ref.id} does not resolve")
+                if ref.id in duplicates[ref.member]:
+                    raise _patch_error(
+                        f"relationship {relationship.id!r}: {ref.member}#{ref.id} does not resolve unambiguously"
+                    )
 
 
 def apply_patch(

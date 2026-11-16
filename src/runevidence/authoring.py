@@ -84,6 +84,7 @@ def edit_result(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
         if key == "id":
             continue
         result[key] = value
+    _text(result, "name", "a result")
     runs = {item["id"] for item in raw.get("runs", [])}
     if not isinstance(result.get("run_id"), str) or result.get("run_id") not in runs:
         raise AuthoringError(f"run {result.get('run_id')!r} does not exist")
@@ -140,6 +141,7 @@ def edit_evidence(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
         if key == "id":
             continue
         evidence[key] = value
+    _text(evidence, "claim", "a claim")
     _check_refs(raw, evidence, ("supports", "contradicts"))
     _validate(raw)
 

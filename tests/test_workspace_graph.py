@@ -197,3 +197,90 @@ def test_a_declared_claim_citation_is_not_unresolved(tmp_path: Path):
     assert graph.unresolved == []
     second = next(item for item in result if item.id == "w2")
     assert "unresolved" not in second.labels
+
+
+def test_a_claim_citing_a_duplicated_member_id_is_unresolved_not_a_crash(tmp_path: Path):
+    root = make_workspace(tmp_path)
+    manifest_path = root / "a" / "runevidence.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["results"] = [{"id": "r", "run_id": "r", "name": "accuracy", "value": 0.9}]
+    manifest["evidence"] = []
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    claims = [
+        {
+            "id": "w1",
+            "claim": "an ambiguous member id",
+            "supports": [{"member": "a", "id": "r"}],
+            "contradicts": [],
+        }
+    ]
+    (root / "rungraph.json").write_text(
+        json.dumps(
+            {
+                "format": "rungraph-workspace",
+                "version": "0.1",
+                "id": "study",
+                "name": "Study",
+                "members": [{"id": "a", "path": "a"}],
+                "claims": claims,
+            }
+        ),
+        encoding="utf-8",
+    )
+    graph, result = states(root)
+    workspace_claim = next(item for item in result if item.member is None)
+    assert {"unresolved", "at-risk"} <= set(workspace_claim.labels)
+    assert "unresolved:a#r" in graph.unresolved
+
+
+def test_a_run_input_makes_citing_claims_at_risk(tmp_path: Path):
+    root = make_workspace(tmp_path)
+    manifest_path = root / "a" / "runevidence.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"].append(
+        {"id": "input", "path": "missing.csv", "sha256": "0" * 64, "size_bytes": 1}
+    )
+    manifest["relationships"] = [
+        {"source": "input", "target": "r", "type": "input_to"}
+    ]
+    manifest["results"] = [
+        {"id": "acc", "run_id": "r", "name": "accuracy", "value": 0.9}
+    ]
+    manifest["evidence"] = [
+        {"id": "claim", "claim": "accuracy holds", "supports": ["acc"], "contradicts": []}
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    claims = [
+        {
+            "id": "w1",
+            "claim": "workspace accuracy holds",
+            "supports": [{"member": "a", "id": "acc"}],
+            "contradicts": [],
+        }
+    ]
+    (root / "rungraph.json").write_text(
+        json.dumps(
+            {
+                "format": "rungraph-workspace",
+                "version": "0.1",
+                "id": "study",
+                "name": "Study",
+                "members": [{"id": "a", "path": "a"}],
+                "claims": claims,
+            }
+        ),
+        encoding="utf-8",
+    )
+    graph, result = states(root)
+    member_claim = next(item for item in result if item.member == "a")
+    workspace_claim = next(item for item in result if item.member is None)
+    assert "at-risk" in member_claim.labels
+    assert "at-risk" in workspace_claim.labels
+
+    from runevidence.workspace import load_workspace
+    from runevidence.workspace_consumers import claim_closure
+
+    loaded = load_workspace(root)
+    closure = claim_closure(loaded, graph, workspace_claim)
+    assert "artifact:a#input" in closure
+    assert "result:a#acc" in closure

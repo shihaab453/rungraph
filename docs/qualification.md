@@ -39,7 +39,7 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,180 passed, 138 skipped on Python 3.12; 6,177 passed, 141 skipped on
+- **Full suite**: 6,184 passed, 138 skipped on Python 3.12; 6,181 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
@@ -95,11 +95,15 @@ The probe found and fixed these defects, each with a regression test:
 - A result ID that was not a string raised `TypeError`; required IDs and reference names are
   now checked as non-empty strings (`tests/test_authoring.py`).
 - Workspace and member claims with an unresolved support reference were not `at-risk`, and a
-  member claim did not follow relationship and dependency-closure errors. Claim states now
-  use the same support closure as `report`/`impact` (`tests/test_workspace_graph.py`).
-- An unknown member or workspace-claim reference disappeared from `graph`'s unresolved list
-  or raised `KeyError`; both are now named unresolved nodes, so `graph --fail-on-unresolved`
-  exits 1 (`tests/test_workspace_graph.py`).
+  member claim did not follow relationship and dependency-closure errors, including the
+  inputs of a cited result's run. Claim states and `report`/`impact` now share one
+  dependency-direction closure, with `input_to` traversed from the run to its artifacts
+  (`tests/test_workspace_graph.py`).
+- An unknown member, unknown workspace-claim or ambiguous duplicate-ID member reference
+  disappeared from `graph`'s unresolved list, raised `KeyError`, or was silently dropped;
+  all are now named unresolved nodes, so `graph --fail-on-unresolved` exits 1, and new
+  workspace claims/relationships into such an ID are refused
+  (`tests/test_workspace_graph.py`, `tests/test_rungraph_authoring.py`).
 - `report --strict --json` ignored strictness, and `validate --strict --json` printed
   `"exit_code": 0` before returning 1. Both now apply strictness before printing
   (`tests/test_rungraph_cli.py`).
@@ -163,6 +167,9 @@ cycles, over-cap readers, malformed hooks, stale documents, refused writes and e
   other filesystems fail closed, and Windows is not claimed.
 - **Adapters**: the MLflow adapter reads a local file store only; no tracking server, remote
   URI or network access.
+- **Accepted changes**: `rehash` records the new bytes and value; it does not re-adjudicate
+  whether a claim's wording is still true. `supported` remains an evidence state, not a truth
+  judgement.
 - **Release**: no tag, version bump or package-index publication. Installation is from the
   repository or a locally built wheel.
 

@@ -142,3 +142,14 @@ def test_removing_a_cited_result_is_refused(tmp_path: Path, capsys):
 
     assert main(["evidence", "remove", str(path), "--id", "c1"]) == 0
     assert main(["result", "remove", str(path), "--id", "acc"]) == 0
+
+
+def test_edit_result_needs_a_non_empty_name(tmp_path: Path, capsys):
+    path = make_manifest(tmp_path)
+    result = {"id": "acc", "run_id": "run", "name": "accuracy", "value": 0.9}
+    assert main(["result", "add", str(path), "--file", write_json(tmp_path / "r.json", result)]) == 0
+    before = path.read_bytes()
+    result["name"] = ""
+    assert main(["result", "edit", str(path), "--file", write_json(tmp_path / "r.json", result)]) == 2
+    assert "non-empty string 'name'" in capsys.readouterr().out
+    assert path.read_bytes() == before
