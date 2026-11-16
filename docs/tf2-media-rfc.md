@@ -1,33 +1,28 @@
-# TF2 media summaries — design RFC (v0.7)
+# TF2 media summaries — design RFC (v0.8)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.10 admission decision are required before any code.
 Schema 0.1–0.9, their readers/checkers and every delivered behavior stay frozen, except the
 additive dispatch, model, migration and text edits this document names explicitly.
 
-## 0. Changes in v0.7
+## 0. Changes in v0.8
 
-Round 6 accepted the design and flagged three stale or ambiguous sentences. v0.7 fixes them:
+Round 7 confirmed every v0.7 fix and found no normative contradiction; the only remaining notes
+asked for an accurate changelog. v0.8 makes §0 describe this revision truthfully:
 
-- **Requests are named explicitly.** The four-tuple sentence says "the two TF2 kinds", not
-  "these kinds", so the six delivered three-tuple ladders cannot be misread as four-tuple.
-- **The precedence note names the flags.** §5 states that the encoding-failure flag is tested
-  before `non_scalar`, as `_media_results` does.
-- **Tensor help.** It retains the `opt-in; implies schema 0.9` phrase and reads "implies schema
-  0.9 unless --include-tf2-media selects 0.10".
-- **Future-version tests move forward, not away.** `test_future_schema_version_is_manifest_load_failed`
-  moves to 0.11, and a new test asserts the 0.10 manifest loads and reaches the 0.10
-  `UNSUPPORTED_VERSION` text.
-- **The CLI pin is inventoried.** `tests/test_experimental_cli_parser_contract.py` pins `cli.py`'s
-  bytes; every 0.10 edit repoints it and records the previous pair as historical, as the 0.9
-  slice did.
-- Precision: the content state is "last-wins; an empty range is absent", not a sticky or
-  non-empty-only rule; and the inventory names `_decoded_tag` (adapter) and `_locator_kind`
-  (checker) in their rows.
+- Four-tuple requests explicitly name "the two TF2 kinds"; the six delivered kinds keep their
+  three-tuple ladders.
+- The §5 precedence note names the delivered order: the encoding-failure flag is tested before
+  `non_scalar`.
+- The content state reads "last-wins range; an empty range is absent".
+- `_locator_kind` (checker) and `_decoded_tag` (adapter) are named in their §8 rows.
+- The migrate inventory reads six existing downgrade lists plus the new 0.9 list, with the
+  separate `--to 0.10` target branch and `TARGET_VERSIONS` entry.
 
-Earlier revisions fixed the reader layouts, the two 0.10-only locator kinds, the ladder order,
-the occurrence unit, the digit bound, the merge rule and the migration arms; those normative
-sections are unchanged here.
+Earlier revisions folded the real-layout redesign, the two 0.10-only locator kinds with a
+required `element`, the exhaustive ladder and per-kind classification, per-entry occurrence with
+four-tuple requests, the bounded digit parse and 128-offset state, the merge rule, the complete
+test-flip and CLI-pin inventory, the guide/help texts, and the migration arms.
 
 ## 1. Problem and scope
 
