@@ -1,10 +1,13 @@
-# RunGraph workspace RFC (v0.6)
+# RunGraph workspace RFC (v0.7)
 
 Status: draft for independent review. No implementation is authorised until this contract is
 accepted.
 
 ## 0. Changes in this version
 
+- v0.7 folds the final review: the `at-risk` and `supported` predicates are scoped per claim
+  kind, so a member claim's broken contradiction target gives `unresolved` without `at-risk`;
+  the combination list and the three asymmetries match; a regression case is added.
 - v0.6 folds the fifth review: the §5 target scope is now per claim kind (workspace claims
   exclude context, member claims keep the delivered result/artifact/run set); "lineage
   parity" replaces the inaccurate "foundations parity"; the delivered `contradicts`
@@ -252,19 +255,26 @@ claim `at-risk` (the delivered asymmetry).
   `unresolved`.
 - `contradiction-recorded`: at least one `contradicts` target resolves, or a cited claim
   carries `contradiction-recorded`.
-- `at-risk`: any support/contradicts target or closure is touched by an error-level finding;
-  any ref is unresolved; or a cited claim carries `at-risk`. `unresolved` therefore always
-  implies `at-risk`.
+- `at-risk`: for a workspace claim, any support/contradicts target or closure is touched by
+  an error-level finding, or any support/contradicts ref is unresolved, or a cited claim
+  carries `at-risk`. For a member claim, a support target or its closure is touched by an
+  error-level finding, a support ref is unresolved, or a cited claim carries `at-risk`; a
+  dangling `contradicts` ref gives `unresolved` only, not `at-risk`. `unresolved` therefore
+  implies `at-risk` for a workspace claim, and for a member claim only when the unresolved
+  ref is a support target.
 - `supported`: for a workspace claim, at least one support target is a result, evidence or
   claim; for a member claim, any delivered support target (result, artifact or run). Every
-  support target resolves; no support target, contradiction target or closure is touched by an
-  error; no ref is unresolved; no cited claim carries `unresolved` or `at-risk`. A recorded
+  support target resolves; for a workspace claim no support or contradiction target or
+  closure is touched by an error and no ref is unresolved; for a member claim only support
+  targets and their closure matter, and a broken or dangling contradiction target does not
+  block `supported`. No cited claim carries `unresolved` or `at-risk`. A recorded
   contradiction does **not** block `supported`.
 - `uncited`: for a workspace claim, no result/evidence/claim support target; for a member
   claim, no support target at all (context-only or contradiction-only workspace claims are
   `uncited`).
 
-Allowed combinations: `unresolved` with `at-risk` or `contradiction-recorded`;
+Allowed combinations: `unresolved` with `at-risk` or `contradiction-recorded`, or alone for a
+member claim whose only unresolved ref is a contradiction target;
 `contradiction-recorded` with `supported`, `at-risk` or `uncited`; `supported` with
 `contradiction-recorded`; `uncited` with `at-risk` (a broken contradiction target or inherited
 state) or `unresolved`. Never `supported` with `at-risk` or `unresolved`; never `uncited`
@@ -273,13 +283,15 @@ precedence is
 `unresolved` > `contradiction-recorded` > `at-risk` > `supported` > `uncited`. All applicable
 labels are printed in text and JSON.
 
-Two asymmetries are intended. A member claim's state is its own recorded structure: a
+Three asymmetries are intended. A member claim's state is its own recorded structure: a
 same-target `conflicting-evidence` error makes it `contradiction-recorded` while it stays
 `supported`. A workspace claim citing it is `at-risk`, because that error is on an object in
 the workspace claim's closure. Likewise, a result-subject `conflicting-evidence` makes a
 workspace claim citing the result `at-risk`, while the member claim citing it stays
-`supported`. Inheritance applies through `contradicts` as well as `supports`: contradicting an
-at-risk claim makes the contradicting claim `at-risk`.
+`supported`. Third, a member claim's dangling or broken contradiction target gives
+`unresolved` (and a resolved contradiction gives `contradiction-recorded`) but not `at-risk`,
+while a workspace claim's does. Inheritance applies through `contradicts` as well as
+`supports`: contradicting an at-risk claim makes the contradicting claim `at-risk`.
 
 `report` runs checks with the same default as `validate`: `--directory-artifacts` is an
 explicit flag; without it the report states that directory artifacts were not checked. It
@@ -550,7 +562,9 @@ upstream artifact (A0 -> run X -> A1) is in the closure and listed by impact; an
 output-artifact break where report and impact agree; duplicate
 local ID refusal; the member mapping table for `claim-unverified`, `unsupported-claim`
 warning/error and same-target `conflicting-evidence`; an ordinary member contradiction; a
-claim with several findings; a claim with no subject finding.
+member claim with a broken `contradicts` target is `unresolved` but not `at-risk`, while a
+workspace claim in the same position is `at-risk`; a claim with several findings; a claim
+with no subject finding.
 
 Baseline: each schema 0.1–0.10, canonical `data`, schema-changed member, added/removed/
 re-pathed/re-keyed members, missing baseline member, workspace claim/relationship edits,
