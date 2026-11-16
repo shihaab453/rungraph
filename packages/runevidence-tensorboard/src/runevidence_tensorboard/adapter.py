@@ -200,6 +200,11 @@ class TensorboardAdapter(Adapter):
     ) -> Manifest05 | Manifest06 | Manifest07 | Manifest08 | Manifest09 | Manifest10:
         root = Path(root)
         paths = sorted(discovery.files)
+        if not paths:
+            raise AdapterError(
+                "no files to record: the folder is empty or holds only the manifest. "
+                "Point at the TensorBoard log directory for the run."
+            )
         event_paths = [path for path in paths if _tensorboard_path_matches(path)]
         _refuse_paths(paths, event_paths)
         if include_tf2_media:

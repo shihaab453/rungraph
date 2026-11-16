@@ -553,6 +553,24 @@ def test_zero_event_files_is_not_an_error(tmp_path):
     assert manifest.artifacts[0].run_id is None
 
 
+def test_tensorboard_extract_refuses_a_folder_with_no_files(tmp_path):
+    root = tmp_path / "empty"
+    root.mkdir()
+
+    with pytest.raises(AdapterError) as excinfo:
+        _extract(root)
+
+    assert "no files to record" in str(excinfo.value)
+
+
+def test_cli_init_tensorboard_refuses_an_empty_folder_and_writes_nothing(tmp_path, capsys):
+    assert main(["init", str(tmp_path), "--adapter", "tensorboard"]) == EXIT_INVALID
+    out = capsys.readouterr().out
+    assert "adapter 'tensorboard' cannot read" in out
+    assert "no files to record" in out
+    assert not (tmp_path / MANIFEST_FILENAME).exists()
+
+
 # --- refusals ---------------------------------------------------------------
 
 

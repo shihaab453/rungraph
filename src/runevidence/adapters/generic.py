@@ -51,6 +51,11 @@ class GenericAdapter(Adapter):
         return Discovery(root=root, files=files, details={"runs": runs})
 
     def extract(self, root: Path, discovery: Discovery, *, project_id: str, project_name: str) -> Manifest:
+        if not discovery.files:
+            raise AdapterError(
+                "no files to record: the folder is empty or holds only the manifest. "
+                "Point at the experiment folder that contains the run outputs."
+            )
         # Names can arrive in any order when a discovery list is supplied;
         # allocate in sorted order so each name always gets the same ID.
         run_names = sorted(set(discovery.details.get("runs", [])))
