@@ -1,4 +1,4 @@
-# TensorBoard numeric tensor digests — design RFC (v0.7)
+# TensorBoard numeric tensor digests — design RFC (v0.8)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.9 admission decision are required before any code.
@@ -7,8 +7,8 @@ additive dispatch, model, migration and text edits this document names explicitl
 
 ## 0. Changes in v0.7
 
-Round 6 confirmed the frozen boundary and rejected v0.6 on one wire-0 slip plus two scope
-sentences. v0.7 fixes them:
+Round 7 confirmed the boundary and rejected v0.7 on one scalar-boundary phrase and one
+under-qualified example. v0.8 fixes them:
 
 - **Wire 0 contributes.** The string-path sentence now skips only wire 1/5; a wire-0 integer is
   an element, so a foreign wire-0 `int_val` still makes that list non-empty.
@@ -16,15 +16,23 @@ sentences. v0.7 fixes them:
   when non-empty `tensor_content` wins; in the typed branch a foreign list fails the entry, so a
   damaged packed span there is not "discarded".
 - **Lineage needs no own branch.** Every node already flows through `run_claim._display_row` to
-  `value_display`, so the edits are `value_to_json`, `value_display` and the claim whitelist.
-- **The two-outcome example is exact.** A rank-1 `[1]` float32 with 4 content bytes (or float64
-  with 8) plus one `float_val`/`double_val` produces the pair, and so does a rank-1 `[1]`
-  int32/int64 with content, because the scalar classifier rejects every non-float dtype. A
-  rank-0 float32 with content is a recorded scalar (tensor locator: unsupported value); a rank-0
-  int32 fails the profile (tensor locator: unsupported tensor encoding); `[1,1]` gives the
-  scalar locator `selects an unsupported value`.
+  `value_display`, so the edits are `value_to_json`, `value_display`, `display_locator` and the
+  claim whitelist.
+- **The two-outcome example is exact.** A rank-1 `[1]` float32 with exactly 4 content bytes (or
+  float64 with 8) plus one or more `float_val`/`double_val` values produces the pair, and so does
+  a rank-1 `[1]` int32/int64 that conforms in either form (content, or one `int_val`/
+  `int64_val`), because the scalar classifier rejects every non-float dtype. A rank-0 float32
+  with exactly 4 content bytes is a recorded scalar (tensor locator: unsupported value); with
+  any other content length it is an unsupported scalar (tensor locator: unsupported tensor
+  encoding); a rank-0 int32 fails the profile with `selects an unsupported tensor encoding`; a
+  `[1,1]` float gives the scalar locator `selects an unsupported value`.
+- **Scalar boundary corrected.** "Content plus typed values" now names `float_val`/`double_val`
+  only; an integer typed list is ignored by the scalar classifier, so the entry stays a recorded
+  scalar and consumes no tensor occurrence.
 - **Budget table completed.** `tensors + media + histograms` selects `BUDGET_MESSAGE_07_HIST`,
   and the full eight-row table is pinned.
+- **Table and summary fixes.** The §8 comparison row is split into two well-formed rows, the
+  lineage edit list gains `display_locator`, and the round-6 description is accurate.
 
 Earlier revisions folded rounds 1 to 6: the frozen-strictness boundary and encoding-based damage
 split, varint and int32 rules, raw-wire float hashing, the separate O(1) accumulator,
@@ -94,9 +102,10 @@ A `Summary.Value` whose winning oneof member is `tensor` (8) is a tensor candida
 classifier runs first with exactly the frozen semantics:
 
 1. if the frozen scalar classifier records the entry (a valid scalar encoding at rank 0 or rank
-   1 `[1]` float/double — note that content plus typed values is *not* a valid scalar encoding) or
-   the frozen string classifier records it (rank-0 or `[1]` `DT_STRING`), the entry is that
-   scalar/string and is **not** a tensor; a tensor locator for it receives
+   1 `[1]` float/double — note that content plus a `float_val`/`double_val` is *not* a valid
+   scalar encoding, while an integer typed list is ignored and leaves the entry a recorded
+   scalar) or the frozen string classifier records it (rank-0 or `[1]` `DT_STRING`), the entry is
+   that scalar/string and is **not** a tensor; a tensor locator for it receives
    `selects an unsupported value` and the entry consumes no tensor occurrence;
 2. otherwise, if the dtype is float32/float64/int32/int64, the shape has 1–8 dimensions with
    `unknown_rank` false and each dimension `1..2**31-1`, the element count is `1..1_000_000`
@@ -133,8 +142,9 @@ packed span in an ignored field is never decoded at all.
 
 Everything else that is new in 0.9 fails entry-locally and only for candidates the frozen
 classifiers did not record: unsupported dtype, rank/dimension caps, element-count and
-canonical-length mismatches, foreign typed lists, overflow of the selected list, and packed
-varint decoding. A recorded scalar or string is never re-examined as a tensor.
+canonical-length mismatches, foreign typed lists and packed varint decoding **in the typed
+branch**, and overflow of the selected list. A recorded scalar or string is never re-examined as
+a tensor.
 
 ### 3.3 Merge rules
 
@@ -177,9 +187,9 @@ refuses the file where the frozen grammar would.
 1. the last `tensor_content` range is non-empty: its length must be exactly
    `element_count * width`, else fail; it is the payload and is hashed fresh. In this branch
    **every** typed list is ignored for value and validity: foreign dtype, overflow, zero-length
-   packed span, packed-varint damage. Unpacked damage, a wrong wire on `float_val`/`double_val`
-   and a short fixed body have already refused the file in §3.2, so nothing in this branch can
-   rescue them;
+   packed span, packed-varint damage. Unpacked damage, packed float/double length damage, a
+   wrong wire on `float_val`/`double_val` and a short fixed body have already refused the file in
+   §3.2, so nothing in this branch can rescue them;
 2. otherwise (content absent or empty) the payload is the list matching `dtype`:
    - it must be present and its element count must equal `element_count`, else fail; a selected
      count above 1,000,000 fails;
@@ -397,7 +407,8 @@ help lists 0.9. The 0.9 cap text is the delivered `TENSORBOARD_CAP_MESSAGE_06`.
 | `checks/graph.py` | version gates, capped hint, compact display |
 | `histogram_display.py` | `value_to_json`, `tensor_display`, and `value_display` wiring |
 | `locator_profiles.py`, `run_claim.py` | display, whitelist, value branch |
-| `run_compare.py` | `_structured_flag` and `_side_flag`; `run_matrix.py`, `run_details.py`, `run_leaderboard.py`, `report.py` | display and JSON |
+| `run_compare.py` | `_structured_flag` and `_side_flag` |
+| `run_matrix.py`, `run_details.py`, `run_leaderboard.py`, `report.py` | display and JSON |
 | `run_lineage.py` | no code change; its nodes reach `value_display` through `run_claim`, so it is a verification surface only |
 | `migrate.py`, `run_comparability.py`, `cli.py`, `adapter.py` | targets, downgrade tuples, flags, texts, precedence, generator |
 
@@ -422,12 +433,16 @@ help lists 0.9. The 0.9 cap text is the delivered `TENSORBOARD_CAP_MESSAGE_06`.
 - Identity: per-kind occurrence, a scalar entry not consuming a tensor occurrence, tag filter,
   multifile names, occurrence 2,000,000,000; the two-outcome asymmetry, named precisely: a
   rank-2 tensor gives a scalar locator `selects an unsupported value`; a rank-1 `[1]` float32
-  with 4 content bytes (or float64 with 8) plus one `float_val`/`double_val`, and a rank-1 `[1]`
-  int32/int64 with content, give the scalar locator `selects an unsupported scalar encoding` and
-  a tensor locator a value; a rank-0 float32 with content is a recorded scalar whose tensor
-  locator gets `selects an unsupported value`; a rank-0 int32 fails the profile with `selects an
-  unsupported tensor encoding`; a `[1,1]` float gives the scalar locator `selects an unsupported
-  value`.
+  with exactly 4 content bytes (or float64 with 8) plus one or more `float_val`/`double_val`, a
+  rank-1 `[1]` int32/int64 with content, and a rank-1 `[1]` int32/int64 with one typed
+  `int_val`/`int64_val`, give the scalar locator `selects an unsupported scalar encoding` and a
+  tensor locator a value; a rank-1 `[1]` float32 with 4 content bytes plus an `int_val` stays a
+  recorded scalar (tensor locator `selects an unsupported value`); a rank-0 float32 with exactly
+  4 content bytes is a recorded scalar, while any other content length gives the scalar locator
+  `selects an unsupported scalar encoding` and the tensor locator `selects an unsupported tensor
+  encoding`; a rank-0 int32 fails the profile with `selects an unsupported tensor encoding`; a
+  `[1,1]` float gives the scalar locator `selects an unsupported value`. These examples assume
+  one entry per `(tag, step)`; a sibling entry can change the aggregated scalar outcome.
 - Checker: every ladder row and byte-exact texts; six-kind caps; csv cap on 0.9; 128 MiB
   eligibility; digest, shape, dtype and count mismatches.
 - Adapter/CLI: flag matrix with 0.9 precedence; budget texts; tag texts; capability errors and
