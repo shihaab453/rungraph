@@ -1,28 +1,29 @@
-# TF2 media summaries — design RFC (v0.6)
+# TF2 media summaries — design RFC (v0.7)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.10 admission decision are required before any code.
 Schema 0.1–0.9, their readers/checkers and every delivered behavior stay frozen, except the
 additive dispatch, model, migration and text edits this document names explicitly.
 
-## 0. Changes in v0.6
+## 0. Changes in v0.7
 
-Round 5 accepted the design and rejected v0.5 on one wrong help claim and two missing test
-inventory items. v0.6 fixes them:
+Round 6 accepted the design and flagged three stale or ambiguous sentences. v0.7 fixes them:
 
-- **Tensor help.** It keeps "(opt-in; implies schema 0.9)" only as a prefix; when the TF2 media
-  flag is also passed the run writes 0.10, so the help reads "implies schema 0.9 unless
-  --include-tf2-media selects 0.10".
+- **Requests are named explicitly.** The four-tuple sentence says "the two TF2 kinds", not
+  "these kinds", so the six delivered three-tuple ladders cannot be misread as four-tuple.
+- **The precedence note names the flags.** §5 states that the encoding-failure flag is tested
+  before `non_scalar`, as `_media_results` does.
+- **Tensor help.** It retains the `opt-in; implies schema 0.9` phrase and reads "implies schema
+  0.9 unless --include-tf2-media selects 0.10".
 - **Future-version tests move forward, not away.** `test_future_schema_version_is_manifest_load_failed`
   moves to 0.11, and a new test asserts the 0.10 manifest loads and reaches the 0.10
   `UNSUPPORTED_VERSION` text.
 - **The CLI pin is inventoried.** `tests/test_experimental_cli_parser_contract.py` pins `cli.py`'s
   bytes; every 0.10 edit repoints it and records the previous pair as historical, as the 0.9
   slice did.
-- Precision: the encoding-failure precedence names the `non_scalar` flag; the content state is
-  "last-wins non-empty", not a sticky flag; and the inventory adds the schema pins, the package
-  README, the adapter test file, `_decoded_tag`'s 0.10 parameter, `_locator_kind`, and the
-  guide's quick-reference table and identity sentence.
+- Precision: the content state is "last-wins; an empty range is absent", not a sticky or
+  non-empty-only rule; and the inventory names `_decoded_tag` (adapter) and `_locator_kind`
+  (checker) in their rows.
 
 Earlier revisions fixed the reader layouts, the two 0.10-only locator kinds, the ladder order,
 the occurrence unit, the digit bound, the merge rule and the migration arms; those normative
@@ -155,8 +156,8 @@ The 0.10 state is separate from `_TensorState` and retains at most **128** eleme
 covers the largest valid layout (audio `[64, 2]` = 128 values) and the image form (2 + 64 = 66).
 A 129th retained string fails the entry while reading. Besides those offsets it retains the
 dimension count and the first two dimension values (the layouts are rank 1 or rank 2), the final
-dtype, `unknown_rank`, the last-wins non-empty `tensor_content` range, typed-field and
-wrong-wire flags, per-string size flags and one failed flag — all O(1). `_TensorState` and every 0.5–0.9 reader stay byte-identical.
+dtype, `unknown_rank`, the last-wins `tensor_content` range (an empty range is absent),
+typed-field and wrong-wire flags, per-string size flags and one failed flag — all O(1). `_TensorState` and every 0.5–0.9 reader stay byte-identical.
 
 ## 4. Identity, ordering, names
 
@@ -188,8 +189,8 @@ through to `scan_scalars` and vanish.
 This ladder governs **only** the two TF2 kinds. Requests for the six delivered TensorBoard kinds
 keep their delivered ladders inside `scan_tensorboard_10`, so a legacy image request on a
 TF2-shaped entry still reports `selects an unsupported value` and no frozen outcome moves.
-Requests for these kinds are `(tag, step, occurrence, element)`; a dedicated state keeps one
-selection per four-tuple. Recognition is structural: an entry is a **string-tensor entry** when
+Requests for the two TF2 kinds are `(tag, step, occurrence, element)`; a dedicated state keeps
+one selection per four-tuple. Recognition is structural: an entry is a **string-tensor entry** when
 its winning member is `tensor` (8) and its merged dtype is `DT_STRING` (7), whatever its shape.
 Validation is per requested kind, so a string tensor with the wrong rank, dimensions, count,
 typed fields or payloads is still recognisable and can be diagnosed.
@@ -208,7 +209,8 @@ Stage 1, first matching row wins, mirroring the delivered `_media_results` prece
 "Conforming" means §3.1–§3.4 pass for the requested kind; it includes `k >= 1`, the 64 cap,
 the exact string count, the layout, the width/height agreement, the typed-field exclusion and
 each payload's validation. Rows 2 and 3 are checked before the unsupported rows, exactly as every delivered kind checks
-identity exhaustion before an unsupported reason. An element `>= k` on an otherwise conforming
+identity exhaustion before an unsupported reason. The encoding-failure row precedes the
+other-entry row because `_media_results` tests its `unsupported` flag before `non_scalar`. An element `>= k` on an otherwise conforming
 entry is `missing`: the identity is `(tag, step, occurrence, element)` and the checker never
 searches later entries for a different element. The fallback row is deliberately exhaustive:
 anything that is not a conforming string-tensor entry and not a string-tensor encoding failure
@@ -259,8 +261,8 @@ reports "schema 0.3" and loses the cap hint.
 - `migrate --to 0.10` admits 0.1/0.2 through the locator precheck and 0.3–0.9 as version-only
   rewrites. No JSON field is added or removed: `element` exists only on the new kinds, which no
   older manifest can carry.
-- Seven existing downgrade lists need 0.10: 0.3 through 0.8 each have one, and the 0.9 arm has
-  none and needs one; the 0.2 arm already refuses every non-0.1 source generically. Separately,
+- Six existing downgrade lists need 0.10 (0.3-0.8); the 0.9 arm has none and needs a new one;
+  the 0.2 arm already refuses every non-0.1 source generically. Separately,
   the new `--to 0.10` target needs its own explicit branch and a `TARGET_VERSIONS` entry, because
   the final `else` in the dispatcher is the 0.5 arm.
 - Comparability refuses 0.10 by version; `init --force` refuses a declared 0.10 manifest before
@@ -295,12 +297,12 @@ is `TENSORBOARD_CAP_MESSAGE_06`.
 | `models.py` | `TensorboardTf2ImageLocator`, `TensorboardTf2AudioLocator` (required `element`), `Result10`, `Manifest10`, the `Manifest._version_specific_shape` 0.10 branch with ten kinds, dispatch/adapters, `model_dump` 0.10, value↔locator matrix, schema file and pin |
 | `manifest.py` | dispatch, `_root_model_for`, `artifact_to_dict`, `_LOCATOR_TAGS`, value-union tuple |
 | `tensorboard_events.py` | TF2 layout extraction with its own bounded state, `scan_tensorboard_10`, `iter_supported_summaries_10` (all lower kinds plus TF2), four-tuple selection |
-| `checks/__init__.py`, `checks/results.py` | 0.10 admission, eight-kind caps, element requests and ladder |
+| `checks/__init__.py`, `checks/results.py` | 0.10 admission, eight-kind caps, element requests and ladder; `_locator_kind` learns both kinds |
 | `checks/graph.py` | both version gates |
 | `locator_profiles.py`, `run_claim.py` | element-aware locator display and whitelist |
 | `run_compare.py` | no change; flags derive from the value kind, so TF2 results already set the image/audio flags |
 | `migrate.py` | add 0.10 to the six explicit downgrade lists (0.3-0.8); give the existing 0.9 arm the downgrade list it lacks; add the new `--to 0.10` target branch; the 0.2 arm already refuses generically |
-| `run_comparability.py`, `cli.py`, `adapter.py` | comparability, flag, capability/keyword checks, texts, call sites, id/name plumbing |
+| `run_comparability.py`, `cli.py`, `adapter.py` | comparability, flag, capability/keyword checks, texts, call sites, id/name plumbing, and `_decoded_tag`'s 0.10 parameter |
 | `tests/tensorboard_builder.py` | `string_val` support (single and repeated fragments) |
 | `tests/test_cli_migrate.py`, `tests/test_migrate_0_3.py`, `tests/test_migrate_0_4.py`, `tests/test_migrate_0_5.py`, `tests/test_manifest_0_2.py` | the 0.10-as-unsupported expectations move to 0.11 |
 | `tests/data/schema-vectors/reject-unknown-version.json` | declares 0.10; move the fixture to 0.11 so the unknown-version rejection still has a subject |
