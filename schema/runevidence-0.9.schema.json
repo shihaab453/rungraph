@@ -1,0 +1,1384 @@
+{
+  "$defs": {
+    "Artifact": {
+      "additionalProperties": false,
+      "else": {
+        "properties": {
+          "digest_format": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "artifact_type": {
+            "const": "directory"
+          }
+        },
+        "required": [
+          "artifact_type"
+        ]
+      },
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path relative to the manifest's folder, using forward slashes.",
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "artifact_type": {
+          "default": "file",
+          "description": "What the path names on disk. Omitted means file. 'directory' records a folder checked with --directory-artifacts and authored with add --directory or rehash --directory.",
+          "enum": [
+            "file",
+            "directory"
+          ],
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "digest_format": {
+          "anyOf": [
+            {
+              "const": "runevidence-directory-v1",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How sha256 was computed for a directory. Required for directories, absent for files.",
+          "title": "Digest Format"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "size_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Bytes"
+        },
+        "volatile": {
+          "default": false,
+          "description": "Content is expected to change on every rerun (e.g. a log with timestamps). Only the file's existence is checked; sha256 and size_bytes are ignored.",
+          "title": "Volatile",
+          "type": "boolean"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Free-form label, e.g. dataset, config, checkpoint, metrics, log.",
+          "title": "Kind"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Run that produced this file.",
+          "title": "Run Id"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "dataset_id": {
+          "minLength": 1,
+          "type": "string",
+          "title": "Dataset Id",
+          "description": "Semantic dataset label (schema 0.2). Not an artifact ID; multiple artifacts may share it.",
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "then": {
+        "properties": {
+          "digest_format": {
+            "const": "runevidence-directory-v1"
+          }
+        },
+        "required": [
+          "digest_format"
+        ]
+      },
+      "title": "Artifact",
+      "type": "object"
+    },
+    "AudioValue": {
+      "additionalProperties": false,
+      "description": "Schema-0.8 reference to one RIFF/WAVE payload inside a TensorBoard event file.",
+      "properties": {
+        "kind": {
+          "const": "audio",
+          "type": "string"
+        },
+        "media_type": {
+          "const": "audio/wav",
+          "type": "string"
+        },
+        "sha256": {
+          "description": "Lowercase SHA-256 over the stored encoded_audio_string bytes.",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "description": "Encoded payload length in bytes.",
+          "maximum": 16777216,
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "media_type",
+        "sha256",
+        "size_bytes"
+      ],
+      "title": "AudioValue",
+      "type": "object"
+    },
+    "CsvCellLocator": {
+      "additionalProperties": false,
+      "description": "Structured 0.9 csv-cell locator for one CSV data cell. ``row`` is one-based over data records and ``column`` one-based over the header.",
+      "properties": {
+        "kind": {
+          "const": "csv-cell",
+          "description": "Locator kind; 0.9 admits csv-cell.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "row": {
+          "description": "One-based data record. StrictInt runtime: 1.0 is schema-valid under draft 2020-12 but model-rejected; true/string are rejected.",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Row",
+          "type": "integer"
+        },
+        "column": {
+          "description": "One-based column in the parsed header. StrictInt runtime: 1.0 is schema-valid under draft 2020-12 but model-rejected; true/string are rejected.",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Column",
+          "type": "integer"
+        },
+        "header": {
+          "description": "Recorded header assertion at this column, in code points. A lone surrogate is rejected.",
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Header",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "row",
+        "column",
+        "header"
+      ],
+      "title": "CsvCellLocator",
+      "type": "object"
+    },
+    "EvaluationProtocol": {
+      "additionalProperties": false,
+      "description": "A recorded evaluation protocol, resolved as a whole value.",
+      "properties": {
+        "protocol_id": {
+          "minLength": 1,
+          "title": "Protocol Id",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          ],
+          "title": "Version"
+        }
+      },
+      "required": [
+        "protocol_id"
+      ],
+      "title": "EvaluationProtocol",
+      "type": "object"
+    },
+    "EvidenceReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "claim": {
+          "description": "The statement being made, in plain words.",
+          "minLength": 1,
+          "title": "Claim",
+          "type": "string"
+        },
+        "supports": {
+          "description": "IDs of results, artifacts or runs backing the claim.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Supports",
+          "type": "array"
+        },
+        "contradicts": {
+          "description": "IDs of results, artifacts or runs that cut against it.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Contradicts",
+          "type": "array"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where the claim is made, e.g. 'README.md#results'.",
+          "title": "Source"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "claim"
+      ],
+      "title": "EvidenceReference",
+      "type": "object"
+    },
+    "HistogramValue": {
+      "additionalProperties": false,
+      "description": "Structured schema-0.8 TensorBoard histogram value.\n\nAll eight keys are required. Numbers are finite binary64; JSON integers are\naccepted only when exactly representable. Limits are strictly increasing,\narrays match, and there are at most 1,024 pairs.",
+      "properties": {
+        "kind": {
+          "const": "histogram",
+          "description": "Value kind; 0.8 admits histogram.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "min": {
+          "title": "Min",
+          "type": "number"
+        },
+        "max": {
+          "title": "Max",
+          "type": "number"
+        },
+        "num": {
+          "title": "Num",
+          "type": "number"
+        },
+        "sum": {
+          "title": "Sum",
+          "type": "number"
+        },
+        "sum_squares": {
+          "title": "Sum Squares",
+          "type": "number"
+        },
+        "bucket_limit": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Bucket Limit",
+          "type": "array"
+        },
+        "bucket": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Bucket",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "min",
+        "max",
+        "num",
+        "sum",
+        "sum_squares",
+        "bucket_limit",
+        "bucket"
+      ],
+      "title": "HistogramValue",
+      "type": "object"
+    },
+    "ImageValue": {
+      "additionalProperties": false,
+      "description": "Schema-0.8 reference to one PNG payload inside a TensorBoard event file.\n\nThe digest covers the encoded bytes exactly as stored; nothing is\nextracted or decoded. ``width``/``height`` are the verified IHDR values.",
+      "properties": {
+        "kind": {
+          "const": "image",
+          "type": "string"
+        },
+        "media_type": {
+          "const": "image/png",
+          "type": "string"
+        },
+        "sha256": {
+          "description": "Lowercase SHA-256 over the stored encoded_image_string bytes.",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "description": "Encoded payload length in bytes.",
+          "maximum": 16777216,
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "width": {
+          "description": "Verified IHDR width.",
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "description": "Verified IHDR height.",
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Height",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "media_type",
+        "sha256",
+        "size_bytes",
+        "width",
+        "height"
+      ],
+      "title": "ImageValue",
+      "type": "object"
+    },
+    "JsonlLocator": {
+      "additionalProperties": false,
+      "description": "Structured 0.9 jsonl locator for one physical JSONL line and a JSON Pointer. 0.9 admits jsonl/csv-cell/tensorboard/tensorboard-string/tensorboard-histogram/tensorboard-image/tensorboard-audio/tensorboard-tensor; ``line`` is one-based and uses ``StrictInt``.",
+      "properties": {
+        "kind": {
+          "const": "jsonl",
+          "description": "Locator kind; 0.9 admits jsonl/csv-cell/tensorboard/tensorboard-string/tensorboard-histogram/tensorboard-image/tensorboard-audio/tensorboard-tensor.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "line": {
+          "description": "One-based physical JSONL line. StrictInt runtime: 1.0 is schema-valid under draft 2020-12 but model-rejected; true/string are rejected.",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Line",
+          "type": "integer"
+        },
+        "pointer": {
+          "description": "JSON Pointer inside the selected line; empty or /-prefixed, ~0/~1 only.",
+          "title": "Pointer",
+          "type": "string",
+          "pattern": "^(?![\\s\\S]*[\\r\\n\\u2028\\u2029])(?:/(?:[^~]|~[01])*)?$"
+        }
+      },
+      "required": [
+        "kind",
+        "line",
+        "pointer"
+      ],
+      "title": "JsonlLocator",
+      "type": "object"
+    },
+    "MetricDefinition": {
+      "additionalProperties": false,
+      "description": "A recorded metric definition, resolved as a whole value.",
+      "properties": {
+        "definition_id": {
+          "minLength": 1,
+          "title": "Definition Id",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "higher_is_better": {
+          "type": "boolean",
+          "title": "Higher Is Better"
+        },
+        "averaging": {
+          "minLength": 1,
+          "type": "string",
+          "title": "Averaging",
+          "pattern": "\\S"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          ],
+          "title": "Version"
+        }
+      },
+      "required": [
+        "definition_id"
+      ],
+      "title": "MetricDefinition",
+      "type": "object"
+    },
+    "Project": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "Project",
+      "type": "object"
+    },
+    "Relationship": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/RelationshipType"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "type"
+      ],
+      "title": "Relationship",
+      "type": "object"
+    },
+    "RelationshipType": {
+      "enum": [
+        "produced_by",
+        "input_to",
+        "result_of",
+        "reported_in",
+        "derived_from",
+        "supports",
+        "contradicts"
+      ],
+      "title": "RelationshipType",
+      "type": "string"
+    },
+    "Result09": {
+      "additionalProperties": false,
+      "description": "0.9 result: 0.8 locators plus ``tensorboard-tensor`` and a tensor value.",
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "run_id": {
+          "description": "Run this result belongs to.",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "name": {
+          "description": "What was measured, e.g. 'accuracy' or 'val_loss'.",
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/HistogramValue"
+            },
+            {
+              "$ref": "#/$defs/ImageValue"
+            },
+            {
+              "$ref": "#/$defs/AudioValue"
+            },
+            {
+              "$ref": "#/$defs/TensorValue"
+            }
+          ],
+          "default": null,
+          "title": "Value",
+          "description": "A scalar, a structured histogram, an image reference, an audio reference, or a canonical tensor digest."
+        },
+        "artifact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Artifact the value was read from (e.g. a metrics file).",
+          "title": "Artifact Id"
+        },
+        "locator": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(?![\\s\\S]*[\\r\\n\\u2028\\u2029])(?:/(?:[^~]|~[01])*)?$",
+              "description": "Empty or a JSON Pointer into a .json artifact."
+            },
+            {
+              "$ref": "#/$defs/JsonlLocator"
+            },
+            {
+              "$ref": "#/$defs/CsvCellLocator"
+            },
+            {
+              "$ref": "#/$defs/TensorboardLocator"
+            },
+            {
+              "$ref": "#/$defs/TensorboardStringLocator"
+            },
+            {
+              "$ref": "#/$defs/TensorboardHistogramLocator"
+            },
+            {
+              "$ref": "#/$defs/TensorboardImageLocator"
+            },
+            {
+              "$ref": "#/$defs/TensorboardAudioLocator"
+            },
+            {
+              "$ref": "#/$defs/TensorboardTensorLocator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Locator",
+          "description": "RFC 6901 pointer, a structured locator object, or null. In 0.9 any non-null locator requires artifact_id."
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "metric_definition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "run_id",
+        "name"
+      ],
+      "title": "Result09",
+      "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "locator"
+            ],
+            "properties": {
+              "locator": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "artifact_id"
+            ],
+            "properties": {
+              "artifact_id": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "value"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "histogram"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "locator": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "tensorboard-histogram"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "value"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "image"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "locator": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "tensorboard-image"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "value"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "audio"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "locator": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "tensorboard-audio"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "value"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "tensor"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "locator": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "tensorboard-tensor"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Run": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "params": {
+          "additionalProperties": true,
+          "description": "Hyperparameters or settings, free-form.",
+          "title": "Params",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "conditions": {
+          "$ref": "#/$defs/RunConditions"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Run",
+      "type": "object"
+    },
+    "RunConditions": {
+      "additionalProperties": false,
+      "description": "First-class recorded run conditions (schema 0.2).\n\nOmitted members fall back to legacy metadata. Explicit null means recorded\nUNKNOWN for the split/protocol/source_revision/environment dimensions;\nselector nulls and a null parent are invalid.",
+      "properties": {
+        "evaluation_split": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string",
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evaluation Split"
+        },
+        "evaluation_protocol": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvaluationProtocol"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evaluation_dataset_artifact_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "type": "string",
+          "title": "Evaluation Dataset Artifact Id"
+        },
+        "model_checkpoint_artifact_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "type": "string",
+          "title": "Model Checkpoint Artifact Id"
+        },
+        "source_revision": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string",
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Revision"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Environment"
+        }
+      },
+      "title": "RunConditions",
+      "type": "object"
+    },
+    "TensorValue": {
+      "additionalProperties": false,
+      "description": "Schema-0.9 canonical digest of one numeric tensor.\n\n``sha256`` covers a canonical little-endian row-major encoding; nothing is\ndecoded into the manifest. ``element_count`` must equal the shape product,\nwhich JSON Schema cannot express.",
+      "properties": {
+        "kind": {
+          "const": "tensor",
+          "type": "string"
+        },
+        "dtype": {
+          "enum": [
+            "float32",
+            "float64",
+            "int32",
+            "int64"
+          ],
+          "type": "string"
+        },
+        "shape": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "description": "1-8 dimensions, row-major; the product is element_count."
+        },
+        "element_count": {
+          "description": "Shape product; at most one million elements.",
+          "maximum": 1000000,
+          "minimum": 1,
+          "title": "Element Count",
+          "type": "integer"
+        },
+        "sha256": {
+          "description": "Lowercase SHA-256 over the canonical little-endian encoding.",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "dtype",
+        "shape",
+        "element_count",
+        "sha256"
+      ],
+      "title": "TensorValue",
+      "type": "object"
+    },
+    "TensorboardAudioLocator": {
+      "additionalProperties": false,
+      "description": "Structured 0.9 tensorboard-audio locator for one supported TensorBoard audio summary. ``tag`` is exact; ``occurrence`` is per artifact.",
+      "properties": {
+        "kind": {
+          "const": "tensorboard-audio",
+          "description": "Locator kind; 0.9 admits tensorboard-audio.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tag": {
+          "description": "Exact event tag, at most 4,096 code points and at most 4,096 UTF-8 bytes. A lone surrogate is rejected.",
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Tag",
+          "type": "string"
+        },
+        "step": {
+          "description": "Signed 64-bit event step; an absent Event.step means 0.",
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Step",
+          "type": "integer"
+        },
+        "occurrence": {
+          "description": "Required zero-based occurrence among conforming audio entries with this exact (tag, step) in this artifact.",
+          "maximum": 2147483647,
+          "minimum": 0,
+          "title": "Occurrence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "tag",
+        "step",
+        "occurrence"
+      ],
+      "title": "TensorboardAudioLocator",
+      "type": "object"
+    },
+    "TensorboardHistogramLocator": {
+      "additionalProperties": false,
+      "description": "Structured 0.9 tensorboard-histogram locator for one supported TensorBoard histogram. ``tag`` is exact; ``occurrence`` is per artifact.",
+      "properties": {
+        "kind": {
+          "const": "tensorboard-histogram",
+          "description": "Locator kind; 0.9 admits tensorboard-histogram.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tag": {
+          "description": "Exact event tag, at most 4,096 code points and at most 4,096 UTF-8 bytes. A lone surrogate is rejected.",
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Tag",
+          "type": "string"
+        },
+        "step": {
+          "description": "Signed 64-bit event step; an absent Event.step means 0.",
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Step",
+          "type": "integer"
+        },
+        "occurrence": {
+          "description": "Required zero-based occurrence among conforming histograms with this exact (tag, step) in this artifact.",
+          "maximum": 2147483647,
+          "minimum": 0,
+          "title": "Occurrence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "tag",
+        "step",
+        "occurrence"
+      ],
+      "title": "TensorboardHistogramLocator",
+      "type": "object"
+    },
+    "TensorboardImageLocator": {
+      "additionalProperties": false,
+      "description": "Structured 0.9 tensorboard-image locator for one supported TensorBoard image summary. ``tag`` is exact; ``occurrence`` is per artifact.",
+      "properties": {
+        "kind": {
+          "const": "tensorboard-image",
+          "description": "Locator kind; 0.9 admits tensorboard-image.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tag": {
+          "description": "Exact event tag, at most 4,096 code points and at most 4,096 UTF-8 bytes. A lone surrogate is rejected.",
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Tag",
+          "type": "string"
+        },
+        "step": {
+          "description": "Signed 64-bit event step; an absent Event.step means 0.",
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Step",
+          "type": "integer"
+        },
+        "occurrence": {
+          "description": "Required zero-based occurrence among conforming images with this exact (tag, step) in this artifact.",
+          "maximum": 2147483647,
+          "minimum": 0,
+          "title": "Occurrence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "tag",
+        "step",
+        "occurrence"
+      ],
+      "title": "TensorboardImageLocator",
+      "type": "object"
+    },
+    "TensorboardLocator": {
+      "additionalProperties": false,
+      "description": "Structured 0.9 tensorboard locator for one supported TensorBoard scalar. ``tag`` is exact; ``occurrence`` is per artifact.",
+      "properties": {
+        "kind": {
+          "const": "tensorboard",
+          "description": "Locator kind; 0.9 admits tensorboard.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tag": {
+          "description": "Exact event tag, at most 4,096 code points and at most 4,096 UTF-8 bytes. A lone surrogate is rejected.",
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Tag",
+          "type": "string"
+        },
+        "step": {
+          "description": "Signed 64-bit event step; an absent Event.step means 0. StrictInt runtime: 1.0 is schema-valid under draft 2020-12 but model-rejected; true/string are rejected.",
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Step",
+          "type": "integer"
+        },
+        "occurrence": {
+          "description": "Required zero-based occurrence among supported scalars with this exact (tag, step). StrictInt runtime: 1.0 is schema-valid under draft 2020-12 but model-rejected; true/string are rejected.",
+          "maximum": 2147483647,
+          "minimum": 0,
+          "title": "Occurrence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "tag",
+        "step",
+        "occurrence"
+      ],
+      "title": "TensorboardLocator",
+      "type": "object"
+    },
+    "TensorboardStringLocator": {
+      "additionalProperties": false,
+      "description": "Structured 0.9 tensorboard-string locator for one supported TensorBoard string tensor. ``tag`` is exact; ``occurrence`` is per artifact.",
+      "properties": {
+        "kind": {
+          "const": "tensorboard-string",
+          "description": "Locator kind; 0.9 admits tensorboard-string.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tag": {
+          "description": "Exact event tag, at most 4,096 code points and at most 4,096 UTF-8 bytes. A lone surrogate is rejected.",
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Tag",
+          "type": "string"
+        },
+        "step": {
+          "description": "Signed 64-bit event step; an absent Event.step means 0.",
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Step",
+          "type": "integer"
+        },
+        "occurrence": {
+          "description": "Required zero-based occurrence among conforming string entries with this exact (tag, step) in this artifact.",
+          "maximum": 2147483647,
+          "minimum": 0,
+          "title": "Occurrence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "tag",
+        "step",
+        "occurrence"
+      ],
+      "title": "TensorboardStringLocator",
+      "type": "object"
+    },
+    "TensorboardTensorLocator": {
+      "additionalProperties": false,
+      "description": "Structured 0.9 tensorboard-tensor locator for one supported TensorBoard numeric tensor. ``tag`` is exact; ``occurrence`` is per artifact.",
+      "properties": {
+        "kind": {
+          "const": "tensorboard-tensor",
+          "description": "Locator kind; 0.9 admits tensorboard-tensor.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tag": {
+          "description": "Exact event tag, at most 4,096 code points and at most 4,096 UTF-8 bytes. A lone surrogate is rejected.",
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Tag",
+          "type": "string"
+        },
+        "step": {
+          "description": "Signed 64-bit event step; an absent Event.step means 0.",
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Step",
+          "type": "integer"
+        },
+        "occurrence": {
+          "description": "Required zero-based occurrence among conforming tensors with this exact (tag, step) in this artifact.",
+          "maximum": 2147483647,
+          "minimum": 0,
+          "title": "Occurrence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "tag",
+        "step",
+        "occurrence"
+      ],
+      "title": "TensorboardTensorLocator",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Schema 0.9 manifest: 0.8 locators plus tensorboard-tensor.",
+  "properties": {
+    "schema_version": {
+      "const": "0.9",
+      "default": "0.9",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "project": {
+      "$ref": "#/$defs/Project"
+    },
+    "runs": {
+      "items": {
+        "$ref": "#/$defs/Run"
+      },
+      "title": "Runs",
+      "type": "array"
+    },
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/Artifact"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "results": {
+      "items": {
+        "$ref": "#/$defs/Result09"
+      },
+      "title": "Results",
+      "type": "array"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/EvidenceReference"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "relationships": {
+      "items": {
+        "$ref": "#/$defs/Relationship"
+      },
+      "title": "Relationships",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "project"
+  ],
+  "title": "Manifest09",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:runevidence:manifest:0.9"
+}

@@ -62,6 +62,7 @@ from .models import (
     Manifest06,
     Manifest07,
     Manifest08,
+    Manifest09,
     backup_generation,
     json_schema,
 )
@@ -918,6 +919,14 @@ INIT_0_7_REFUSAL = (
 )
 
 
+INIT_0_9_REFUSAL = (
+    "ERROR: the existing manifest declares schema 0.9. init --force would regenerate the "
+    "manifest and cannot carry over first-class values or locators. Nothing was written. "
+    "Move the manifest aside, run init, then run runevidence migrate PATH --to 0.9 (unless "
+    "the adapter writes 0.9 itself) and reapply the first-class values and locators."
+)
+
+
 INIT_0_8_REFUSAL = (
     "ERROR: the existing manifest declares schema 0.8. init --force would regenerate the "
     "manifest and cannot carry over first-class values or locators. Nothing was written. "
@@ -945,13 +954,15 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         return EXIT_INVALID
     declared = _declared_manifest_version(out) if out.exists() else None
     if out.exists() and args.force and declared in (
-        "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8"
+        "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9"
     ):
         # Refuse before adapter discovery, backup creation or any write: a raw
         # 0.2/0.3/0.4/0.5 declaration means hand-entered data (or a would-be
         # downgrade) is at risk. An unparseable manifest keeps the legacy
         # backup-and-replace path below.
-        if declared == "0.8":
+        if declared == "0.9":
+            print(INIT_0_9_REFUSAL)
+        elif declared == "0.8":
             print(INIT_0_8_REFUSAL)
         elif declared == "0.7":
             print(INIT_0_7_REFUSAL)
@@ -1028,6 +1039,20 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
                 "Nothing was written."
             )
             return EXIT_INVALID
+    include_tensors = bool(getattr(args, "include_tensors", False))
+    if include_tensors:
+        if not getattr(adapter, "supports_include_tensors", False):
+            print(
+                f"ERROR: adapter {adapter.name!r} does not support --include-tensors. "
+                "Nothing was written."
+            )
+            return EXIT_INVALID
+        if not _accepts_keyword(adapter, "include_tensors"):
+            print(
+                f"ERROR: adapter {adapter.name!r} cannot apply --include-tensors. "
+                "Nothing was written."
+            )
+            return EXIT_INVALID
     patterns = list(getattr(args, "tags", None) or [])
     tag_filter = None
     if patterns:
@@ -1059,6 +1084,8 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
             extra["include_images"] = True
         if include_audio:
             extra["include_audio"] = True
+        if include_tensors:
+            extra["include_tensors"] = True
         manifest = adapter.extract(
             root,
             discovery,
@@ -1110,6 +1137,7 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
                     or include_histograms
                     or include_images
                     or include_audio
+                    or include_tensors
                 )
                 else "scalar"
             )
@@ -1141,8 +1169,8 @@ _MIGRATE_ERROR_TEXT = {
     ),
     "UNSUPPORTED_TARGET": (
         "ERROR (UNSUPPORTED_TARGET): only --to 0.2, --to 0.3, --to 0.4, --to 0.5, "
-        "--to 0.6, --to 0.7 or --to 0.8 is supported; downgrade and other versions are not "
-        "available. Nothing was written."
+        "--to 0.6, --to 0.7, --to 0.8 or --to 0.9 is supported; downgrade and other versions "
+        "are not available. Nothing was written."
     ),
     "RESERVED_PATH": (
         "ERROR (RESERVED_PATH): the target resolves to a backup name; choose the "
@@ -1372,6 +1400,12 @@ _CONDITIONS_UNSUPPORTED_VERSION_0_8 = (
     "runevidence migrate PATH --to 0.2; schema 0.3, 0.4, 0.5, 0.6, 0.7 and 0.8 have no "
     "downgrade path. Nothing was written."
 )
+_CONDITIONS_UNSUPPORTED_VERSION_0_9 = (
+    "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
+    "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
+    "runevidence migrate PATH --to 0.2; schema 0.3, 0.4, 0.5, 0.6, 0.7, 0.8 and 0.9 have "
+    "no downgrade path. Nothing was written."
+)
 
 
 def _conditions_failure(code: str, as_json: bool, *, version: str | None = None) -> int:
@@ -1397,6 +1431,8 @@ def _conditions_failure(code: str, as_json: bool, *, version: str | None = None)
         print(_CONDITIONS_UNSUPPORTED_VERSION_0_7)
     elif code == "UNSUPPORTED_VERSION" and version == "0.8":
         print(_CONDITIONS_UNSUPPORTED_VERSION_0_8)
+    elif code == "UNSUPPORTED_VERSION" and version == "0.9":
+        print(_CONDITIONS_UNSUPPORTED_VERSION_0_9)
     else:
         print(_CONDITIONS_ERROR_TEXT[code])
     return EXIT_INVALID
@@ -1529,7 +1565,9 @@ def _event_artifact_is_volatile(manifest: Manifest, patterns: list[str]) -> bool
     points at the artifact, so an empty or fully filtered event file is still
     protected.
     """
-    if not isinstance(manifest, (Manifest05, Manifest06, Manifest07, Manifest08)):
+    if not isinstance(
+        manifest, (Manifest05, Manifest06, Manifest07, Manifest08, Manifest09)
+    ):
         return False
     return any(
         getattr(artifact, "artifact_type", "file") == "file"
@@ -2646,7 +2684,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "also record legacy TensorBoard histograms as schema 0.7 results "
-            "(opt-in; implies schema 0.7 unless a media flag selects 0.8)"
+            "(opt-in; implies schema 0.7 unless a media or tensor flag selects a "
+            "later schema)"
         ),
     )
     p.add_argument(
@@ -2654,7 +2693,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "also record legacy TensorBoard image summaries as schema 0.8 results "
-            "(opt-in; implies schema 0.8)"
+            "(opt-in; implies schema 0.8 unless --include-tensors selects 0.9)"
         ),
     )
     p.add_argument(
@@ -2662,7 +2701,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "also record legacy TensorBoard audio summaries as schema 0.8 results "
-            "(opt-in; implies schema 0.8)"
+            "(opt-in; implies schema 0.8 unless --include-tensors selects 0.9)"
+        ),
+    )
+    p.add_argument(
+        "--include-tensors",
+        action="store_true",
+        help=(
+            "also record numeric TensorBoard tensors as schema 0.9 results "
+            "(opt-in; implies schema 0.9)"
         ),
     )
     p.add_argument(
@@ -2694,10 +2741,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "migrate",
-        help="declare an existing manifest as schema 0.2, 0.3, 0.4, 0.5, 0.6, 0.7 or 0.8 without changing any recorded value (explicit, no inference)",
+        help="declare an existing manifest as schema 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8 or 0.9 without changing any recorded value (explicit, no inference)",
     )
     p.add_argument("path", type=Path, help=f"experiment folder (containing {MANIFEST_FILENAME}) or manifest file")
-    p.add_argument("--to", required=True, metavar="VERSION", help="target schema version (0.2, 0.3, 0.4, 0.5, 0.6, 0.7 or 0.8)")
+    p.add_argument("--to", required=True, metavar="VERSION", help="target schema version (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8 or 0.9)")
     p.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
     p.add_argument("--json", action="store_true", help="machine-readable result")
     p.set_defaults(func=cmd_migrate)

@@ -327,13 +327,13 @@ def test_unsupported_target_text_names_0_5(tmp_path):
     path = write(folder, doc("0.2"))
     before = path.read_bytes()
 
-    code, out, err = run(["migrate", str(folder), "--to", "0.9"])
+    code, out, err = run(["migrate", str(folder), "--to", "0.10"])
 
     assert (code, err) == (2, "")
     assert out == (
         "ERROR (UNSUPPORTED_TARGET): only --to 0.2, --to 0.3, --to 0.4, --to 0.5, "
-        "--to 0.6, --to 0.7 or --to 0.8 is supported; downgrade and other versions are not "
-        "available. Nothing was written.\n"
+        "--to 0.6, --to 0.7, --to 0.8 or --to 0.9 is supported; downgrade and other versions "
+        "are not available. Nothing was written.\n"
     )
     assert path.read_bytes() == before
 
@@ -344,14 +344,16 @@ def test_migrate_help_and_to_help_name_0_5():
         code = cli.main(["migrate", "--help"])
     text = out.getvalue()
     assert (code, err.getvalue()) == (0, "")
-    assert "target schema version (0.2, 0.3, 0.4, 0.5, 0.6, 0.7 or 0.8)" in text
+    assert "target schema version (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8 or 0.9)" in " ".join(
+        text.split()
+    )
 
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = cli.main(["--help"])
     assert (code, err.getvalue()) == (0, "")
     # The top-level list wraps long command help; compare normalized whitespace.
-    assert "declare an existing manifest as schema 0.2, 0.3, 0.4, 0.5, 0.6, 0.7 or 0.8" in " ".join(
+    assert "declare an existing manifest as schema 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8 or 0.9" in " ".join(
         out.getvalue().split()
     )
 

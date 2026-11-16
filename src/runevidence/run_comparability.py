@@ -60,6 +60,7 @@ from .models import (
     SCHEMA_VERSION_0_6,
     SCHEMA_VERSION_0_7,
     SCHEMA_VERSION_0_8,
+    SCHEMA_VERSION_0_9,
 )
 
 # Comparability is defined on the 0.1/0.2 recorded-condition projections.
@@ -71,6 +72,7 @@ _UNSUPPORTED_COMPARABILITY_SCHEMAS = (
     SCHEMA_VERSION_0_6,
     SCHEMA_VERSION_0_7,
     SCHEMA_VERSION_0_8,
+    SCHEMA_VERSION_0_9,
 )
 
 __all__ = [
