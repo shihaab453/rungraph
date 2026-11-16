@@ -3270,3 +3270,78 @@ def test_init_force_refuses_an_existing_09_manifest(tmp_path, capsys):
     )
     assert cli_module.INIT_0_9_REFUSAL in (capsys.readouterr().out)
     assert (root / MANIFEST_FILENAME).read_bytes() == before
+
+
+# --- Cross-schema matrix: every opt-in level, then migration to 0.9 ---------
+
+
+def _schema_matrix_folder(root: Path) -> Path:
+    payload = _tensor_payload(1, (2, 2), struct.pack("<4f", 1, 2, 3, 4))
+    _write(
+        root / "run" / "e.tfevents",
+        _records(
+            _scalar_event(b"loss", 0.5, step=0),
+            _string_event(b"config", b"lr=3e-4", step=1),
+            _histo_event(b"weights", step=2),
+            _image_event(b"samples", _media_png(), step=3),
+            _audio_event(b"clip", _media_wav(), step=4),
+            _tensor_event(b"logits", payload, step=5),
+        ),
+    )
+    return root
+
+
+@pytest.mark.parametrize(
+    ("flags", "schema", "expected_kinds"),
+    [
+        ([], "0.5", {"tensorboard"}),
+        (["--include-strings"], "0.6", {"tensorboard", "tensorboard-string"}),
+        (["--include-histograms"], "0.7", {"tensorboard", "tensorboard-histogram"}),
+        (
+            ["--include-images", "--include-audio"],
+            "0.8",
+            {"tensorboard", "tensorboard-image", "tensorboard-audio"},
+        ),
+        (
+            ["--include-tensors"],
+            "0.9",
+            {"tensorboard", "tensorboard-tensor"},
+        ),
+    ],
+)
+def test_each_opt_in_level_validates_and_migrates_to_09(
+    tmp_path, capsys, flags, schema, expected_kinds
+):
+    root = _schema_matrix_folder(tmp_path / "experiment")
+    assert main(["init", str(root), "--adapter", "tensorboard", *flags]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == schema
+    assert {result["locator"]["kind"] for result in document["results"]} == expected_kinds
+    assert main(["validate", str(root)]) == 0
+    capsys.readouterr()
+
+    assert main(["migrate", str(root), "--to", "0.9"]) == 0
+    capsys.readouterr()
+    migrated = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert migrated["schema_version"] == "0.9"
+    assert {result["locator"]["kind"] for result in migrated["results"]} == expected_kinds
+    assert main(["validate", str(root)]) == 0
+    capsys.readouterr()
+
+    if schema != "0.9":
+        assert main(["migrate", str(root), "--to", schema]) == 2
+        out = capsys.readouterr()
+        assert "DOWNGRADE_UNSUPPORTED" in (out.out + out.err)
+
+
+def test_09_manifest_refuses_forced_regeneration(tmp_path, capsys):
+    from runevidence import cli as cli_module
+
+    root = _schema_matrix_folder(tmp_path / "experiment")
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tensors"]) == 0
+    capsys.readouterr()
+    before = (root / MANIFEST_FILENAME).read_bytes()
+    assert main(["init", str(root), "--adapter", "tensorboard", "--force"]) == 2
+    assert cli_module.INIT_0_9_REFUSAL in capsys.readouterr().out
+    assert (root / MANIFEST_FILENAME).read_bytes() == before
