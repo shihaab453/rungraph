@@ -103,3 +103,14 @@ def test_workspace_guide_names_every_shipped_route():
         assert f"rungraph {route}" in guide, f"rungraph {route} is missing from the workspace guide"
     assert "--baseline" in guide
     assert "rungraph-workspace.md" in README, "the README does not link the workspace guide"
+
+
+def test_readme_names_every_public_cli_route():
+    import argparse
+
+    from runevidence.cli import build_parser
+
+    parser = build_parser()
+    sub = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+    for route in sub.choices:
+        assert f"runevidence {route}" in README, f"runevidence {route} is missing from the README"

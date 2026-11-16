@@ -311,6 +311,31 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence schema [-o FILE]` | Print the 0.1 manifest JSON Schema (also committed at `schema/runevidence.schema.json`). The separate 0.2 schema is `schema/runevidence-0.2.schema.json`. |
 | `runevidence adapters` | List installed adapters. |
 
+### Analysis and review commands
+
+These routes read recorded assertions only. They do not hash artifact bytes or re-read source
+values; run `runevidence validate` separately before relying on the evidence. Every route
+below accepts `--json` unless noted, and exits `2` on a load or usage failure.
+
+| Command | What it does |
+| --- | --- |
+| `runevidence compare PATH --base RUN_ID --target RUN_ID` | Compare recorded parameters and results of two runs in one manifest (no artifact checks). |
+| `runevidence leaderboard PATH --metric NAME --direction max\|min` | Rank runs by one recorded numeric metric; `--top` limits the list (1-1000). |
+| `runevidence matrix PATH` | Show recorded metrics side by side for selected runs (`--run`, `--metric`). |
+| `runevidence run PATH --id RUN_ID` | Show one run's recorded results, artifacts and claims. |
+| `runevidence claim PATH --id CLAIM_ID` | Show one claim's recorded support and contradiction targets. |
+| `runevidence lineage PATH --id CLAIM_ID` | Trace a claim's recorded upstream provenance, naming unresolved nodes and cycles. |
+| `runevidence impact PATH --id OBJECT_ID` | Find claims potentially affected by one recorded object, with the dependency path. |
+| `runevidence coverage PATH` | Review structural claim support, contradictions and provenance gaps (`--only-flagged`). |
+| `runevidence coverage-gate PATH` | CI gate on selected structural coverage flags; exit `1` when a selected flag is present. |
+| `runevidence fingerprint PATH` | Hash normalized recorded assertions (not artifact contents). |
+| `runevidence fingerprint-compare A B` | Check recorded semantic equality of two manifests; exit `0` same, `1` different, `2` invalid. |
+| `runevidence coverage-diff A B` | Compare structural claim review flags between two recorded manifests. |
+| `runevidence review-diff A B` | Unify recorded claim impact and structural flag changes for review. |
+| `runevidence impact-diff A B` | Compare recorded snapshots and list the claims that need review. |
+| `runevidence review-gate A B` | CI policy gate over recorded review changes; exit `1` when policy is violated. |
+
+
 `PATH` can be the experiment folder or the manifest file. `validate` and
 `inspect` accept `--json` (machine-readable) and `--strict` (warnings fail too).
 With `--json`, either command also accepts `--redact-manifest-path`: the
