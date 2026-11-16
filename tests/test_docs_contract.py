@@ -125,3 +125,23 @@ def test_readme_names_every_workspace_route():
     sub = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
     for route in sub.choices:
         assert f"rungraph {route}" in README, f"rungraph {route} is missing from the README"
+
+
+def test_every_public_route_flag_is_named_in_the_reference():
+    import argparse
+
+    from runevidence.cli import build_parser
+    from runevidence.rungraph_cli import build_parser as build_workspace_parser
+
+    workspace_guide = (REPO / "docs" / "rungraph-workspace.md").read_text(encoding="utf-8")
+    for parser, document, prefix in (
+        (build_parser(), README, "runevidence"),
+        (build_workspace_parser(), workspace_guide, "rungraph"),
+    ):
+        sub = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+        for route, command in sub.choices.items():
+            for action in command._actions:
+                for option in action.option_strings:
+                    if option in ("-h", "--help"):
+                        continue
+                    assert option in document, f"{prefix} {route}: {option} is not documented"
