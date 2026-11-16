@@ -1,15 +1,19 @@
-# RunGraph workspace RFC (v0.8)
+# RunGraph workspace RFC (v0.9)
 
 Status: draft for independent review. No implementation is authorised until this contract is
 accepted.
 
 ## 0. Changes in this version
 
+- v0.9 is editorial after the v0.8 acceptance: no normative change.
+  It fixes the historical changelog wording, adds "intact support" to the two member
+  regression fixtures, says the mapping table's default may combine with
+  `contradiction-recorded`, and defines a wrong-kind target as not a target.
 - v0.8 resolves the last predicate conflict: `supported` requires no unresolved ref of either kind
   for either claim kind, so a member claim with a dangling contradiction is `unresolved` only;
   the regression case asserts the full label set.
 - v0.7 folds the final review: the `at-risk` and `supported` predicates are scoped per claim
-  kind, so a member claim's broken contradiction target gives `unresolved` without `at-risk`;
+  kind, so a member claim's dangling contradiction target gives `unresolved` without `at-risk`;
   the combination list and the three asymmetries match; a regression case is added.
 - v0.6 folds the fifth review: the §5 target scope is now per claim kind (workspace claims
   exclude context, member claims keep the delivered result/artifact/run set); "lineage
@@ -212,7 +216,7 @@ several findings carries several labels.
 | any resolved `contradicts` target | `contradiction-recorded` |
 | no support target at all (the `unsupported-claim` warning) | `uncited` |
 | no result/artifact/run support target with a contradiction present | `uncited` + `contradiction-recorded` |
-| otherwise | `supported` |
+| otherwise | `supported` (may combine with `contradiction-recorded`) |
 
 The workspace-only rule "result/evidence/claim support target" does **not** apply to member
 claims: a member claim supported only by an artifact or run is `supported`, exactly as the
@@ -248,7 +252,10 @@ touches the member only.
 Predicates. For a workspace claim, "target" means a traversed citation (result, evidence or
 workspace claim); an artifact, run or project citation is context and never satisfies a
 workspace-claim predicate. For a member claim, "target" uses the delivered set (result,
-artifact or run), and the closure above applies. A workspace claim's `at-risk` follows both
+artifact or run), and the closure above applies. A target of the wrong kind for the claim kind is invalid (the edge is dropped) and is
+not a target: it neither supports nor contradicts.
+
+A workspace claim's `at-risk` follows both
 support and contradiction targets; a member claim's `at-risk` follows its support targets and
 the delivered `claim-at-risk` only, so a broken `contradicts` target does not make a member
 claim `at-risk` (the delivered asymmetry).
@@ -568,10 +575,10 @@ upstream artifact (A0 -> run X -> A1) is in the closure and listed by impact; an
 output-artifact break where report and impact agree; duplicate
 local ID refusal; the member mapping table for `claim-unverified`, `unsupported-claim`
 warning/error and same-target `conflicting-evidence`; an ordinary member contradiction; a
-member claim with a dangling `contradicts` target is `unresolved` only (no `supported`, no
-`at-risk`), while a workspace claim in the same position is `unresolved` + `at-risk`; a
-member claim with an existing error-bearing contradiction target is `supported` +
-`contradiction-recorded`; a claim with several findings; a claim with no subject finding.
+member claim with an intact support target and a dangling `contradicts` target is
+`unresolved` only (no `supported`, no `at-risk`), while a workspace claim in the same position
+is `unresolved` + `at-risk`; a member claim with an intact support target and an existing
+error-bearing contradiction target is `supported` + `contradiction-recorded`; a claim with several findings; a claim with no subject finding.
 
 Baseline: each schema 0.1–0.10, canonical `data`, schema-changed member, added/removed/
 re-pathed/re-keyed members, missing baseline member, workspace claim/relationship edits,
