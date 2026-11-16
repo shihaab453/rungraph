@@ -1,18 +1,22 @@
-# RunGraph workspace RFC (v0.5)
+# RunGraph workspace RFC (v0.6)
 
 Status: draft for independent review. No implementation is authorised until this contract is
 accepted.
 
 ## 0. Changes in this version
 
-- v0.5 folds the fourth review: context citations are explicitly excluded from every claim
+- v0.6 folds the fifth review: the §5 target scope is now per claim kind (workspace claims
+  exclude context, member claims keep the delivered result/artifact/run set); "lineage
+  parity" replaces the inaccurate "foundations parity"; the delivered `contradicts`
+  asymmetry for member claims is stated.
+- v0.5 folded the fourth review: context citations are explicitly excluded from every claim
   predicate; the member-claim `uncited` rule uses the delivered result/artifact/run target
   set; a cited artifact's closure includes its producing run and inputs; the intended
   member/workspace asymmetries and `contradicts` inheritance are stated; the combination list
   is exhaustive.
 - v0.4 folded the third review: context citations retained but not edges; member mapping
   matched to delivered findings; `supported` excludes inherited/unresolved; closure defined
-  once per object kind and matched to `foundations`; row identity is the result ID everywhere;
+  once per object kind and matched to `lineage`; row identity is the result ID everywhere;
   workspace finding subjects and `uncited` pairs; `--expected-sha256` precedence and
   `init --force` staleness; declared members under ignored folders.
 
@@ -216,13 +220,13 @@ The dependency closure is defined once, here, and used by both report and impact
 - cited result: the result, its artifact, its run, the run's input artifacts and their
   producing runs recursively, and `derived_from` ancestors of the artifact and inputs;
 - cited run: the run, its input artifacts recursively, and the artifacts it produced (the
-  delivered `foundations` for a run);
+  delivered `lineage` for a run);
 - cited artifact: the artifact, its `derived_from` ancestors, its producing run, and that
   run's input artifacts and their producing runs recursively (the delivered `lineage` rule);
 - cited evidence or claim: its citations recursively;
 - every closure follows `derived_from` and member/workspace relationship edges.
 
-This matches the delivered `foundations` per object kind; a result's closure does **not**
+This matches the delivered `lineage` per object kind; a result's closure does **not**
 include the run's other outputs, so Impact and Claims cannot disagree.
 
 A workspace claim citing a member claim or another workspace claim inherits that claim's
@@ -235,9 +239,13 @@ artifact in the closure, "touches" the claim. Workspace findings carry a subject
 a `claim:<workspace>#<id>` node ID, or the qualified reference text; a finding with no subject
 touches the member only.
 
-Predicates. In this section "target" means a traversed citation (result, evidence or
-workspace claim). A context citation (artifact, run, project) never satisfies a predicate and
-never makes a claim `at-risk`.
+Predicates. For a workspace claim, "target" means a traversed citation (result, evidence or
+workspace claim); an artifact, run or project citation is context and never satisfies a
+workspace-claim predicate. For a member claim, "target" uses the delivered set (result,
+artifact or run), and the closure above applies. A workspace claim's `at-risk` follows both
+support and contradiction targets; a member claim's `at-risk` follows its support targets and
+the delivered `claim-at-risk` only, so a broken `contradicts` target does not make a member
+claim `at-risk` (the delivered asymmetry).
 
 - `unresolved`: any support/contradicts target names a missing member, a missing local ID, an
   ambiguous duplicate local ID, or a missing workspace claim; or a cited claim carries
@@ -536,7 +544,7 @@ Claims: every state and allowed combination, including `supported` + `contradict
 `unresolved` + `at-risk`, `uncited` + `at-risk`, `uncited` + `unresolved`; context-only
 citations retained but not traversed (an error on a context artifact does not make `at-risk`);
 a cited at-risk member claim inherits its state and is never `supported`; an evidence closure;
-the per-kind closure (`foundations` parity: a cited result does not include the run's other
+the per-kind closure (`lineage` parity: a cited result does not include the run's other
 outputs, a cited run does, a cited artifact includes its producing run and inputs); a broken
 upstream artifact (A0 -> run X -> A1) is in the closure and listed by impact; an
 output-artifact break where report and impact agree; duplicate
