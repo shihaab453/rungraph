@@ -52,6 +52,7 @@ from .edit import EditError, glob_match, plan_add, plan_rehash, select_artifacts
 from .manifest import (LoadedManifest, ManifestLoadError, load_manifest, load_raw,
                        parse_manifest_source, resolve_manifest_path, save_manifest,
                        save_raw)
+from . import authoring
 from .conditions_authoring import FIELDS as CONDITIONS_FIELDS, ConditionsError, author_conditions
 from .migrate import TARGET_VERSIONS, MigrationError, migrate_manifest
 from .models import (
@@ -878,6 +879,63 @@ def _accepts_keyword(adapter, name: str) -> bool:
 
 def _accepts_tag_filter(adapter) -> bool:
     return _accepts_keyword(adapter, "tag_filter")
+
+
+def _author_manifest(args: argparse.Namespace, mutate, summary: str) -> int:
+    loaded = _load_or_report(args.path, args.json)
+    if loaded is None:
+        return EXIT_INVALID
+    raw = load_raw(loaded)
+    try:
+        mutate(raw)
+    except authoring.AuthoringError as exc:
+        if args.json:
+            print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": str(exc), "exit_code": EXIT_INVALID}))
+        else:
+            print(f"ERROR: {exc}\nNothing was written.")
+        return EXIT_INVALID
+    if args.dry_run:
+        if args.json:
+            print(json.dumps({"format": "runevidence-authoring-v1", "ok": True, "changed": summary, "dry_run": True, "written": False, "exit_code": EXIT_OK}))
+        else:
+            print(f"Would {summary}.")
+        return EXIT_OK
+    try:
+        save_raw(raw, loaded.path, expected_bytes=loaded.source_bytes)
+    except OSError as exc:
+        print(f"ERROR: {exc}\nNothing was written.")
+        return EXIT_INVALID
+    if args.json:
+        print(json.dumps({"format": "runevidence-authoring-v1", "ok": True, "changed": summary, "dry_run": False, "written": True, "exit_code": EXIT_OK}))
+    else:
+        print(f"Wrote {loaded.path}\nNext: runevidence validate {args.path}")
+    return EXIT_OK
+
+
+def cmd_result(args: argparse.Namespace) -> int:
+    if args.action == "remove":
+        return _author_manifest(args, lambda raw: authoring.remove_result(raw, args.id), f"remove result {args.id}")
+    path = Path(args.file)
+    entry = authoring.read_json_file(path)
+    if args.action == "add":
+        return _author_manifest(args, lambda raw: authoring.add_result(raw, entry), f"add result {entry.get('id')}")
+    return _author_manifest(args, lambda raw: authoring.edit_result(raw, entry["id"], entry), f"edit result {entry.get('id')}")
+
+
+def cmd_evidence(args: argparse.Namespace) -> int:
+    if args.action == "remove":
+        return _author_manifest(args, lambda raw: authoring.remove_evidence(raw, args.id), f"remove claim {args.id}")
+    entry = authoring.read_json_file(Path(args.file))
+    if args.action == "add":
+        return _author_manifest(args, lambda raw: authoring.add_evidence(raw, entry), f"add claim {entry.get('id')}")
+    return _author_manifest(args, lambda raw: authoring.edit_evidence(raw, entry["id"], entry), f"edit claim {entry.get('id')}")
+
+
+def cmd_relationship(args: argparse.Namespace) -> int:
+    if args.action == "remove":
+        return _author_manifest(args, lambda raw: authoring.remove_relationship(raw, args.index), f"remove relationship {args.index}")
+    entry = authoring.read_json_file(Path(args.file))
+    return _author_manifest(args, lambda raw: authoring.add_relationship(raw, entry), "add relationship")
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -2675,6 +2733,33 @@ def build_parser() -> argparse.ArgumentParser:
                    default="new-flags", help="review condition triggering exit 1 (default: new-flags)")
     p.add_argument("--json", action="store_true", help="complete machine-readable gate and unfiltered review")
     p.set_defaults(func=cmd_review_gate)
+
+    p = sub.add_parser("result", help="add, edit or remove a recorded result")
+    p.add_argument("action", choices=("add", "edit", "remove"))
+    p.add_argument("path", type=Path)
+    p.add_argument("--id")
+    p.add_argument("--file")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_result)
+
+    p = sub.add_parser("evidence", help="add, edit or remove a claim/evidence entry")
+    p.add_argument("action", choices=("add", "edit", "remove"))
+    p.add_argument("path", type=Path)
+    p.add_argument("--id")
+    p.add_argument("--file")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_evidence)
+
+    p = sub.add_parser("relationship", help="add or remove a recorded relationship")
+    p.add_argument("action", choices=("add", "remove"))
+    p.add_argument("path", type=Path)
+    p.add_argument("--file")
+    p.add_argument("--index", type=int)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_relationship)
 
     p = sub.add_parser("init", help=f"scan a folder and write a starter {MANIFEST_FILENAME}")
     p.add_argument("path", type=Path, nargs="?", default=Path("."), help="experiment folder (default: current)")

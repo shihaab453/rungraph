@@ -354,8 +354,9 @@ def test_no_public_route_or_production_writer_reference():
     current_public = {"validate", "validate-batch", "inspect", "compare", "comparability", "assess", "leaderboard", "matrix", "run",
                       "claim", "lineage", "impact", "coverage", "coverage-gate", "fingerprint",
                       "fingerprint-compare", "coverage-diff", "review-diff", "impact-diff", "review-gate",
+                      "result", "evidence", "relationship",
                       "init", "migrate", "conditions", "rehash", "add", "schema", "adapters"}
-    assert historical_seven <= current_public and len(current_public) == 27
+    assert historical_seven <= current_public and len(current_public) == 30
     assert set(choices) == current_public
     # The protected property: no private, experimental, staging or SQLite route is public.
     assert not [c for c in choices if c.startswith("_")
