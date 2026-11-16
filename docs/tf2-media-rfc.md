@@ -1,21 +1,21 @@
-# TF2 media summaries — design RFC (v0.4)
+# TF2 media summaries — design RFC (v0.5)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.10 admission decision are required before any code.
 Schema 0.1–0.9, their readers/checkers and every delivered behavior stay frozen, except the
 additive dispatch, model, migration and text edits this document names explicitly.
 
-## 0. Changes in v0.4
+## 0. Changes in v0.5
 
-Round 3 confirmed the v0.3 design and rejected it on missed table rows, stale lines and an
-incomplete inventory. v0.4 fixes them:
+Round 4 confirmed the v0.4 design and rejected it on one precedence contradiction and two
+missing test flips. v0.5 fixes them:
 
-- **Ladder completed.** Precedence is value, exhausted occurrence (`missing`), element beyond
-  the entry's payload count (`missing`), string-tensor encoding failure, anything outside
-  structural recognition (`unsupported_value`), absent (`missing`). Recognition is structural
-  (member 8 + `DT_STRING`), so dtype 0/20/21 tensors fall to the exhaustive fallback; validation
-  is per requested kind, so `k=0`, `k=65`, `[k,3]`, `tensor_content`, rank-0 text and the opposite
-  kind all have rows.
+- **Ladder completed and ordered like the delivered reader.** Precedence is value, exhausted
+  occurrence (`missing`), element beyond the entry's payload count (`missing`), string-tensor
+  encoding failure (including an entry that conforms only as the other TF2 kind), anything
+  outside structural recognition (`unsupported_value`), absent (`missing`). The encoding-failure
+  flag wins over the other-kind flag exactly as `_media_results` orders `unsupported_scalar`
+  before `non_scalar`; the summary, table and verification plan now agree.
 - **One merge rule, everywhere.** Repeated field-8 fragments merge by protobuf rules and the
   merged state is validated; the stale "merge fails" test line and the stale compare-flag row
   are removed.
@@ -97,7 +97,7 @@ A `Summary.Value` whose winning member is `tensor` (8) is a TF2 media candidate 
 
 Rank 0 and rank-1 `[1]` string tensors are **not** TF2 media. For string requests they keep the
 delivered 0.6 behavior; a TF2 media request on such an entry reports `unsupported_encoding`
-(it is a string tensor that conforms as neither TF2 layout). `tf.make_tensor_proto` of a single
+(it is a string tensor that fails that kind's layout). `tf.make_tensor_proto` of a single
 encoded image produces that shape, and it is explicitly out of scope (§11).
 
 ### 3.2 Image layout
@@ -125,10 +125,13 @@ A label longer than 4,096 bytes fails the entry; an empty label is accepted.
 
 ### 3.4 Validation and bounds
 
-Each payload reuses the delivered 0.8 validators unchanged: PNG signature, IHDR length/type/
-CRC-32 (zlib), dimensions 1..65,535, at least one non-empty `IDAT`, a final `IEND` ending the
-element; RIFF/WAVE magic, `riff_size == length - 8`, first `fmt ` of at least 16 bytes, exactly
-one non-empty `data`, odd-size padding. Digests cover each element's bytes exactly.
+Each payload reuses the 0.8 pixel/audio byte walks: the PNG signature, IHDR length/type/CRC-32
+(zlib), dimensions 1..65,535, at least one non-empty `IDAT` and a final `IEND` ending the
+element; the RIFF/WAVE magic, `riff_size == length - 8`, first `fmt ` of at least 16 bytes,
+exactly one non-empty `data` and odd-size padding. The legacy `Summary.Image` wire width/height
+and `Summary.Audio` `content_type` checks do **not** apply, because those fields do not exist on
+a `TensorProto`; the TF2 width/height rule is §3.2's string comparison. Digests cover each
+element's bytes exactly.
 
 Element count is capped at 64. The merged-summary cap (16 MiB per Event) still bounds the whole
 entry, so the per-element 16 MiB bound is a defensive ceiling, not a reachable budget.
@@ -150,9 +153,10 @@ fails the entry through the ordinary layout checks.
 
 The 0.10 state is separate from `_TensorState` and retains at most **128** element offsets, which
 covers the largest valid layout (audio `[64, 2]` = 128 values) and the image form (2 + 64 = 66).
-A 129th retained string fails the entry while reading. Besides those offsets it retains only the
-dimension count and the first two dimension values (the layouts are rank 1 or rank 2); nothing
-else. `_TensorState` and every 0.5–0.9 reader stay byte-identical.
+A 129th retained string fails the entry while reading. Besides those offsets it retains the
+dimension count and the first two dimension values (the layouts are rank 1 or rank 2), the final
+dtype, `unknown_rank`, the `tensor_content`, typed-field and wrong-wire flags, per-string size
+flags and one failed flag — all O(1). `_TensorState` and every 0.5–0.9 reader stay byte-identical.
 
 ## 4. Identity, ordering, names
 
@@ -166,8 +170,9 @@ else. `_TensorState` and every 0.5–0.9 reader stay byte-identical.
   the element suffix, so the id is derivable from those locators alone; every legacy kind keeps
   its delivered token and bytes (the string token is `text`, not the locator kind). Occurrence advances once per conforming **entry**, and every
   element record of that entry carries the same occurrence.
-- Names: `tag @ step (tf2 image) element N` / `(tf2 audio) element N`, then ` #n` when the entry
-  occurrence is above zero. A multifile group **replaces** that occurrence suffix with
+- Names: `tag @ step (tf2 image) element N` / `(tf2 audio) element N` from a display-label map
+  (`tf2 image`/`tf2 audio`), deliberately distinct from the id tokens (`tf2-image`/`tf2-audio`),
+  then ` #n` when the entry occurrence is above zero. A multifile group **replaces** that occurrence suffix with
   `[basename] #<digest>`, where the digest includes the kind and the element; the delivered
   reader uses the same replace-not-append shape. Legacy names are unchanged.
 
@@ -193,8 +198,7 @@ Stage 1, first matching row wins, mirroring the delivered `_media_results` prece
 | conforming entry at that occurrence, element `< k` | `value` (stage 2) |
 | conforming entries exist and the occurrence is exhausted | `missing` |
 | conforming entry at that occurrence, element `>= k` | `missing` |
-| entries exist that are string-tensor entries, conform as the **other** TF2 kind, and never as the requested kind | `unsupported_value` |
-| entries exist that are string-tensor entries but conform as neither TF2 kind | `unsupported_encoding` |
+| entries exist that are string-tensor entries but fail the requested kind's validation — including an entry conforming only as the other TF2 kind, a wrong rank/layout/count, `tensor_content`, or a failing payload | `unsupported_encoding` |
 | any other entry at the tag/step: another member, a tensor outside structural recognition (including dtype 0/20/21), or no winning member | `unsupported_value` |
 | no entry at the tag/step | `missing` |
 
@@ -232,13 +236,17 @@ reports "schema 0.3" and loses the cap hint.
   else 0.5. `iter_supported_summaries_10` yields **every** lower kind as 0.9 does, plus both TF2
   records, so combined flags never drop kinds.
 - `_read_event_file` filters TF2 records by the flag and keeps per-kind occurrence counters
-  advancing only for records that survive filtering **and** conform, matching the checker's
-  namespace; legacy counters are independent.
+  advancing only for entries that survive filtering **and** conform, matching the checker's
+  namespace; legacy counters are independent. `iter_supported_summaries_10` yields **one record
+  per entry**, carrying its element values; the adapter then expands that record into `k`
+  observations that share the single occurrence and differ only by `element`. A per-element
+  record would advance the delivered counter `k` times and desynchronise the checker.
 - The budget text for a TF2-media-only run is `BUDGET_MESSAGE_08` (the media family line);
   `_budget_message` gains the 0.10 flag in its first test. Each element charges one result.
 - Tags: media records pass `text=True`, so an unusable tag is skipped, never fatal; the no-match
-  warning counts the flag so the noun is "summary tag". `TAG_MESSAGE_10` exists for scalar tags
-  and is reached only through the delivered scalar path.
+  warning counts the flag so the noun is "summary tag". `TAG_MESSAGE_10` is reached only when a
+  scalar record with an unusable tag is decoded on a 0.10 run — a TF2-media-only run still
+  yields lower kinds, so that path remains reachable and must be tested.
 - Adapter plumbing that must learn `element`: `_Observation`, the reservation pass, the emit
   pass, `_result_id`, `_assign_names` and the multifile name digest. The two passes must derive
   identical ids or the collision error fires.
@@ -263,10 +271,13 @@ ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit schema 
 a scalar tag cannot be represented in schema 0.10; nothing was written
 ```
 
+The conditions text is a new `_CONDITIONS_UNSUPPORTED_VERSION_0_10` constant plus a dispatch arm;
+the base `_CONDITIONS_ERROR_TEXT` entry and the 0.3-0.9 constants stay byte-identical.
+
 `--include-tf2-media` help: `also record TensorFlow 2 image and audio string summaries as
-schema 0.10 results (opt-in; implies schema 0.10)`. The histogram and tensor help texts gain
-"or a TF2 media flag selects 0.10", and the `--include-images`/`--include-audio` help becomes
-"implies schema 0.8 unless a tensor or TF2 media flag selects a later schema". Capability errors
+schema 0.10 results (opt-in; implies schema 0.10)`. The `--include-images`/`--include-audio`
+help becomes "implies schema 0.8 unless a tensor or TF2 media flag selects a later schema"; the
+histogram help already reads that way and the tensor help needs no "unless" clause. Capability errors
 for the new flag are pinned as `ERROR: adapter {name!r} does not support --include-tf2-media.
 Nothing was written.` and the matching "cannot apply" line. `--to` and migrate parser help list 0.10. The 0.10 cap text
 is `TENSORBOARD_CAP_MESSAGE_06`.
@@ -282,13 +293,14 @@ is `TENSORBOARD_CAP_MESSAGE_06`.
 | `checks/graph.py` | both version gates |
 | `locator_profiles.py`, `run_claim.py` | element-aware locator display and whitelist |
 | `run_compare.py` | no change; flags derive from the value kind, so TF2 results already set the image/audio flags |
-| `migrate.py` | seven target edits: explicit lists in 0.3-0.8, a new 0.9 arm, and the 0.10 target branch (0.2 already refuses generically) |
+| `migrate.py` | add 0.10 to the six explicit downgrade lists (0.3-0.8); give the existing 0.9 arm the downgrade list it lacks; add the new `--to 0.10` target branch; the 0.2 arm already refuses generically |
 | `run_comparability.py`, `cli.py`, `adapter.py` | comparability, flag, capability/keyword checks, texts, call sites, id/name plumbing |
 | `tests/tensorboard_builder.py` | `string_val` support (single and repeated fragments) |
-| `tests/test_cli_migrate.py`, `tests/test_migrate_0_4.py`, `tests/test_migrate_0_5.py`, `tests/test_manifest_0_2.py` | the 0.10-as-unsupported expectations move to 0.11 |
+| `tests/test_cli_migrate.py`, `tests/test_migrate_0_3.py`, `tests/test_migrate_0_4.py`, `tests/test_migrate_0_5.py`, `tests/test_manifest_0_2.py` | the 0.10-as-unsupported expectations move to 0.11 |
+| `tests/data/schema-vectors/reject-unknown-version.json` | declares 0.10; move the fixture to 0.11 so the unknown-version rejection still has a subject |
 | `tests/test_cli_conditions.py` | a 0.10 manifest now loads and reaches the 0.10 `UNSUPPORTED_VERSION` text |
 | `tests/test_docs_contract.py` | page map, flag lists, migrate-target and locator-kind assertions gain 0.10 |
-| `docs/tensorboard-guide.md` | deliberate-limits section now says TF2 media IS read under 0.10 |
+| `docs/tensorboard-guide.md` | schema range, precedence, per-kind list, locator list, caps, migrate/comparability paragraphs, page list and the deliberate-limits section all gain 0.10 and TF2 media |
 | `docs/`, `schema/`, `README.md` | 0.10 page, schema file, flag documentation |
 
 ## 9. Verification plan
@@ -299,12 +311,17 @@ is `TENSORBOARD_CAP_MESSAGE_06`.
   stay text/unsupported; `tensor_content` and typed fields fail; a split fragment merge that
   forms a valid layout is recorded, and one that does not fails the entry.
 - Payloads: per-element truncation, bad CRC, unpadded WAV, empty payload.
-- Identity: occurrence per entry unaffected by elements; element ids always present and
-  derivable; names and multifile suffixes unique across batches; tag filter.
-- Checker: element out of range → `was not found`; wrong layout → unsupported encoding; other
-  member → unsupported value; digest mismatch; locator rendering with `element`.
+- Identity: occurrence per entry unaffected by elements, including a k=3 batch that must yield
+  three results at occurrence 0 with elements 0-2; element ids always present and derivable;
+  names and multifile suffixes unique across batches; tag filter.
+- Checker: element out of range → `was not found`; wrong layout or the opposite TF2 kind →
+  unsupported encoding; another member → unsupported value; digest mismatch; locator rendering
+  with `element`. Mixed entries are tested in both file orders, for both requested kinds, with
+  and without a conforming entry, so the encoding-before-other-kind precedence is pinned.
 - Differential: for scalar, string, histogram, media and numeric-tensor requests,
-  `scan_tensorboard_10` returns the same selections and outcomes as 0.5–0.9 on the same bytes.
+  `scan_tensorboard_10` returns the same selections and outcomes as 0.5–0.9 on the same bytes,
+  including lower-kind requests **on TF2-shaped entries** (a rank-1/2 dtype-7 tensor is still an
+  unsupported numeric/scalar entry for those requests).
 - Migration: 0.9 → 0.10 identity; 0.10 → every lower target `DOWNGRADE_UNSUPPORTED`;
   comparability; force guard; 0.8/0.9 still reject both new kinds and `element`.
 - Adapter/CLI: flag precedence, combined flags keep lower kinds, budget text, tag skip, no-match
