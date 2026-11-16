@@ -11,7 +11,7 @@ import math
 from fractions import Fraction
 from typing import Any
 
-from .histogram_display import histogram_display, value_to_json
+from .histogram_display import value_display, value_to_json
 from .models import Manifest
 
 
@@ -82,6 +82,18 @@ def _delta(base: int | float, target: int | float) -> int | float | None:
     return rounded
 
 
+def _kind(value: Any) -> str | None:
+    return value.get("kind") if isinstance(value, dict) else None
+
+
+def _structured_flag(row: dict[str, Any], side: str, value: Any, *, allow: bool) -> None:
+    if not allow:
+        return
+    kind = _kind(value)
+    if kind in ("histogram", "image", "audio"):
+        row[f"{side}_{kind}"] = True
+
+
 def _items(
     base: dict[str, Any],
     target: dict[str, Any],
@@ -97,16 +109,14 @@ def _items(
             row = {"name": name, "target": target[name], "status": "target_only"}
             if name in target_text:
                 row["target_text"] = True
-            if allow_histograms and histogram_display(target[name]) is not None:
-                row["target_histogram"] = True
+            _structured_flag(row, "target", target[name], allow=allow_histograms)
             items.append(row)
             continue
         if name not in target:
             row = {"name": name, "baseline": base[name], "status": "baseline_only"}
             if name in base_text:
                 row["baseline_text"] = True
-            if allow_histograms and histogram_display(base[name]) is not None:
-                row["baseline_histogram"] = True
+            _structured_flag(row, "baseline", base[name], allow=allow_histograms)
             items.append(row)
             continue
         b, t = base[name], target[name]
@@ -120,11 +130,8 @@ def _items(
             row["baseline_text"] = True
         if name in target_text:
             row["target_text"] = True
-        if allow_histograms:
-            if histogram_display(b) is not None:
-                row["baseline_histogram"] = True
-            if histogram_display(t) is not None:
-                row["target_histogram"] = True
+        _structured_flag(row, "baseline", b, allow=allow_histograms)
+        _structured_flag(row, "target", t, allow=allow_histograms)
         if numeric_deltas and _numeric(b) and _numeric(t):
             delta = _delta(b, t)
             if delta is not None:
@@ -179,12 +186,19 @@ def _display_value(
     value: Any, *, text: bool, histogram: bool = False
 ) -> str:
     if histogram:
-        hist = histogram_display(value)
-        if hist is not None:
-            return hist
+        shown = value_display(value)
+        if shown is not None:
+            return shown
     if text and isinstance(value, str) and len(value) > 120:
         return json.dumps(value[:120], ensure_ascii=True, allow_nan=False) + "..."
     return _visible(value)
+
+
+def _side_flag(row: dict[str, Any], side: str) -> bool:
+    return any(
+        row.get(f"{side}_{kind}")
+        for kind in ("histogram", "image", "audio")
+    )
 
 
 def format_comparison(data: dict[str, Any]) -> str:
@@ -207,18 +221,18 @@ def format_comparison(data: dict[str, Any]) -> str:
             if status == "baseline_only":
                 msg = (
                     "baseline only "
-                    f"{_display_value(row['baseline'], text=row.get('baseline_text', False), histogram=row.get('baseline_histogram', False))}"
+                    f"{_display_value(row['baseline'], text=row.get('baseline_text', False), histogram=_side_flag(row, 'baseline'))}"
                 )
             elif status == "target_only":
                 msg = (
                     "target only "
-                    f"{_display_value(row['target'], text=row.get('target_text', False), histogram=row.get('target_histogram', False))}"
+                    f"{_display_value(row['target'], text=row.get('target_text', False), histogram=_side_flag(row, 'target'))}"
                 )
             else:
                 msg = (
-                    f"{_display_value(row['baseline'], text=row.get('baseline_text', False), histogram=row.get('baseline_histogram', False))}"
+                    f"{_display_value(row['baseline'], text=row.get('baseline_text', False), histogram=_side_flag(row, 'baseline'))}"
                     " -> "
-                    f"{_display_value(row['target'], text=row.get('target_text', False), histogram=row.get('target_histogram', False))}"
+                    f"{_display_value(row['target'], text=row.get('target_text', False), histogram=_side_flag(row, 'target'))}"
                     f" [{status}]"
                 )
                 if "delta" in row:

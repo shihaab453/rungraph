@@ -33,13 +33,18 @@ from ..models import (
     SCHEMA_VERSION_0_5,
     SCHEMA_VERSION_0_6,
     SCHEMA_VERSION_0_7,
+    SCHEMA_VERSION_0_8,
     CsvCellLocator,
     HistogramValue,
     JsonlLocator,
     Manifest,
+    TensorboardAudioLocator,
+    TensorboardImageLocator,
     TensorboardLocator,
     TensorboardStringLocator,
     TensorboardHistogramLocator,
+    AudioValue,
+    ImageValue,
 )
 from ..tensorboard_events import (
     EventFileError,
@@ -47,6 +52,7 @@ from ..tensorboard_events import (
     scan_scalars,
     scan_tensorboard_06,
     scan_tensorboard_07,
+    scan_tensorboard_08,
 )
 from .csv import (
     CsvNotNumeric,
@@ -143,6 +149,8 @@ def _extension_matches(artifact_path: str, locator: Any) -> bool:
             TensorboardLocator,
             TensorboardStringLocator,
             TensorboardHistogramLocator,
+            TensorboardImageLocator,
+            TensorboardAudioLocator,
         ),
     ):
         return _tensorboard_path_matches(artifact_path)
@@ -160,6 +168,8 @@ def _expected_extension(locator: Any) -> str:
             TensorboardLocator,
             TensorboardStringLocator,
             TensorboardHistogramLocator,
+            TensorboardImageLocator,
+            TensorboardAudioLocator,
         ),
     ):
         return "TensorBoard event"
@@ -329,6 +339,65 @@ def _check_one_targeted(
         )
         return findings, True
     if not compare_values(result.value, actual):
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.result_value_mismatch, "does not match the recorded value",
+            )
+        )
+        return findings, True
+    return findings, False
+
+
+def _check_one_tensorboard_media(
+    result,
+    artifact_path: str,
+    locator,
+    selection,
+    *,
+    kind: str,
+    model,
+) -> tuple[list[Finding], bool]:
+    """Selection, type and exact comparison for one image or audio result."""
+    findings: list[Finding] = []
+    outcome = selection.outcome
+    if outcome is ScalarOutcome.mismatch:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_mismatch, "was not found",
+            )
+        )
+        return findings, True
+    if outcome is ScalarOutcome.unsupported_scalar:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unsupported_value,
+                f"selects an unsupported {kind} encoding",
+            )
+        )
+        return findings, True
+    if outcome is not ScalarOutcome.value or selection.value is None:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unsupported_value, "selects an unsupported value",
+            )
+        )
+        return findings, True
+    recorded = result.value
+    if isinstance(recorded, model):
+        recorded = recorded.model_dump(mode="json")
+    if not isinstance(recorded, dict) or recorded.get("kind") != kind:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unsupported_value, "selects an unsupported value",
+            )
+        )
+        return findings, True
+    if recorded != selection.value:
         findings.append(
             _value_error(
                 result, artifact_path, locator,
@@ -599,6 +668,10 @@ def _check_one_tensorboard_histogram(
 
 
 def _locator_kind(locator: Any) -> str:
+    if isinstance(locator, TensorboardImageLocator):
+        return "tensorboard-image"
+    if isinstance(locator, TensorboardAudioLocator):
+        return "tensorboard-audio"
     if isinstance(locator, TensorboardHistogramLocator):
         return "tensorboard-histogram"
     if isinstance(locator, TensorboardStringLocator):
@@ -634,6 +707,7 @@ def check_targeted_results(
             SCHEMA_VERSION_0_5,
             SCHEMA_VERSION_0_6,
             SCHEMA_VERSION_0_7,
+            SCHEMA_VERSION_0_8,
         ):
             directory_hint = (
                 "Point the result at a single JSON, JSONL, CSV or TensorBoard event "
@@ -718,14 +792,24 @@ def check_targeted_results(
                     message=(
                         TENSORBOARD_CAP_MESSAGE_06
                         if manifest.schema_version
-                        in (SCHEMA_VERSION_0_6, SCHEMA_VERSION_0_7)
+                        in (
+                            SCHEMA_VERSION_0_6,
+                            SCHEMA_VERSION_0_7,
+                            SCHEMA_VERSION_0_8,
+                        )
                         else TENSORBOARD_CAP_MESSAGE
                     ),
                     hint=None,
                 )
             )
             capped_kinds.update(
-                {"tensorboard", "tensorboard-string", "tensorboard-histogram"}
+                {
+                    "tensorboard",
+                    "tensorboard-string",
+                    "tensorboard-histogram",
+                    "tensorboard-image",
+                    "tensorboard-audio",
+                }
             )
             capped_artifact = True
         if csv_cell_capped and csv_cell_eligible:
@@ -766,6 +850,8 @@ def check_targeted_results(
             "tensorboard",
             "tensorboard-string",
             "tensorboard-histogram",
+            "tensorboard-image",
+            "tensorboard-audio",
         ):
             if file_over_cap_128:
                 findings.append(
@@ -862,6 +948,8 @@ def check_targeted_results(
                 TensorboardLocator,
                 TensorboardStringLocator,
                 TensorboardHistogramLocator,
+                TensorboardImageLocator,
+                TensorboardAudioLocator,
             ),
         )
     ]
@@ -869,6 +957,8 @@ def check_targeted_results(
     scalar_selections = None
     text_selections = None
     hist_selections = None
+    image_selections = None
+    audio_selections = None
     if tensorboard_results:
         scalar_requests = [
             (
@@ -897,8 +987,41 @@ def check_targeted_results(
             for result in tensorboard_results
             if isinstance(result.locator, TensorboardHistogramLocator)
         ]
+        image_requests = [
+            (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+            )
+            for result in tensorboard_results
+            if isinstance(result.locator, TensorboardImageLocator)
+        ]
+        audio_requests = [
+            (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+            )
+            for result in tensorboard_results
+            if isinstance(result.locator, TensorboardAudioLocator)
+        ]
         try:
-            if manifest.schema_version == SCHEMA_VERSION_0_7:
+            if manifest.schema_version == SCHEMA_VERSION_0_8:
+                (
+                    scalar_selections,
+                    text_selections,
+                    hist_selections,
+                    image_selections,
+                    audio_selections,
+                ) = scan_tensorboard_08(
+                    data,
+                    scalar_requests,
+                    text_requests,
+                    hist_requests,
+                    image_requests,
+                    audio_requests,
+                )
+            elif manifest.schema_version == SCHEMA_VERSION_0_7:
                 (
                     scalar_selections,
                     text_selections,
@@ -992,6 +1115,36 @@ def check_targeted_results(
             result_findings, failed = _check_one_tensorboard_histogram(
                 result, artifact.path, result.locator, hist_selections[key]
             )
+        elif isinstance(result.locator, TensorboardImageLocator):
+            assert image_selections is not None
+            key = (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+            )
+            result_findings, failed = _check_one_tensorboard_media(
+                result,
+                artifact.path,
+                result.locator,
+                image_selections[key],
+                kind="image",
+                model=ImageValue,
+            )
+        elif isinstance(result.locator, TensorboardAudioLocator):
+            assert audio_selections is not None
+            key = (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+            )
+            result_findings, failed = _check_one_tensorboard_media(
+                result,
+                artifact.path,
+                result.locator,
+                audio_selections[key],
+                kind="audio",
+                model=AudioValue,
+            )
         elif isinstance(result.locator, CsvCellLocator):
             result_findings, failed = _check_one_csv_cell(
                 result, artifact.path, result.locator, csv_profile
@@ -1038,6 +1191,7 @@ def check_results(
         SCHEMA_VERSION_0_5,
         SCHEMA_VERSION_0_6,
         SCHEMA_VERSION_0_7,
+        SCHEMA_VERSION_0_8,
     )
 
     def unverifiable(res_id: str, msg: str) -> None:

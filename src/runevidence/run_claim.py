@@ -10,7 +10,7 @@ import math
 from typing import Any
 
 from .locator_profiles import display_locator
-from .histogram_display import histogram_display, value_to_json
+from .histogram_display import value_display, value_to_json
 from .models import Manifest, RelationshipType, locator_to_json
 
 
@@ -36,14 +36,16 @@ def _display_details(details: dict[str, Any]) -> dict[str, Any]:
         else getattr(locator, "kind", None)
     )
     value = details.get("value")
-    hist = histogram_display(value)
-    if hist is not None:
-        details = {**details, "value": hist}
+    shown = value_display(value)
+    if shown is not None:
+        details = {**details, "value": shown}
     if kind in (
         "csv-cell",
         "tensorboard",
         "tensorboard-string",
         "tensorboard-histogram",
+        "tensorboard-image",
+        "tensorboard-audio",
     ):
         return {**details, "locator": display_locator(locator)}
     return details

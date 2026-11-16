@@ -717,8 +717,10 @@ def test_artifact_to_dict_has_explicit_version_context():
     assert artifact_to_dict(labelled, schema_version="0.3")["dataset_id"] == "imagenet"
     assert artifact_to_dict(labelled, schema_version="0.4")["dataset_id"] == "imagenet"
 
+    assert artifact_to_dict(plain, schema_version="0.8")["path"] == plain.path
+
     with pytest.raises(ValueError):
-        artifact_to_dict(plain, schema_version="0.8")
+        artifact_to_dict(plain, schema_version="0.9")
 
 
 def _two_entry_doc(version: str = "0.2") -> dict:

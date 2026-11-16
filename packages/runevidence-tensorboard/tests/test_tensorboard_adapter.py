@@ -2735,3 +2735,328 @@ def test_profile_valid_plus_wrong_wire_string_is_non_string(tmp_path, capsys):
     assert (
         main(["init", str(root), "--adapter", "tensorboard", "--include-strings"]) == 2
     )
+
+
+# --- Schema 0.8 media references -------------------------------------------
+
+
+def _media_png(width: int = 64, height: int = 64, body: bytes = b"\x00\x01") -> bytes:
+    import zlib as _zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + kind
+            + data
+            + struct.pack(">I", _zlib.crc32(kind + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", body)
+        + chunk(b"IEND", b"")
+    )
+
+
+def _media_wav(frames: bytes = b"\x00\x00" * 4) -> bytes:
+    fmt = struct.pack("<HHIIHH", 1, 1, 8000, 16000, 2, 16)
+    chunks = b"fmt " + struct.pack("<I", len(fmt)) + fmt
+    chunks += b"data" + struct.pack("<I", len(frames)) + frames
+    if len(frames) % 2:
+        chunks += b"\x00"
+    return b"RIFF" + struct.pack("<I", len(chunks) + 4) + b"WAVE" + chunks
+
+
+def _image_value(
+    tag: bytes, payload: bytes, *, width: int = 64, height: int = 64
+) -> bytes:
+    message = _varint_field(1, height) + _varint_field(2, width) + _bytes_field(4, payload)
+    return _value(tag) + _bytes_field(4, message)
+
+
+def _audio_value(tag: bytes, payload: bytes, *, content_type=b"audio/wav") -> bytes:
+    message = b""
+    if content_type is not None:
+        message += _bytes_field(5, content_type)
+    message += _bytes_field(4, payload)
+    return _value(tag) + _bytes_field(6, message)
+
+
+def _image_event(tag: bytes, payload: bytes, *, step: int = 0) -> bytes:
+    return _event(step=step, summary_bytes=_summary(_image_value(tag, payload)))
+
+
+def _audio_event(tag: bytes, payload: bytes, *, step: int = 0) -> bytes:
+    return _event(step=step, summary_bytes=_summary(_audio_value(tag, payload)))
+
+
+def test_include_images_writes_schema_08(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "e.tfevents", _records(_scalar_event(b"loss", 0.5, step=1), _image_event(b"samples", _media_png())))
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-images"]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.8"
+    kinds = {result["locator"]["kind"] for result in document["results"]}
+    assert kinds == {"tensorboard", "tensorboard-image"}
+    image = next(r for r in document["results"] if r["locator"]["kind"] == "tensorboard-image")
+    assert image["name"] == "samples @ 0 (image)"
+    assert image["value"]["media_type"] == "image/png"
+    assert main(["validate", str(root)]) == 0
+    capsys.readouterr()
+
+
+def test_include_audio_writes_schema_08(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "e.tfevents", _records(_audio_event(b"clip", _media_wav())))
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-audio"]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.8"
+    assert document["results"][0]["locator"]["kind"] == "tensorboard-audio"
+    assert document["results"][0]["name"] == "clip @ 0 (audio)"
+    assert main(["validate", str(root)]) == 0
+    capsys.readouterr()
+
+
+def test_all_flags_record_every_kind_at_08(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(
+        root / "e.tfevents",
+        _records(
+            _scalar_event(b"loss", 0.5, step=1),
+            _string_event(b"config", b"lr=3e-4", step=2),
+            _histo_event(b"weights", step=3),
+            _image_event(b"samples", _media_png(), step=4),
+            _audio_event(b"clip", _media_wav(), step=5),
+        ),
+    )
+    assert (
+        main(
+            [
+                "init",
+                str(root),
+                "--adapter",
+                "tensorboard",
+                "--include-strings",
+                "--include-histograms",
+                "--include-images",
+                "--include-audio",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.8"
+    assert len(document["results"]) == 5
+    assert main(["validate", str(root)]) == 0
+    capsys.readouterr()
+
+
+def test_media_only_skips_other_kinds(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(
+        root / "e.tfevents",
+        _records(
+            _scalar_event(b"loss", 0.5, step=1),
+            _string_event(b"config", b"x", step=2),
+            _histo_event(b"weights", step=3),
+            _image_event(b"samples", _media_png(), step=4),
+        ),
+    )
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-images"]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    kinds = [result["locator"]["kind"] for result in document["results"]]
+    assert "tensorboard-image" in kinds
+    assert "tensorboard-histogram" not in kinds
+    assert "tensorboard-string" not in kinds
+
+
+def test_media_tag_filter_applies(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(
+        root / "e.tfevents",
+        _records(
+            _image_event(b"samples", _media_png()),
+            _image_event(b"ignored", _media_png(body=b"\x00\x02")),
+        ),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-images", "--tags", "s*"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert [result["name"] for result in document["results"]] == ["samples @ 0 (image)"]
+
+
+def test_media_plus_histogram_uses_the_07_tag_text(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(
+        root / "e.tfevents",
+        _records(
+            _event(step=0, summary_bytes=_summary(_image_value(b"\xff", _media_png()))),
+            _histo_event(b"ok", step=1),
+        ),
+    )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-images", "--include-histograms"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.8"
+
+
+def test_media_scalar_tag_refusal_names_08(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(
+        root / "e.tfevents",
+        _records(
+            _event(step=0, summary_bytes=_summary(_value(b"\xff", simple_value=0.5))),
+        ),
+    )
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-images"]) == 2
+    out = capsys.readouterr()
+    assert (
+        "a scalar tag cannot be represented in schema 0.8; nothing was written"
+        in (out.out + out.err)
+    )
+
+
+def test_media_compact_display_and_json_flags(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    png = _media_png()
+    wav = _media_wav()
+    for run, size in (("trainA", png), ("trainB", _media_png(body=b"\x00\x09"))):
+        _write(
+            root / run / "e.tfevents",
+            _records(_image_event(b"samples", size), _audio_event(b"clip", wav)),
+        )
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-images", "--include-audio"])
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    runs = {run["name"]: run["id"] for run in document["runs"]}
+    image_bytes = len(png)
+    assert main(["inspect", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert f"image(64x64 png, {image_bytes} bytes)" in out
+    assert f"audio(wav, {len(wav)} bytes)" in out
+    assert "sha256" not in out
+    assert main(["compare", "--base", runs["trainA"], "--target", runs["trainB"], str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "image(64x64 png" in out
+    assert main(["compare", "--base", runs["trainA"], "--target", runs["trainB"], str(root), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    row = next(item for item in data["results"] if item["name"].startswith("samples"))
+    assert row["baseline_image"] is True and row["target_image"] is True
+    assert "baseline_histogram" not in row
+    assert main(["matrix", str(root)]) == 0
+    assert "image(64x64 png" in capsys.readouterr().out
+
+
+def test_media_checker_reports_a_tampered_digest(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "e.tfevents", _records(_image_event(b"samples", _media_png())))
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-images"]) == 0
+    capsys.readouterr()
+    path = root / MANIFEST_FILENAME
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["results"][0]["value"]["sha256"] = "b" * 64
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert main(["validate", str(root)]) == 1
+    out = capsys.readouterr().out
+    assert "does not match the recorded value" in out
+    assert "tensorboard-image:step=0,occurrence=0" in out
+    assert "SECRET" not in out
+
+
+def test_media_checker_missing_occurrence(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "e.tfevents", _records(_image_event(b"samples", _media_png())))
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-images"]) == 0
+    capsys.readouterr()
+    path = root / MANIFEST_FILENAME
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["results"][0]["locator"]["occurrence"] = 1
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert main(["validate", str(root)]) == 1
+    out = capsys.readouterr().out
+    assert "was not found" in out
+    assert "tensorboard-image:step=0,occurrence=1" in out
+
+
+def test_media_scalar_on_media_locator_is_unsupported_value(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "e.tfevents", _records(_image_event(b"samples", _media_png())))
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-images"]) == 0
+    capsys.readouterr()
+    path = root / MANIFEST_FILENAME
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["results"][0]["value"] = 1.5
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert main(["validate", str(root)]) == 1
+    assert "selects an unsupported value" in capsys.readouterr().out
+
+
+def test_media_budget_texts_by_flag_set():
+    from runevidence.models import SCHEMA_VERSION_0_8
+    from runevidence_tensorboard import adapter as adapter_module
+
+    def message(**flags):
+        state = adapter_module._State(None, **flags)
+        return adapter_module._budget_message(state)
+
+    assert message() == adapter_module.BUDGET_MESSAGE
+    assert message(include_strings=True) == adapter_module.BUDGET_MESSAGE_06
+    assert message(include_histograms=True) == adapter_module.BUDGET_MESSAGE_07_HIST
+    assert (
+        message(include_histograms=True, include_strings=True)
+        == adapter_module.BUDGET_MESSAGE_07
+    )
+    assert message(include_images=True) == adapter_module.BUDGET_MESSAGE_08
+    assert (
+        message(include_images=True, include_strings=True)
+        == adapter_module.BUDGET_MESSAGE_06
+    )
+    assert (
+        message(include_images=True, include_histograms=True)
+        == adapter_module.BUDGET_MESSAGE_07_HIST
+    )
+    assert (
+        message(include_images=True, include_histograms=True, include_strings=True)
+        == adapter_module.BUDGET_MESSAGE_07
+    )
+    assert SCHEMA_VERSION_0_8 == "0.8"
+
+
+def test_media_capability_error_names_the_selected_adapter(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "metrics.json", b"{}")
+    assert main(["init", str(root), "--adapter", "generic", "--include-images"]) == 2
+    out = capsys.readouterr()
+    assert (
+        "ERROR: adapter 'generic' does not support --include-images. Nothing was written."
+        in (out.out + out.err)
+    )
+
+
+def test_init_force_refuses_an_existing_08_manifest(tmp_path, capsys):
+    from runevidence import cli as cli_module
+
+    root = tmp_path / "experiment"
+    _write(root / "e.tfevents", _records(_image_event(b"samples", _media_png())))
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-images"]) == 0
+    capsys.readouterr()
+    before = (root / MANIFEST_FILENAME).read_bytes()
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-images", "--force"]) == 2
+    out = capsys.readouterr()
+    assert cli_module.INIT_0_8_REFUSAL in (out.out + out.err)
+    assert (root / MANIFEST_FILENAME).read_bytes() == before

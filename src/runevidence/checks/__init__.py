@@ -14,8 +14,11 @@ from ..models import (
     SCHEMA_VERSION_0_5,
     SCHEMA_VERSION_0_6,
     SCHEMA_VERSION_0_7,
+    SCHEMA_VERSION_0_8,
     CsvCellLocator,
+    TensorboardAudioLocator,
     TensorboardHistogramLocator,
+    TensorboardImageLocator,
     TensorboardLocator,
     TensorboardStringLocator,
 )
@@ -54,6 +57,7 @@ _LOCATOR_SCHEMAS = frozenset(
         SCHEMA_VERSION_0_5,
         SCHEMA_VERSION_0_6,
         SCHEMA_VERSION_0_7,
+        SCHEMA_VERSION_0_8,
     }
 )
 
@@ -73,6 +77,7 @@ def _csv_cell_cap(
         SCHEMA_VERSION_0_5,
         SCHEMA_VERSION_0_6,
         SCHEMA_VERSION_0_7,
+        SCHEMA_VERSION_0_8,
     ):
         return False, frozenset()
     eligible_artifacts = {
@@ -107,7 +112,7 @@ def _tensorboard_cap(
 ) -> tuple[bool, frozenset[str]]:
     """Classify TensorBoard eligibility without reads; emit nothing.
 
-    Returns ``(capped, eligible_artifact_ids)``. Schema 0.5-0.7 can carry a
+    Returns ``(capped, eligible_artifact_ids)``. Schema 0.5-0.8 can carry a
     tensorboard locator. Tag metadata is the UTF-8 byte length of each eligible
     locator's recorded tag.
     """
@@ -115,6 +120,7 @@ def _tensorboard_cap(
         SCHEMA_VERSION_0_5,
         SCHEMA_VERSION_0_6,
         SCHEMA_VERSION_0_7,
+        SCHEMA_VERSION_0_8,
     ):
         return False, frozenset()
     eligible_artifacts = {
@@ -136,6 +142,8 @@ def _tensorboard_cap(
                 TensorboardLocator,
                 TensorboardStringLocator,
                 TensorboardHistogramLocator,
+                TensorboardImageLocator,
+                TensorboardAudioLocator,
             ),
         ):
             continue
@@ -163,6 +171,7 @@ def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
         SCHEMA_VERSION_0_5,
         SCHEMA_VERSION_0_6,
         SCHEMA_VERSION_0_7,
+        SCHEMA_VERSION_0_8,
     ):
         return frozenset()
     paths = {
@@ -179,6 +188,8 @@ def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
                 TensorboardLocator,
                 TensorboardStringLocator,
                 TensorboardHistogramLocator,
+                TensorboardImageLocator,
+                TensorboardAudioLocator,
             ),
         )
         and result.artifact_id is not None
