@@ -1,45 +1,43 @@
-# TensorBoard media references — design RFC (v0.4)
+# TensorBoard media references — design RFC (v0.5)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.8 admission decision are required before any code.
 Schema 0.1–0.7, their readers/checkers and every delivered behavior stay frozen, except the
 additive dispatch, model, migration and text edits this document names explicitly.
 
-## 0. Changes in v0.4
+## 0. Changes in v0.5
 
-v0.4 folds the round-3 review. Each seat confirmed the round-2 fixes; together they rejected
-v0.3 on one shared ladder defect and a `models.py` enumeration gap:
+Round 4 closed the design: two seats accepted v0.4 with limitations, and their items are folded
+here. v0.5 changes:
 
-- **Ladder.** §5.2 is rebuilt as the delivered two-stage ladder: stage 1 decides what the file
-  holds (value / missing / unsupported encoding / unsupported value, including a tag-only
-  `Summary.Value` with no winning oneof member), and only a `value` outcome proceeds to stage 2,
-  which checks the recorded type before comparing. This restores the reachability of
-  `selects an unsupported value` for a scalar recorded on a media locator.
-- **`Manifest08`.** The version-shape branch, per-version locator dispatch/adapters and
-  scalar-shape override are named; without them 0.8 rejects every jsonl locator and accepts a
-  null `artifact_id` with a non-null locator. The JSON Schema rule becomes three per-kind
-  `if/then` branches plus the retained `artifact_id` rule.
-- **Digest.** A new lowercase-only pattern (the shared `SHA256_PATTERN` accepts uppercase) and
-  one definition of the digest scope shared by reader, checker and adapter.
-- **Media validation.** The int32 wire-dimension truncation is pinned with a vector
-  (`2**32 + 64` → `64`), at least one `IDAT` must be non-empty, the RIFF pad byte is any value,
-  and the document states that chunk placement and truncation are validated, not image validity.
-- **Consumers.** Display helpers handle the model and the JSON-dict form; locator display
-  literals are pinned; compare's JSON gains media flags, so "JSON unchanged" is qualified.
-- **Texts.** Capability errors become templates that interpolate the adapter name, with pinned
-  output for `--adapter generic`; the init flag help and migrate help are verbatim; budget text
-  selection is tabulated for all eight flag sets.
-- **Corrections.** `is_manifest` already accepts a `Manifest08` subclass; the real gates are the
-  `manifest.py` dispatch functions. The "graph" text is the conflicting-evidence message in
-  `validate`/`inspect`; the Summary cap is checked per event; `--to 0.2` needs no edit; the
-  leaderboard never serializes values; `manifest`'s value union is a membership tuple.
+- Any media flag selects the 0.8 tag message, including media + strings and media + histograms,
+  and the no-match warning says "summary tag" whenever a non-scalar kind is enabled.
+- Compare's `baseline_*`/`target_*` flags branch on the value kind, so extending the display
+  helper to media cannot set the histogram flags.
+- The value↔locator check is a per-result `Result08._media_value_locator` reached through
+  `_dispatch_value_08`, so errors report `/results/N` and never the manifest root.
+- Capability errors print in the delivered order (strings, histograms, then images, audio); the
+  `--include-histograms` help is updated; the stage-2 row reads "not the locator's own value
+  kind"; each 16 MiB test names payload or Summary; a differential scanner test across versions
+  is added; the TF2 tensor-rank claim is dropped.
+- The checklist counts seven structured locator kinds, and "the four capability errors"
+  replaces the vague "last four".
+- Leaderboard is described correctly: it excludes both media kinds and prints no value, while
+  eligible scalar rows still serialize theirs.
+- The digest note names `Artifact._lowercase_digest`, which case-folds the digest field (not a
+  path); the 168-byte note says it is the compact JSON length and that the delivered budget
+  charges result count and tag bytes only, so no byte budget bounds media values.
+- The parser note points at `_iter_summary_values_08`, the level the delivered analogue uses,
+  and the generator yields every supported media record while `_read_event_file` applies the
+  flag filters.
 
-Earlier revisions: v0.2 folded round 1 (occurrence bound, value↔locator matrix, Summary-cap
-precedence, complete PNG walk, pinned RIFF rule, audio metadata dropped, separate
-`_parse_value_08`, delivered ladder and texts, admission obligations, migration branches,
-force/volatile gates, schema precedence, fixed texts) and v0.3 folded round 2 (one-way matrix,
-media budget dropped, bounded RIFF chunk walk, PNG walk end/order, adapter generator, results
-and checks-init gates, `value_to_json`, `is_manifest`, `artifact_id` rule, display literals).
+Earlier revisions folded rounds 1–3: the occurrence bound, the one-way value↔locator matrix and
+its per-kind schema rules, Summary-cap precedence, the bounded PNG and RIFF walks, dropped audio
+metadata and media budget, the separate `_parse_value_08` and its two callers, the delivered
+checker ladder and texts, the admission obligations across `manifest.py`, `checks/__init__.py`,
+`checks/results.py`, `histogram_display.py`, `locator_profiles.py` and `cli.py`, the migration
+branches, the force/volatile/model-dump gates, the tag-agnostic adapter generator, and the fixed
+texts.
 
 ## 1. Problem and scope
 
@@ -55,8 +53,8 @@ for the payload already inside the event file, plus the PNG geometry. Nothing is
 copied; verification re-reads the file.
 
 Coverage is TF1 and PyTorch/tensorboardX writers. `tf.summary.image` and `tf.summary.audio`
-in TF2 write string tensors (field 8) of rank 3/2, which neither the 0.6 string reader nor this
-slice records; that is a stated non-goal.
+in TF2 write string tensors (field 8) of higher rank, which neither the 0.6 string reader nor
+this slice records; that is a stated non-goal.
 
 In scope: one image or audio payload per `Summary.Value`, digest-only recording, exact
 verification, opt-in recording, schema 0.8, migration and compact display. The opt-in is about
@@ -91,8 +89,9 @@ Rules:
 
 - both models are strict (`extra="forbid"`), every key is required, `kind` is const;
 - `sha256` is exactly 64 lowercase hexadecimal characters, enforced by a **new**
-  lowercase-only pattern constant. The shared `SHA256_PATTERN` accepts uppercase and the
-  artifact path folds case; reusing it would silently accept an uppercase digest;
+  lowercase-only pattern constant. The shared `SHA256_PATTERN` accepts uppercase and
+  `Artifact._lowercase_digest` case-folds the digest field, so reusing the shared pattern would
+  silently accept an uppercase digest here;
 - `size_bytes` is an integer in `1..16_777_216`; a zero-length payload is not a media value;
 - `media_type` is const (`image/png`, `audio/wav`); any other payload type is unsupported and
   produces no result (§3.4–§3.5);
@@ -137,11 +136,14 @@ Consequences that are part of the contract:
   `tensorboard-histogram`, each allowing `null`), alongside the retained `artifact_id` rule. A
   single `value is object → locator anyOf` branch cannot express kind-to-kind and would admit a
   histogram value on an image locator;
-- the model enforces the same matrix in `Manifest08._version_specific_shape`, with its own
-  locator dispatch/adapters and scalar-shape override. Without that branch, a `Manifest08`
-  subclass rejects every `jsonl` locator (the inherited `else` rejects them), accepts a null
-  `artifact_id` with a non-null locator, and rejects a media locator model built in Python mode
-  even though the dict path validates.
+- the model enforces the object rule in a per-result validator, `Result08._media_value_locator`,
+  reached through `_dispatch_value_08`, not at the manifest root, so a violation is reported at
+  `/results/N` exactly like `Result07._histogram_value_locator`;
+- `Manifest08._version_specific_shape` carries its own locator dispatch/adapters and
+  scalar-shape override. Without that branch, a `Manifest08` subclass rejects every `jsonl`
+  locator (the inherited `else` rejects them), accepts a null `artifact_id` with a non-null
+  locator, and rejects a media locator model built in Python mode even though the dict path
+  validates.
 
 ## 3. Reader profile
 
@@ -150,8 +152,9 @@ Consequences that are part of the contract:
 The 0.5/0.6 `_parse_value` stays byte-for-byte frozen. Schema 0.8 gets `_parse_value_08`,
 modelled on `_parse_value_07`: same oneof tracking, same histogram merge/reset state, plus the
 `image` (4) and `audio` (6) payload ranges. `_parse_value_07` also stays untouched.
-`_parse_value_08` has exactly two callers: `scan_tensorboard_08` (checker requests) and
-`iter_supported_summaries_08` (tag-agnostic adapter generator).
+`_parse_value_08` is called from `_iter_summary_values_08`, mirroring the delivered
+`_parse_value_07`/`_iter_summary_values_07` pair; `scan_tensorboard_08` (checker requests) and
+`iter_supported_summaries_08` (tag-agnostic adapter generator) consume that level.
 
 ### 3.2 Where media lives, and the merge rule
 
@@ -246,7 +249,8 @@ therefore outranks every entry-local rule here:
   cap is `>`, so a Summary of exactly 16 MiB is accepted;
 - below that line, §3.3–§3.5 failures are entry-local;
 - `size_bytes` `1..16_777_216` is the model bound; in practice a payload near 16 MiB always
-  trips the Summary cap first, so boundary tests at 16 MiB and 16 MiB + 1 are file-level.
+  trips the Summary cap first, so the boundary tests are about Summary size: exactly 16 MiB is
+  accepted and 16 MiB + 1 refuses the file.
 
 Nothing is retained beyond offsets and a streaming digest.
 
@@ -329,7 +333,7 @@ Stage 2 runs only when stage 1 returned `value`:
 
 | Stage 2 condition | Finding |
 | --- | --- |
-| recorded value is not an `ImageValue`/`AudioValue` (a scalar, a histogram, or `null`) | `locator-unsupported-value`, text `selects an unsupported value` |
+| recorded value is not the locator's own value kind | `locator-unsupported-value`, text `selects an unsupported value` |
 | recorded value differs | `result-value-mismatch`, text `does not match the recorded value` |
 | recorded value matches | none |
 
@@ -345,8 +349,8 @@ values are never injected into locator-level findings.
 
 ### 5.3 Display
 
-Human surfaces (`inspect`, `claim`, `lineage`, `run`, `compare`, `matrix`, `leaderboard`)
-render, for results only:
+Human surfaces (`inspect`, `claim`, `lineage`, `run`, `compare`, `matrix`) render, for results
+only:
 
 - `image(64x64 png, 4321 bytes)`;
 - `audio(wav, 88244 bytes)`.
@@ -358,11 +362,13 @@ the model. `display_locator` gains the literal forms
 never the tag. `run_claim`'s value display gains a media branch so claim output uses the compact
 string rather than a model repr. In `compare`,
 media rows set `baseline_image`/`target_image` or `baseline_audio`/`target_audio` flags, the
-analogues of the delivered `baseline_histogram`/`target_histogram` flags, and never
-`baseline_histogram`.
+analogues of the delivered `baseline_histogram`/`target_histogram` flags. The flag selection
+must branch on the value's `kind`, not on whether the display helper returned a string, or
+extending the helper to media would set the histogram flags on media rows.
 
 Parameters keep their delivered rendering. `--json` emits the value object exactly.
-`leaderboard` treats both kinds as `non_numeric_or_nonfinite`.
+`leaderboard` excludes both kinds as `non_numeric_or_nonfinite` and prints no value for them;
+eligible scalar rows still serialize their value, so only media values are never serialized.
 
 `locator_profiles.display_locator` needs branches for both kinds, and `run_claim`'s display
 whitelist needs both, or the first finding crashes with `AttributeError` and the claim surface
@@ -399,12 +405,23 @@ helpers that dispatch on the manifest type; those are admitted to 0.8 as decided
   - `_decoded_tag`, whose text is selected by booleans: a media-only 0.8 run must print the 0.8
     tag text, not the 0.5 one.
 - A flag never records a kind that was not asked for.
-- `--tags` filters media tags like the other kinds.
+- `--tags` filters media tags like the other kinds. The `--include-histograms` help drops
+  "implies schema 0.7" in favour of "implies schema 0.7 unless a media flag selects 0.8"; the
+  `--include-strings` help keeps its delivered text because 0.8 supersets 0.6.
 - Unusable tags: without `--tags`, an unrepresentable scalar tag refuses `init`; with `--tags`,
   it is skipped, exactly as delivered. An unrepresentable string, histogram, image or audio tag
   is skipped in both cases.
-- Media adds no budget of its own: a media value is at most 168 bytes, so the delivered
-  10,000-result and 16 MiB tag limits bound it. Budget text selection is fixed per flag set:
+- Any media flag selects the 0.8 tag message, regardless of whether strings or histograms are
+  also enabled. `_decoded_tag` currently checks histograms and then strings, so a
+  media+histogram or media+string run would otherwise print the 0.7 or 0.6 text for a file that
+  is 0.8. The four media flag sets are tested explicitly.
+- When several `--include-*` flags are rejected by an adapter, the errors print in the delivered
+  order: strings, histograms, images, audio. The new checks append to that order.
+- The no-match warning says "summary tag" whenever any of strings, histograms, images or audio
+  is enabled, and "scalar tag" only for a scalar-only run.
+- Media adds no budget of its own: a media value is at most 168 bytes of compact JSON (the
+  stored, indented form is longer), and the delivered budget charges the result count and tag
+  bytes only, so only the 10,000-result limit bounds media, not the 16 MiB tag limit. Budget text selection is fixed per flag set:
 
 | Flags | Text |
 | --- | --- |
@@ -459,7 +476,7 @@ ERROR: adapter {name!r} cannot apply --include-audio. Nothing was written.
 a scalar tag cannot be represented in schema 0.8; nothing was written
 ```
 
-The last four are templates: `{name!r}` interpolates the selected adapter, as the delivered
+The four adapter-error lines are templates: `{name!r}` interpolates the selected adapter, as the delivered
 capability errors do. Expected output for `--adapter generic --include-images` is
 `ERROR: adapter 'generic' does not support --include-images. Nothing was written.`; the
 "cannot apply" form is reached only by an adapter that declares `supports_include_images` but
@@ -531,6 +548,9 @@ migrate parser help becomes `declare an existing manifest as schema 0.2, 0.3, 0.
   literals.
 - Manifest helpers: `is_manifest` accepts 0.8; a 0.8 manifest survives the directory and
   experimental helper dispatch paths that only inspect the model type.
+- Differential: for scalar, string and histogram requests, `scan_tensorboard_08` returns the
+  same selections and outcomes as the 0.5/0.6/0.7 scanners on the same bytes, so a version-only
+  migration cannot change verification results.
 - Mutation probes: drop the PNG signature check, drop the RIFF size check, drop the digest
   comparison, remove 0.8 from `_LOCATOR_SCHEMAS`, remove the `artifact_to_dict` branch, remove
   the `value_to_json` media branch, admit 0.8 in comparability, drop the `init --force` guard.
