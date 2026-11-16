@@ -47,6 +47,8 @@ def _display_details(details: dict[str, Any]) -> dict[str, Any]:
         "tensorboard-image",
         "tensorboard-audio",
         "tensorboard-tensor",
+        "tensorboard-tf2-image",
+        "tensorboard-tf2-audio",
     ):
         return {**details, "locator": display_locator(locator)}
     return details

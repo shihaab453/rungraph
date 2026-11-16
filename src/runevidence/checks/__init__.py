@@ -16,6 +16,7 @@ from ..models import (
     SCHEMA_VERSION_0_7,
     SCHEMA_VERSION_0_8,
     SCHEMA_VERSION_0_9,
+    SCHEMA_VERSION_0_10,
     CsvCellLocator,
     TensorboardAudioLocator,
     TensorboardHistogramLocator,
@@ -23,6 +24,8 @@ from ..models import (
     TensorboardLocator,
     TensorboardStringLocator,
     TensorboardTensorLocator,
+    TensorboardTf2AudioLocator,
+    TensorboardTf2ImageLocator,
 )
 from .conditions import check_conditions
 from .files import check_files
@@ -61,6 +64,7 @@ _LOCATOR_SCHEMAS = frozenset(
         SCHEMA_VERSION_0_7,
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
+        SCHEMA_VERSION_0_10,
     }
 )
 
@@ -82,6 +86,7 @@ def _csv_cell_cap(
         SCHEMA_VERSION_0_7,
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
+        SCHEMA_VERSION_0_10,
     ):
         return False, frozenset()
     eligible_artifacts = {
@@ -126,6 +131,7 @@ def _tensorboard_cap(
         SCHEMA_VERSION_0_7,
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
+        SCHEMA_VERSION_0_10,
     ):
         return False, frozenset()
     eligible_artifacts = {
@@ -150,6 +156,8 @@ def _tensorboard_cap(
                 TensorboardImageLocator,
                 TensorboardAudioLocator,
                 TensorboardTensorLocator,
+                TensorboardTf2ImageLocator,
+                TensorboardTf2AudioLocator,
             ),
         ):
             continue
@@ -179,6 +187,7 @@ def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
         SCHEMA_VERSION_0_7,
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
+        SCHEMA_VERSION_0_10,
     ):
         return frozenset()
     paths = {
@@ -198,6 +207,8 @@ def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
                 TensorboardImageLocator,
                 TensorboardAudioLocator,
                 TensorboardTensorLocator,
+                TensorboardTf2ImageLocator,
+                TensorboardTf2AudioLocator,
             ),
         )
         and result.artifact_id is not None

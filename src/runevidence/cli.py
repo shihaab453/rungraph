@@ -1064,6 +1064,20 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
                 "Nothing was written."
             )
             return EXIT_INVALID
+    include_tf2_media = bool(getattr(args, "include_tf2_media", False))
+    if include_tf2_media:
+        if not getattr(adapter, "supports_include_tf2_media", False):
+            print(
+                f"ERROR: adapter {adapter.name!r} does not support --include-tf2-media. "
+                "Nothing was written."
+            )
+            return EXIT_INVALID
+        if not _accepts_keyword(adapter, "include_tf2_media"):
+            print(
+                f"ERROR: adapter {adapter.name!r} cannot apply --include-tf2-media. "
+                "Nothing was written."
+            )
+            return EXIT_INVALID
     patterns = list(getattr(args, "tags", None) or [])
     tag_filter = None
     if patterns:
@@ -1097,6 +1111,8 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
             extra["include_audio"] = True
         if include_tensors:
             extra["include_tensors"] = True
+        if include_tf2_media:
+            extra["include_tf2_media"] = True
         manifest = adapter.extract(
             root,
             discovery,
@@ -1149,6 +1165,7 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
                     or include_images
                     or include_audio
                     or include_tensors
+                    or include_tf2_media
                 )
                 else "scalar"
             )
@@ -2713,7 +2730,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "also record legacy TensorBoard image summaries as schema 0.8 results "
-            "(opt-in; implies schema 0.8 unless --include-tensors selects 0.9)"
+            "(opt-in; implies schema 0.8 unless a tensor or TF2 media flag selects a "
+            "later schema)"
         ),
     )
     p.add_argument(
@@ -2721,7 +2739,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "also record legacy TensorBoard audio summaries as schema 0.8 results "
-            "(opt-in; implies schema 0.8 unless --include-tensors selects 0.9)"
+            "(opt-in; implies schema 0.8 unless a tensor or TF2 media flag selects a "
+            "later schema)"
+        ),
+    )
+    p.add_argument(
+        "--include-tf2-media",
+        action="store_true",
+        help=(
+            "also record TensorFlow 2 image and audio string summaries as schema 0.10 "
+            "results (opt-in; implies schema 0.10)"
         ),
     )
     p.add_argument(
@@ -2729,7 +2756,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "also record numeric TensorBoard tensors as schema 0.9 results "
-            "(opt-in; implies schema 0.9)"
+            "(opt-in; implies schema 0.9 unless --include-tf2-media selects 0.10)"
         ),
     )
     p.add_argument(

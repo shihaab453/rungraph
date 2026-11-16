@@ -35,6 +35,7 @@ from ..models import (
     SCHEMA_VERSION_0_7,
     SCHEMA_VERSION_0_8,
     SCHEMA_VERSION_0_9,
+    SCHEMA_VERSION_0_10,
     CsvCellLocator,
     HistogramValue,
     JsonlLocator,
@@ -45,6 +46,8 @@ from ..models import (
     TensorboardStringLocator,
     TensorboardHistogramLocator,
     TensorboardTensorLocator,
+    TensorboardTf2AudioLocator,
+    TensorboardTf2ImageLocator,
     AudioValue,
     ImageValue,
     TensorValue,
@@ -57,6 +60,7 @@ from ..tensorboard_events import (
     scan_tensorboard_07,
     scan_tensorboard_08,
     scan_tensorboard_09,
+    scan_tensorboard_10,
 )
 from .csv import (
     CsvNotNumeric,
@@ -156,6 +160,8 @@ def _extension_matches(artifact_path: str, locator: Any) -> bool:
             TensorboardImageLocator,
             TensorboardAudioLocator,
             TensorboardTensorLocator,
+            TensorboardTf2ImageLocator,
+            TensorboardTf2AudioLocator,
         ),
     ):
         return _tensorboard_path_matches(artifact_path)
@@ -176,6 +182,8 @@ def _expected_extension(locator: Any) -> str:
             TensorboardImageLocator,
             TensorboardAudioLocator,
             TensorboardTensorLocator,
+            TensorboardTf2ImageLocator,
+            TensorboardTf2AudioLocator,
         ),
     ):
         return "TensorBoard event"
@@ -363,6 +371,7 @@ def _check_one_tensorboard_media(
     *,
     kind: str,
     model,
+    label: str | None = None,
 ) -> tuple[list[Finding], bool]:
     """Selection, type and exact comparison for one image or audio result."""
     findings: list[Finding] = []
@@ -380,7 +389,7 @@ def _check_one_tensorboard_media(
             _value_error(
                 result, artifact_path, locator,
                 Code.locator_unsupported_value,
-                f"selects an unsupported {kind} encoding",
+                f"selects an unsupported {label or kind} encoding",
             )
         )
         return findings, True
@@ -674,6 +683,10 @@ def _check_one_tensorboard_histogram(
 
 
 def _locator_kind(locator: Any) -> str:
+    if isinstance(locator, TensorboardTf2ImageLocator):
+        return "tensorboard-tf2-image"
+    if isinstance(locator, TensorboardTf2AudioLocator):
+        return "tensorboard-tf2-audio"
     if isinstance(locator, TensorboardTensorLocator):
         return "tensorboard-tensor"
     if isinstance(locator, TensorboardImageLocator):
@@ -717,6 +730,7 @@ def check_targeted_results(
             SCHEMA_VERSION_0_7,
             SCHEMA_VERSION_0_8,
             SCHEMA_VERSION_0_9,
+            SCHEMA_VERSION_0_10,
         ):
             directory_hint = (
                 "Point the result at a single JSON, JSONL, CSV or TensorBoard event "
@@ -806,6 +820,7 @@ def check_targeted_results(
                             SCHEMA_VERSION_0_7,
                             SCHEMA_VERSION_0_8,
                             SCHEMA_VERSION_0_9,
+                            SCHEMA_VERSION_0_10,
                         )
                         else TENSORBOARD_CAP_MESSAGE
                     ),
@@ -820,6 +835,8 @@ def check_targeted_results(
                     "tensorboard-image",
                     "tensorboard-audio",
                     "tensorboard-tensor",
+                    "tensorboard-tf2-image",
+                    "tensorboard-tf2-audio",
                 }
             )
             capped_artifact = True
@@ -864,6 +881,8 @@ def check_targeted_results(
             "tensorboard-image",
             "tensorboard-audio",
             "tensorboard-tensor",
+            "tensorboard-tf2-image",
+            "tensorboard-tf2-audio",
         ):
             if file_over_cap_128:
                 findings.append(
@@ -963,6 +982,8 @@ def check_targeted_results(
                 TensorboardImageLocator,
                 TensorboardAudioLocator,
                 TensorboardTensorLocator,
+                TensorboardTf2ImageLocator,
+                TensorboardTf2AudioLocator,
             ),
         )
     ]
@@ -973,6 +994,8 @@ def check_targeted_results(
     image_selections = None
     audio_selections = None
     tensor_selections = None
+    tf2_image_selections = None
+    tf2_audio_selections = None
     if tensorboard_results:
         scalar_requests = [
             (
@@ -1028,8 +1051,49 @@ def check_targeted_results(
             for result in tensorboard_results
             if isinstance(result.locator, TensorboardTensorLocator)
         ]
+        tf2_image_requests = [
+            (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+                result.locator.element,
+            )
+            for result in tensorboard_results
+            if isinstance(result.locator, TensorboardTf2ImageLocator)
+        ]
+        tf2_audio_requests = [
+            (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+                result.locator.element,
+            )
+            for result in tensorboard_results
+            if isinstance(result.locator, TensorboardTf2AudioLocator)
+        ]
         try:
-            if manifest.schema_version == SCHEMA_VERSION_0_9:
+            if manifest.schema_version == SCHEMA_VERSION_0_10:
+                (
+                    scalar_selections,
+                    text_selections,
+                    hist_selections,
+                    image_selections,
+                    audio_selections,
+                    tensor_selections,
+                    tf2_image_selections,
+                    tf2_audio_selections,
+                ) = scan_tensorboard_10(
+                    data,
+                    scalar_requests,
+                    text_requests,
+                    hist_requests,
+                    image_requests,
+                    audio_requests,
+                    tensor_requests,
+                    tf2_image_requests,
+                    tf2_audio_requests,
+                )
+            elif manifest.schema_version == SCHEMA_VERSION_0_9:
                 (
                     scalar_selections,
                     text_selections,
@@ -1185,6 +1249,40 @@ def check_targeted_results(
                 kind="audio",
                 model=AudioValue,
             )
+        elif isinstance(result.locator, TensorboardTf2ImageLocator):
+            assert tf2_image_selections is not None
+            key = (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+                result.locator.element,
+            )
+            result_findings, failed = _check_one_tensorboard_media(
+                result,
+                artifact.path,
+                result.locator,
+                tf2_image_selections[key],
+                kind="image",
+                model=ImageValue,
+                label="tf2 image",
+            )
+        elif isinstance(result.locator, TensorboardTf2AudioLocator):
+            assert tf2_audio_selections is not None
+            key = (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+                result.locator.element,
+            )
+            result_findings, failed = _check_one_tensorboard_media(
+                result,
+                artifact.path,
+                result.locator,
+                tf2_audio_selections[key],
+                kind="audio",
+                model=AudioValue,
+                label="tf2 audio",
+            )
         elif isinstance(result.locator, TensorboardTensorLocator):
             assert tensor_selections is not None
             key = (
@@ -1248,6 +1346,7 @@ def check_results(
         SCHEMA_VERSION_0_7,
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
+        SCHEMA_VERSION_0_10,
     )
 
     def unverifiable(res_id: str, msg: str) -> None:
