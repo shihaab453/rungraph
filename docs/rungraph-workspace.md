@@ -1,0 +1,132 @@
+# RunGraph workspaces
+
+RunEvidence verifies one experiment manifest. A **workspace** composes several manifests into
+one project-level view: `rungraph.json` at a folder root names the members and can carry
+cross-member claims and relationships. Everything stays offline and file-based.
+
+The workspace layer is read-only in this release. It never rewrites a member manifest.
+
+## Quick start
+
+```bash
+# 1. See which manifests a folder contains, without writing anything.
+rungraph discover path/to/project
+
+# 2. Write a workspace document from that discovery.
+rungraph init path/to/project --id study --name "Study"
+
+# 3. Validate every member and the workspace layer.
+rungraph validate path/to/project
+
+# 4. Ask project-level questions.
+rungraph report path/to/project
+rungraph graph path/to/project
+rungraph impact path/to/project --from artifact:exp-a#test-data
+rungraph compare path/to/project --metric accuracy
+rungraph matrix path/to/project
+rungraph leaderboard path/to/project --metric accuracy --direction max
+```
+
+`discover` exits `2` when it finds no manifests, a duplicate or nested member, an unreadable
+manifest, or hits the 10,000-manifest or depth-64 cap. `init` refuses an empty discovery and
+writes nothing.
+
+## The document
+
+```json
+{
+  "format": "rungraph-workspace",
+  "version": "0.1",
+  "id": "study",
+  "name": "Study",
+  "members": [
+    {"id": "exp-a", "path": "experiments/a"}
+  ],
+  "claims": [
+    {
+      "id": "a-beats-b",
+      "claim": "Method A beats B on the shared split.",
+      "supports": [{"member": "exp-a", "id": "acc-a"}],
+      "contradicts": [{"member": "exp-b", "id": "acc-b"}]
+    }
+  ],
+  "relationships": []
+}
+```
+
+- `members` is required and non-empty. Member IDs are stable and unique; paths are relative
+  and may not escape the root. Two members resolving to the same manifest (including
+  hardlinks) and nested members are refused.
+- A claim cites member results/evidence, another workspace claim (`{"claim": "id"}`), or
+  context objects (artifact/run/project). Only result/evidence/claim citations count as
+  support.
+- Relationship IDs are unique; the type set is the manifest relationship set. Claims are the
+  only claim-citation mechanism.
+- Unknown fields, duplicate JSON keys and non-finite numbers are refused.
+
+## Claim states
+
+A claim is classified from its recorded structure and the member checks:
+
+| Label | Meaning |
+| --- | --- |
+| `supported` | cited evidence resolves and no error touches it |
+| `at-risk` | cited evidence or its dependency closure has an error, or a reference is unresolved |
+| `contradiction-recorded` | a `contradicts` target is recorded (not a truth judgement) |
+| `unresolved` | a cited member, local ID or claim does not resolve |
+| `uncited` | no result/evidence/claim support target |
+
+A claim can carry several labels. `supported` never appears with `at-risk` or `unresolved`;
+`contradiction-recorded` may accompany `supported`. A member claim keeps its delivered
+semantics: artifact and run targets are valid support, and a broken contradiction target does
+not make it `at-risk`.
+
+"Supported" is an evidence state, not scientific truth. Recorded conditions, artifact
+integrity and claim support remain distinct guarantees.
+
+## Graph and identity
+
+A node ID is `kind:member#local` (`result:exp-a#acc`), `member:<id>`, or
+`claim:<workspace>#<claim-id>`. `impact --from` accepts these forms, and the `member#local`
+shorthand when it resolves unambiguously.
+
+The graph includes inline manifest edges, member-declared relationships, member evidence
+citations, workspace relationships and workspace claim citations. Artifact/run/project claim
+citations are context, not traversed edges. Unresolved references are named, not dropped;
+cycles are reported per strongly connected component with a bounded example list.
+
+## Report, impact and comparison
+
+- `report` prints current evidence per member, every claim's states, and the claims affected
+  by each error-level finding. `--directory-artifacts` opts into directory checks and is
+  stated in the header when absent; `--strict` makes warnings fail.
+- `impact` returns the claims whose dependency closure contains the requested node.
+- `compare` prints recorded values for one metric; `matrix` lays members against metrics;
+  `leaderboard` ranks finite numeric values with ties sharing a rank. Rows are identified by
+  `(member, run, result ID)`, so duplicate result names are distinct rows and an ambiguous
+  matrix cell is counted, never averaged.
+- Cross-member comparability is currently unavailable for schemas 0.3–0.10 and is labelled
+  as such. No ranking implies a fair comparison or scientific validity.
+
+## JSON and exit codes
+
+`discover`, `init`, `validate`, `graph`, `report`, `impact`, `compare`, `matrix` and
+`leaderboard` accept `--json` and emit a `rungraph-<command>` envelope with `version: "0.1"`
+and `exit_code`. Errors use `{"format": "rungraph-error", "command": ...}`.
+
+| Command | 0 | 1 | 2 |
+| --- | --- | --- | --- |
+| `discover` | listed | `--check` found errors | empty, duplicate/nested, limits, unreadable |
+| `init` | written or dry-run | — | refusal |
+| `validate` | no errors | evidence errors | workspace/member load, usage |
+| `graph` | built | `--fail-on-unresolved` and unresolved | load/usage |
+| `report` | no errors | evidence errors | workspace/member load, usage |
+| `impact` | object resolves | — | object/workspace load failure |
+| `compare`/`matrix`/`leaderboard` | rendered | — | load/usage |
+
+## Limits and non-goals
+
+No manifest schema, locator or reader change; no network, server, database or GUI; no
+manifest rewrite. Workspace claim/relationship authoring is not part of this read-only
+release. The workspace document is limited to 16 MiB, 10,000 members, 10,000 claims and
+10,000 relationships.

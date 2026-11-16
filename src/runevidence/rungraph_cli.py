@@ -49,6 +49,25 @@ def _error(command: str, code: str, message: str) -> int:
 
 def cmd_discover(args: argparse.Namespace) -> int:
     result = discover(Path(args.root))
+    check_results = {}
+    if args.check:
+        from .manifest import load_manifest
+        from .checks import run_checks
+
+        for item in result.members:
+            if not item.loads:
+                continue
+            try:
+                report = run_checks(
+                    load_manifest(result.root / item.path),
+                    enable_directory_artifacts=args.directory_artifacts,
+                )
+            except Exception:
+                continue
+            check_results[item.path] = {
+                "errors": sum(1 for finding in report.findings if finding.severity.value == "error"),
+                "warnings": sum(1 for finding in report.findings if finding.severity.value != "error"),
+            }
     data = {
         "format": "rungraph-discover",
         "version": "0.1",
@@ -62,12 +81,14 @@ def cmd_discover(args: argparse.Namespace) -> int:
                 "schema_version": item.schema_version,
                 "duplicate": item.duplicate,
                 "error": item.error,
+                "check": check_results.get(item.path),
             }
             for item in result.members
         ],
         "errors": result.errors,
-        "exit_code": result.exit_code,
+        "exit_code": 1 if any(item["errors"] for item in check_results.values()) else result.exit_code,
     }
+    exit_code = data["exit_code"]
     if args.json:
         _print_json(data)
     else:
@@ -75,7 +96,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
             print(f"{item.path}  {item.id}" + ("" if item.loads else "  (unreadable)"))
         for error in result.errors:
             print(f"ERROR {error}")
-    return result.exit_code
+    return exit_code
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -265,6 +286,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("discover", help="list manifests under a root without writing")
     p.add_argument("root", nargs="?", default=".")
+    p.add_argument("--check", action="store_true")
+    p.add_argument("--directory-artifacts", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_discover)
 

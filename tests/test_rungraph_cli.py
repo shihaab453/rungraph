@@ -84,3 +84,11 @@ def test_leaderboard_ranks_numeric_rows(tmp_path: Path, capsys):
     assert main(["leaderboard", str(root), "--metric", "accuracy", "--direction", "max"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert [row["rank"] for row in data["rows"]] == [1, 1]
+
+
+def test_discover_check_runs_member_checks(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    assert main(["discover", str(root), "--check", "--json"]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert all(member["check"]["errors"] == 2 for member in data["members"])
+    assert data["exit_code"] == 1

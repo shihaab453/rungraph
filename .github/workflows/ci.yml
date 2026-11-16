@@ -338,8 +338,12 @@ jobs:
               conf.read_string(wheel[distinfo + "/entry_points.txt"].decode("utf-8"))
               section, name, target = ENTRY[key]
               ensure(conf.has_section(section) and conf.get(section, name, fallback=None) == target, f"{key} wrong entry point")
-              ensure(set(conf[section]) == {name}, f"{key} unexpected entries in {section}")
-              # Core has one console script. Adapters have only their respective named adapter entry.
+              if key == "core":
+                  ensure(set(conf[section]) == {"runevidence", "rungraph"}, f"{key} unexpected console scripts: {sorted(conf[section])}")
+                  ensure(conf.get(section, "rungraph", fallback=None) == "runevidence.rungraph_cli:main", "core wrong rungraph entry point")
+              else:
+                  ensure(set(conf[section]) == {name}, f"{key} unexpected entries in {section}")
+              # Core has two console scripts. Adapters have only their respective named adapter entry.
               print(f"METADATA {key}: name={project['name']} version={project['version']} required fields and entry point PASS")
 
 
