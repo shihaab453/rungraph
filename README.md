@@ -1310,6 +1310,33 @@ Read these before relying on a green `validate` for anything important.
   same manifests; the committed `schema/runevidence.schema.json` uses the
   2.11+ spelling.
 
+## Platform behaviour
+
+- Python 3.10 or newer. CI runs Ubuntu and Windows on Python 3.10 and 3.14, plus minimum
+  dependencies on 3.10; the wheel smoke job installs the built wheels into a clean venv and
+  runs both console scripts.
+- POSIX hosts with directory `flock` serialize the built-in writers (`BUSY` /
+  `LOCK_UNAVAILABLE`). Hosts without it, including Windows, keep the unlocked writer
+  behaviour: the stale-byte checks remain, but there is no serialization guarantee.
+- Directory artifacts are checked on Linux and authored on Linux/ext4 only; other
+  filesystems fail closed. Windows is not claimed for either.
+- Everything is offline. No command reads a network, launches a job or loads model weights.
+- macOS and Python 3.11-3.13 are not directly verified; they are not declared unsupported.
+
+## Machine-readable output
+
+Two envelope families are stable:
+
+- `runevidence-*`: `validate`/`inspect` reports, the comparability result and error
+  documents, the `assess` document, fingerprints and the review/diff routes. `--json` is
+  available on every analysis route; `comparability --preflight` is deliberately text-only.
+- `rungraph-*`: `discover`, `init`, `validate`, `graph`, `report`, `impact`, `compare`,
+  `matrix`, `leaderboard`, `member`, `claim`, `relationship` and `patch`, plus the shared
+  `rungraph-error` document.
+
+Write and diagnostic commands (`init`, `rehash`, `add`, `schema`, `adapters`, `capture` unless
+`--json`) print text only and say so in their help.
+
 ## Non-goals (V1)
 
 No experiment tracker, dashboard, web UI or server. No training, job
