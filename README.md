@@ -298,6 +298,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence validate-batch --json MANIFEST...` | Validate several manifests in order and print a counts-only summary for each, plus an aggregate (`--strict`, `--redact-manifest-path`). See [Batch summaries](#batch-summaries). |
 | `runevidence inspect PATH` | Summarize the manifest, then run every check, also listing files the manifest does not track. |
 | `runevidence comparability BASELINE TARGET --baseline-result ID --target-result ID [--json]` | Experimental read-only comparison of five mandatory recorded conditions across two manifests (no artifact checks; exit `0` comparable, `1` different, `2` unavailable). `--preflight` is a text-only read-only readiness listing/pair check (no JSON; exit `0` list/ready, `1` not ready, `2` load/unknown/invalid). See [Comparability (verdict CLI experimental)](#comparability-verdict-cli-experimental). |
+| `runevidence assess BASELINE TARGET --baseline-result ID --target-result ID [--json] [--directory-artifacts]` | Read-only combined verdict: recorded-condition comparability plus artifact/value integrity on both sides. Exit `0` permitted and clean, `1` not permitted or evidence errors, `2` load failure. |
 | `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`, `--tags PATTERN`, `--include-strings`, `--include-histograms`, `--volatile GLOB`). With `--force`, the old manifest is kept as a backup, because a fresh scan does not carry over hand-written results and claims. See [Backups from `init --force`](#backups-from-init---force). |
 | `runevidence migrate PATH --to 0.2\|0.3\|0.4\|0.5\|0.6\|0.7\|0.8\|0.9\|0.10 [--dry-run] [--json]` | Declare an existing valid manifest as the chosen schema without changing any recorded value. Exits `0` on success, no-op or dry run; `2` on refusal or failure. There is no inference and no downgrade. See [Migrating a manifest to 0.2](#migrating-a-manifest-to-02), [Schema 0.4 CSV cell locators](#schema-04-csv-cell-locators-slice-c) and [Schema 0.5 TensorBoard scalar locators](#schema-05-tensorboard-scalar-locators-slice-d). |
 | `runevidence conditions PATH --run RUN_ID [--patch FILE\|-] [--clear FIELD]... [--dry-run] [--json]` | Set or clear recorded run conditions on a schema 0.2 or later manifest from a local JSON patch; no condition values on the command line. Exits `0` on success, no-op or dry run; `2` on refusal or failure. See [Authoring run conditions](#authoring-run-conditions). |
@@ -482,6 +483,19 @@ so a grammar failure still prints a JSON error when requested. `--strict`,
 > Missing evidence, identical run-ID strings across manifests, unsupported
 > shapes and bounds may prevent comparison. This is not production
 > qualification.
+
+### Evidence-aware comparison (`assess`)
+
+```bash
+runevidence assess BASELINE TARGET --baseline-result ID --target-result ID [--json]
+```
+
+`assess` runs the experimental comparability verdict on the selected result pair and the
+ordinary evidence checks on both manifests. It reports three facts: whether the five
+mandatory recorded conditions matched, whether each side's recorded files and values are
+intact, and whether the comparison is therefore permitted. Missing or changed artifacts,
+failed value checks and non-comparable conditions all make the assessment `NOT PERMITTED`.
+The verdict is consistency evidence, not scientific truth or a fair comparison.
 
 ### Exit codes
 

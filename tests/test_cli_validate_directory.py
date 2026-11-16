@@ -358,7 +358,7 @@ def test_flag_is_grammar_only_for_validate_and_inspect():
     sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
     for name, route in sub.choices.items():
         options = {option for action in route._actions for option in action.option_strings}
-        if name in ("validate", "inspect"):
+        if name in ("validate", "inspect", "assess"):
             assert "--directory-artifacts" in options
         else:
             assert "--directory-artifacts" not in options
