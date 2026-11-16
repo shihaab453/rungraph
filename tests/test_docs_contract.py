@@ -95,6 +95,11 @@ def test_workspace_guide_names_every_shipped_route():
         "compare",
         "matrix",
         "leaderboard",
+        "patch",
+        "member",
+        "claim",
+        "relationship",
     ):
         assert f"rungraph {route}" in guide, f"rungraph {route} is missing from the workspace guide"
+    assert "--baseline" in guide
     assert "rungraph-workspace.md" in README, "the README does not link the workspace guide"

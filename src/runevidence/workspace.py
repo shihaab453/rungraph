@@ -10,6 +10,8 @@ import json
 import os
 import re
 import stat
+
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Optional
@@ -499,3 +501,209 @@ def _inside_ignored(folder: Path, root: Path) -> bool:
     except ValueError:
         return False
     return any(part in IGNORED_DIRS for part in parts)
+
+
+# --- authoring --------------------------------------------------------------
+
+
+def canonical_document(document: Workspace) -> bytes:
+    return (json.dumps(document.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+@contextmanager
+def workspace_lock(root: Path):
+    try:
+        import fcntl
+    except ImportError:
+        yield
+        return
+    if os.name == "nt":
+        yield
+        return
+    try:
+        fd = os.open(os.fspath(root), os.O_RDONLY)
+    except OSError as exc:
+        raise WorkspaceError(f"cannot lock {root}: {exc.strerror or exc}") from None
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise WorkspaceError("BUSY: another writer holds the workspace") from None
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def save_workspace(document: Workspace, path: Path, expected_bytes: Optional[bytes]) -> None:
+    data = canonical_document(document)
+    if expected_bytes is not None:
+        try:
+            current = path.read_bytes()
+        except OSError:
+            current = b""
+        if current != expected_bytes:
+            raise WorkspaceError("stale workspace document; retry")
+    staging = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    try:
+        with staging.open("wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(staging, path)
+    finally:
+        try:
+            staging.unlink()
+        except OSError:
+            pass
+
+
+def _patch_error(message: str) -> WorkspaceError:
+    return WorkspaceError(message)
+
+
+def _apply_operation(raw: dict[str, Any], operation: dict[str, Any]) -> None:
+    kind = operation.get("op")
+    if kind == "set-workspace":
+        for key in ("id", "name", "description", "metadata"):
+            if key in operation:
+                raw[key] = operation[key]
+        return
+    if kind == "add-member":
+        raw.setdefault("members", []).append(operation["member"])
+        return
+    if kind in ("remove-member", "move-member", "rename-member"):
+        members = raw.setdefault("members", [])
+        index = next((i for i, member in enumerate(members) if member.get("id") == operation.get("id")), None)
+        if index is None:
+            raise _patch_error(f"unknown member {operation.get('id')!r}")
+        if kind == "remove-member":
+            members.pop(index)
+        elif kind == "move-member":
+            members[index]["path"] = operation["path"]
+        else:
+            new_id = operation["new_id"]
+            old_id = members[index]["id"]
+            members[index]["id"] = new_id
+            for claim in raw.setdefault("claims", []):
+                for ref in list(claim.get("supports", [])) + list(claim.get("contradicts", [])):
+                    if ref.get("member") == old_id:
+                        ref["member"] = new_id
+            for relationship in raw.setdefault("relationships", []):
+                for side in ("source", "target"):
+                    if relationship.get(side, {}).get("member") == old_id:
+                        relationship[side]["member"] = new_id
+        return
+    if kind == "add-claim":
+        raw.setdefault("claims", []).append(operation["claim"])
+        return
+    if kind in ("edit-claim", "remove-claim"):
+        claims = raw.setdefault("claims", [])
+        index = next((i for i, claim in enumerate(claims) if claim.get("id") == operation.get("id")), None)
+        if index is None:
+            raise _patch_error(f"unknown claim {operation.get('id')!r}")
+        if kind == "remove-claim":
+            claims.pop(index)
+        else:
+            patch = operation["claim"]
+            for key, value in patch.items():
+                if key != "id":
+                    claims[index][key] = value
+        return
+    if kind == "add-relationship":
+        raw.setdefault("relationships", []).append(operation["relationship"])
+        return
+    if kind == "remove-relationship":
+        relationships = raw.setdefault("relationships", [])
+        index = next((i for i, item in enumerate(relationships) if item.get("id") == operation.get("id")), None)
+        if index is None:
+            raise _patch_error(f"unknown relationship {operation.get('id')!r}")
+        relationships.pop(index)
+        return
+    raise _patch_error(f"unknown patch operation {kind!r}")
+
+
+def _manifest_index(manifest: Manifest) -> set[str]:
+    ids = {manifest.project.id}
+    ids |= {item.id for item in manifest.runs}
+    ids |= {item.id for item in manifest.artifacts}
+    ids |= {item.id for item in manifest.results}
+    ids |= {item.id for item in manifest.evidence}
+    return ids
+
+
+def _validate_refs(loaded_members: dict[str, LoadedMember], document: Workspace) -> None:
+    claim_ids = {claim.id for claim in document.claims}
+    indexes = {}
+    for member_id, item in loaded_members.items():
+        if item.manifest is None:
+            raise _patch_error(f"member {member_id!r} has no readable manifest")
+        indexes[member_id] = _manifest_index(item.manifest)
+    for claim in document.claims:
+        for ref in claim.supports + claim.contradicts:
+            if ref.claim is not None:
+                if ref.claim not in claim_ids:
+                    raise _patch_error(f"claim {claim.id!r}: unknown workspace claim {ref.claim!r}")
+            else:
+                if ref.member not in indexes:
+                    raise _patch_error(f"claim {claim.id!r}: unknown member {ref.member!r}")
+                if ref.id not in indexes[ref.member]:
+                    raise _patch_error(f"claim {claim.id!r}: {ref.member}#{ref.id} does not resolve")
+    for relationship in document.relationships:
+        for ref in (relationship.source, relationship.target):
+            if ref.claim is not None:
+                if ref.claim not in claim_ids:
+                    raise _patch_error(f"relationship {relationship.id!r}: unknown claim {ref.claim!r}")
+            else:
+                if ref.member not in indexes:
+                    raise _patch_error(f"relationship {relationship.id!r}: unknown member {ref.member!r}")
+                if ref.id not in indexes[ref.member]:
+                    raise _patch_error(f"relationship {relationship.id!r}: {ref.member}#{ref.id} does not resolve")
+
+
+def apply_patch(
+    loaded: LoadedWorkspace,
+    patch: dict[str, Any],
+    *,
+    expected_sha256: Optional[str] = None,
+    dry_run: bool = False,
+) -> Workspace:
+    if patch.get("format") != "rungraph-patch" or patch.get("version") != "0.1":
+        raise _patch_error("patch must be a rungraph-patch 0.1 document")
+    operations = patch.get("operations")
+    if not isinstance(operations, list) or not operations:
+        raise _patch_error("patch needs a non-empty operations list")
+    current = loaded.path.read_bytes()
+    expected = expected_sha256 or patch.get("expected_sha256")
+    if expected is None:
+        raise _patch_error("expected_sha256 is required when the workspace document exists")
+    import hashlib
+
+    if hashlib.sha256(current).hexdigest() != expected:
+        raise _patch_error("stale workspace document; retry")
+    raw = loaded.document.model_dump(mode="json")
+    for operation in operations:
+        if not isinstance(operation, dict):
+            raise _patch_error("each operation must be an object")
+        _apply_operation(raw, operation)
+    try:
+        document = Workspace.model_validate(raw)
+    except Exception as exc:
+        raise _patch_error(f"invalid workspace after patch: {exc}") from None
+    members = _resolve_members(loaded.root, document)
+    from .manifest import ManifestLoadError, load_manifest
+
+    for member_id, item in members.items():
+        try:
+            item.manifest = load_manifest(item.folder).manifest
+        except (ManifestLoadError, OSError, ValueError) as exc:
+            raise _patch_error(f"member {member_id!r}: {exc}") from None
+    _validate_refs(members, document)
+    if not dry_run:
+        with workspace_lock(loaded.root):
+            if loaded.path.read_bytes() != current:
+                raise _patch_error("stale workspace document; retry")
+            save_workspace(document, loaded.path, current)
+    return document

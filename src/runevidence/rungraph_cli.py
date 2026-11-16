@@ -13,6 +13,7 @@ from .workspace import (
     WORKSPACE_FORMAT,
     WORKSPACE_VERSION,
     WorkspaceError,
+    apply_patch,
     discover,
     load_workspace,
 )
@@ -164,7 +165,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
         loaded, graph, checks, states = _loaded(args)
     except WorkspaceError as exc:
         return _error("validate", "workspace", str(exc))
-    data = report_data(loaded, graph, states, checks, directory_artifacts=args.directory_artifacts)
+    data = report_data(
+        loaded, graph, states, checks,
+        directory_artifacts=args.directory_artifacts,
+    )
     data["format"] = "rungraph-validate"
     if args.json:
         _print_json(data)
@@ -219,7 +223,11 @@ def cmd_report(args: argparse.Namespace) -> int:
         loaded, graph, checks, states = _loaded(args)
     except WorkspaceError as exc:
         return _error("report", "workspace", str(exc))
-    data = report_data(loaded, graph, states, checks, directory_artifacts=args.directory_artifacts)
+    data = report_data(
+        loaded, graph, states, checks,
+        directory_artifacts=args.directory_artifacts,
+        baseline_root=args.baseline,
+    )
     if args.json:
         _print_json(data)
     else:
@@ -275,6 +283,85 @@ def cmd_leaderboard(args: argparse.Namespace) -> int:
     return data["exit_code"]
 
 
+def _author(args: argparse.Namespace, operations: list[dict], command: str) -> int:
+    try:
+        loaded = load_workspace(Path(args.root))
+        document = apply_patch(
+            loaded,
+            {
+                "format": "rungraph-patch",
+                "version": "0.1",
+                "expected_sha256": args.expected_sha256,
+                "operations": operations,
+            },
+            expected_sha256=args.expected_sha256,
+            dry_run=args.dry_run,
+        )
+    except WorkspaceError as exc:
+        return _error(command, "refused", str(exc))
+    data = {
+        "format": f"rungraph-{command}",
+        "version": "0.1",
+        "changed": operations,
+        "path": str(loaded.path),
+        "dry_run": args.dry_run,
+        "written": not args.dry_run,
+        "exit_code": 0,
+    }
+    if args.json:
+        _print_json(data)
+    else:
+        print(("Would apply" if args.dry_run else "Applied") + f" {len(operations)} operation(s).")
+    return EXIT_OK
+
+
+def cmd_patch(args: argparse.Namespace) -> int:
+    try:
+        patch = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return _error("patch", "patch", str(exc))
+    if args.expected_sha256 is None:
+        args.expected_sha256 = patch.get("expected_sha256")
+    return _author(args, patch.get("operations", []), "patch")
+
+
+def cmd_member(args: argparse.Namespace) -> int:
+    if args.action == "add":
+        member = {"id": args.id, "path": args.path}
+        if args.manifest:
+            member["manifest"] = args.manifest
+        if args.role:
+            member["role"] = args.role
+        operations = [{"op": "add-member", "member": member}]
+    elif args.action == "remove":
+        operations = [{"op": "remove-member", "id": args.id}]
+    elif args.action == "move":
+        operations = [{"op": "move-member", "id": args.id, "path": args.path}]
+    else:
+        operations = [{"op": "rename-member", "id": args.id, "new_id": args.new_id}]
+    return _author(args, operations, "member")
+
+
+def cmd_claim(args: argparse.Namespace) -> int:
+    if args.action == "remove":
+        operations = [{"op": "remove-claim", "id": args.id}]
+    else:
+        claim = json.loads(Path(args.file).read_text(encoding="utf-8"))
+        operations = [
+            {"op": "add-claim" if args.action == "add" else "edit-claim", "id": claim["id"], "claim": claim}
+        ]
+    return _author(args, operations, "claim")
+
+
+def cmd_relationship(args: argparse.Namespace) -> int:
+    if args.action == "remove":
+        operations = [{"op": "remove-relationship", "id": args.id}]
+    else:
+        relationship = json.loads(Path(args.file).read_text(encoding="utf-8"))
+        operations = [{"op": "add-relationship", "relationship": relationship}]
+    return _author(args, operations, "relationship")
+
+
 def _slug(text: str) -> str:
     out = "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in text).strip("-.")
     return out or "workspace"
@@ -318,6 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.add_argument("--strict", action="store_true")
     p.add_argument("--directory-artifacts", action="store_true")
+    p.add_argument("--baseline")
     p.set_defaults(func=cmd_report)
 
     p = sub.add_parser("impact", help="claims affected by one workspace node")
@@ -341,6 +429,47 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--direction", choices=("max", "min"), required=True)
     p.add_argument("--top", type=int, default=10)
     p.set_defaults(func=cmd_leaderboard)
+
+    p = sub.add_parser("patch", help="apply an all-or-nothing workspace patch")
+    p.add_argument("root", nargs="?", default=".")
+    p.add_argument("--file", required=True)
+    p.add_argument("--expected-sha256")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_patch)
+
+    p = sub.add_parser("member", help="add, remove, move or rename a member")
+    p.add_argument("action", choices=("add", "remove", "move", "rename"))
+    p.add_argument("root", nargs="?", default=".")
+    p.add_argument("--id")
+    p.add_argument("--path")
+    p.add_argument("--manifest")
+    p.add_argument("--role")
+    p.add_argument("--new-id")
+    p.add_argument("--expected-sha256")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_member)
+
+    p = sub.add_parser("claim", help="add, edit or remove a workspace claim")
+    p.add_argument("action", choices=("add", "edit", "remove"))
+    p.add_argument("root", nargs="?", default=".")
+    p.add_argument("--id")
+    p.add_argument("--file")
+    p.add_argument("--expected-sha256")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_claim)
+
+    p = sub.add_parser("relationship", help="add or remove a workspace relationship")
+    p.add_argument("action", choices=("add", "remove"))
+    p.add_argument("root", nargs="?", default=".")
+    p.add_argument("--id")
+    p.add_argument("--file")
+    p.add_argument("--expected-sha256")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_relationship)
     return parser
 
 

@@ -4,7 +4,8 @@ RunEvidence verifies one experiment manifest. A **workspace** composes several m
 one project-level view: `rungraph.json` at a folder root names the members and can carry
 cross-member claims and relationships. Everything stays offline and file-based.
 
-The workspace layer is read-only in this release. It never rewrites a member manifest.
+It never rewrites a member manifest. The workspace document itself is authored through
+\`rungraph patch\`, \`rungraph member\`, \`rungraph claim\` and \`rungraph relationship\`.
 
 ## Quick start
 
@@ -124,9 +125,31 @@ and `exit_code`. Errors use `{"format": "rungraph-error", "command": ...}`.
 | `impact` | object resolves | — | object/workspace load failure |
 | `compare`/`matrix`/`leaderboard` | rendered | — | load/usage |
 
+## Authoring
+
+\`\`\`bash
+rungraph member add path/to/project --id exp-c --path experiments/c \
+  --expected-sha256 "$(sha256sum path/to/project/rungraph.json | cut -d" " -f1)"
+rungraph claim add path/to/project --file claim.json --expected-sha256 ...
+rungraph patch path/to/project --file patch.json --expected-sha256 ...
+\`\`\`
+
+Every authoring command requires \`--expected-sha256\` once the document exists (the flag wins
+over the patch file's field), takes a cooperative POSIX folder lock, validates all references
+before writing, and stages/fsyncs/replaces the document atomically. A refusal writes nothing.
+\`--dry-run\` prints the plan and writes nothing. \`member rename\` updates every qualified
+reference in the same transaction; \`set-workspace\` is available only through \`patch\`.
+
+## Baseline
+
+\`rungraph report path/to/project --baseline prior-copy/\` compares each member's recorded
+assertions with a prior copy of the workspace root. The projection covers every manifest
+schema, reports added/removed/changed objects by \`(kind, id)\`, and reports added, removed,
+re-pathed and re-keyed members plus workspace claim/relationship changes. It is a recorded
+assertion diff, not a claim that files on disk changed.
+
 ## Limits and non-goals
 
 No manifest schema, locator or reader change; no network, server, database or GUI; no
-manifest rewrite. Workspace claim/relationship authoring is not part of this read-only
-release. The workspace document is limited to 16 MiB, 10,000 members, 10,000 claims and
-10,000 relationships.
+manifest rewrite. The workspace document is limited to 16 MiB, 10,000 members, 10,000 claims
+and 10,000 relationships.
