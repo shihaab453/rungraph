@@ -205,3 +205,46 @@ def test_rank_zero_int_fails_the_profile():
     payload = tb.varint_field(1, 3) + tb.bytes_field(2, b"") + tb.bytes_field(4, struct.pack("<i", 1))
     _, _, _, _, _, tensors = scan(events(payload), tensors=[(b"t", 0, 0)])
     assert tensors[(b"t", 0, 0)].outcome is ScalarOutcome.unsupported_scalar
+
+
+def test_one_million_elements_is_the_boundary():
+    payload = struct.pack("<4f", 1.0, 2.0, 3.0, 4.0)
+    accepted = tb.varint_field(1, 1) + tb.bytes_field(2, shape(1_000_000)) + tb.bytes_field(
+        4, payload * 250_000
+    )
+    value = digest(accepted)
+    assert value is not None
+    assert value["element_count"] == 1_000_000
+
+    rejected = tb.varint_field(1, 1) + tb.bytes_field(2, shape(1_000_001)) + tb.bytes_field(
+        4, payload * 250_000 + payload[:4]
+    )
+    assert digest(rejected) is None
+
+
+def test_rank_eight_is_the_boundary():
+    payload = struct.pack("<2f", 1.0, 2.0)
+    accepted = tb.varint_field(1, 1) + tb.bytes_field(2, shape(1, 1, 1, 1, 1, 1, 1, 2)) + tb.bytes_field(4, payload)
+    assert digest(accepted) is not None
+    rejected = tb.varint_field(1, 1) + tb.bytes_field(2, shape(*([1] * 8 + [2]))) + tb.bytes_field(4, payload)
+    assert digest(rejected) is None
+
+
+def test_seeded_mutations_only_ever_refuse_the_profile():
+    import random
+
+    base = events(
+        tensor(1, [2, 2], content=struct.pack("<4f", 1, 2, 3, 4)),
+        tensor(3, [2], ints=[-1, 5]),
+    )
+    rng = random.Random(0x0907)
+    for _ in range(400):
+        mutated = bytearray(base)
+        for _ in range(rng.randint(1, 4)):
+            mutated[rng.randrange(len(mutated))] ^= 1 << rng.randrange(8)
+        try:
+            list(iter_supported_summaries_09(bytes(mutated)))
+        except EventFileError:
+            continue
+        except Exception as exc:  # noqa: BLE001 - the fuzz asserts the exception class
+            raise AssertionError(f"unexpected {type(exc).__name__}: {exc}") from exc
