@@ -1,4 +1,4 @@
-"""Read TensorBoard event files into a schema 0.5, 0.6, 0.7 or 0.8 manifest.
+"""Read TensorBoard event files into a schema 0.5-0.9 manifest.
 
 This adapter is optional: core verification does not need it, and nothing here
 imports TensorBoard, TensorFlow, protobuf or google-crc32c. The dependency-free
@@ -64,6 +64,7 @@ from runevidence.models import (
     SCHEMA_VERSION_0_6,
     SCHEMA_VERSION_0_7,
     SCHEMA_VERSION_0_8,
+    SCHEMA_VERSION_0_9,
     Artifact,
     AudioValue,
     HistogramValue,
@@ -72,17 +73,21 @@ from runevidence.models import (
     Manifest06,
     Manifest07,
     Manifest08,
+    Manifest09,
     Project,
     Result05,
     Result06,
     Result07,
     Result08,
+    Result09,
     Run,
     TensorboardAudioLocator,
     TensorboardHistogramLocator,
     TensorboardImageLocator,
     TensorboardLocator,
     TensorboardStringLocator,
+    TensorboardTensorLocator,
+    TensorValue,
     is_own_file,
 )
 from runevidence.tag_filter import TagFilter, TagPatternTooExpensive
@@ -92,10 +97,12 @@ from runevidence.tensorboard_events import (
     HistogramRecord,
     ImageRecord,
     StringRecord,
+    TensorRecord,
     iter_supported_scalars,
     iter_supported_summaries,
     iter_supported_summaries_07,
     iter_supported_summaries_08,
+    iter_supported_summaries_09,
 )
 
 #: Per-manifest result budget and total tag-byte budget (RFC section 9).
@@ -115,6 +122,7 @@ TAG_MESSAGE = "a scalar tag cannot be represented in schema 0.5; nothing was wri
 TAG_MESSAGE_06 = "a scalar tag cannot be represented in schema 0.6; nothing was written"
 TAG_MESSAGE_07 = "a scalar tag cannot be represented in schema 0.7; nothing was written"
 TAG_MESSAGE_08 = "a scalar tag cannot be represented in schema 0.8; nothing was written"
+TAG_MESSAGE_09 = "a scalar tag cannot be represented in schema 0.9; nothing was written"
 BUDGET_MESSAGE = (
     "the selected TensorBoard scalars exceed the 10,000-result or 16 MiB tag limit; "
     "nothing was written"
@@ -156,6 +164,7 @@ class TensorboardAdapter(Adapter):
     supports_include_histograms = True
     supports_include_images = True
     supports_include_audio = True
+    supports_include_tensors = True
     description = (
         "TensorBoard log directories: one run per directory, selected scalars or summaries."
     )
@@ -177,12 +186,17 @@ class TensorboardAdapter(Adapter):
         include_histograms: bool = False,
         include_images: bool = False,
         include_audio: bool = False,
-    ) -> Manifest05 | Manifest06 | Manifest07 | Manifest08:
+        include_tensors: bool = False,
+    ) -> Manifest05 | Manifest06 | Manifest07 | Manifest08 | Manifest09:
         root = Path(root)
         paths = sorted(discovery.files)
         event_paths = [path for path in paths if _tensorboard_path_matches(path)]
         _refuse_paths(paths, event_paths)
-        if include_images or include_audio:
+        if include_tensors:
+            schema_version = SCHEMA_VERSION_0_9
+            result_type = Result09
+            manifest_type = Manifest09
+        elif include_images or include_audio:
             schema_version = SCHEMA_VERSION_0_8
             result_type = Result08
             manifest_type = Manifest08
@@ -205,6 +219,7 @@ class TensorboardAdapter(Adapter):
             include_histograms=include_histograms,
             include_images=include_images,
             include_audio=include_audio,
+            include_tensors=include_tensors,
         )
         events: dict[str, _EventFile] = {}
         for rel in event_paths:
@@ -263,7 +278,14 @@ class TensorboardAdapter(Adapter):
                     )
                 )
                 for observation in event.observations:
-                    if observation.kind == "image":
+                    if observation.kind == "tensor":
+                        locator = TensorboardTensorLocator(
+                            kind="tensorboard-tensor",
+                            tag=observation.tag,
+                            step=observation.step,
+                            occurrence=observation.occurrence,
+                        )
+                    elif observation.kind == "image":
                         locator = TensorboardImageLocator(
                             kind="tensorboard-image",
                             tag=observation.tag,
@@ -412,6 +434,7 @@ class _State:
     include_histograms: bool = False
     include_images: bool = False
     include_audio: bool = False
+    include_tensors: bool = False
     budget: _Budget = field(default_factory=_Budget)
     failures: dict[int, Exception] = field(default_factory=dict)
     selected: dict[str, bool] = field(default_factory=dict)
@@ -538,7 +561,9 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
 
     observations: list[_Observation] = []
     occurrences: dict[tuple[str, str, int], int] = {}
-    if state.include_images or state.include_audio:
+    if state.include_tensors:
+        iterator = iter_supported_summaries_09(snapshot.data)
+    elif state.include_images or state.include_audio:
         iterator = iter_supported_summaries_08(snapshot.data)
     elif state.include_histograms:
         iterator = iter_supported_summaries_07(snapshot.data)
@@ -560,7 +585,12 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
             is_audio = isinstance(record, AudioRecord)
             if is_audio and not state.include_audio:
                 continue
-            if is_image:
+            is_tensor = isinstance(record, TensorRecord)
+            if is_tensor and not state.include_tensors:
+                continue
+            if is_tensor:
+                kind = "tensor"
+            elif is_image:
                 kind = "image"
             elif is_audio:
                 kind = "audio"
@@ -576,7 +606,8 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
                     state.include_strings,
                     state.include_histograms,
                     state.include_images or state.include_audio,
-                    text=is_text or is_hist or is_image or is_audio,
+                    state.include_tensors,
+                    text=is_text or is_hist or is_image or is_audio or is_tensor,
                 )
             except AdapterError as exc:
                 if state.tag_filter is None:
@@ -612,6 +643,8 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
                 value = ImageValue.model_validate(record.value)
             elif is_audio:
                 value = AudioValue.model_validate(record.value)
+            elif is_tensor:
+                value = TensorValue.model_validate(record.value)
             elif is_hist:
                 value = HistogramValue.model_validate(record.value)
             observations.append(
@@ -687,7 +720,7 @@ def _record_reservation(value: str, used: set[str], state: _State) -> None:
 
 def _budget_message(state: _State) -> str:
     """The budget text for the flag set that was actually passed."""
-    if state.include_images or state.include_audio:
+    if state.include_tensors or state.include_images or state.include_audio:
         if state.include_histograms and state.include_strings:
             return BUDGET_MESSAGE_07
         if state.include_histograms:
@@ -705,6 +738,7 @@ def _decoded_tag(
     schema_06: bool = False,
     schema_07: bool = False,
     schema_08: bool = False,
+    schema_09: bool = False,
     *,
     text: bool = False,
 ) -> str | None:
@@ -716,6 +750,8 @@ def _decoded_tag(
     if not raw or len(raw) > MAX_TENSORBOARD_TAG:
         if text:
             return None
+        if schema_09:
+            raise AdapterError(TAG_MESSAGE_09)
         if schema_08:
             raise AdapterError(TAG_MESSAGE_08)
         if schema_07:
@@ -726,6 +762,10 @@ def _decoded_tag(
     except UnicodeDecodeError:
         if text:
             return None
+        if schema_09:
+            raise AdapterError(TAG_MESSAGE_09)
+        if schema_09:
+            raise AdapterError(TAG_MESSAGE_09) from None
         if schema_08:
             raise AdapterError(TAG_MESSAGE_08) from None
         if schema_07:

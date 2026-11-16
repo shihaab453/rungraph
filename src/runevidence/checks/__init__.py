@@ -15,12 +15,14 @@ from ..models import (
     SCHEMA_VERSION_0_6,
     SCHEMA_VERSION_0_7,
     SCHEMA_VERSION_0_8,
+    SCHEMA_VERSION_0_9,
     CsvCellLocator,
     TensorboardAudioLocator,
     TensorboardHistogramLocator,
     TensorboardImageLocator,
     TensorboardLocator,
     TensorboardStringLocator,
+    TensorboardTensorLocator,
 )
 from .conditions import check_conditions
 from .files import check_files
@@ -58,6 +60,7 @@ _LOCATOR_SCHEMAS = frozenset(
         SCHEMA_VERSION_0_6,
         SCHEMA_VERSION_0_7,
         SCHEMA_VERSION_0_8,
+        SCHEMA_VERSION_0_9,
     }
 )
 
@@ -78,6 +81,7 @@ def _csv_cell_cap(
         SCHEMA_VERSION_0_6,
         SCHEMA_VERSION_0_7,
         SCHEMA_VERSION_0_8,
+        SCHEMA_VERSION_0_9,
     ):
         return False, frozenset()
     eligible_artifacts = {
@@ -121,6 +125,7 @@ def _tensorboard_cap(
         SCHEMA_VERSION_0_6,
         SCHEMA_VERSION_0_7,
         SCHEMA_VERSION_0_8,
+        SCHEMA_VERSION_0_9,
     ):
         return False, frozenset()
     eligible_artifacts = {
@@ -144,6 +149,7 @@ def _tensorboard_cap(
                 TensorboardHistogramLocator,
                 TensorboardImageLocator,
                 TensorboardAudioLocator,
+                TensorboardTensorLocator,
             ),
         ):
             continue
@@ -172,6 +178,7 @@ def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
         SCHEMA_VERSION_0_6,
         SCHEMA_VERSION_0_7,
         SCHEMA_VERSION_0_8,
+        SCHEMA_VERSION_0_9,
     ):
         return frozenset()
     paths = {
@@ -190,6 +197,7 @@ def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
                 TensorboardHistogramLocator,
                 TensorboardImageLocator,
                 TensorboardAudioLocator,
+                TensorboardTensorLocator,
             ),
         )
         and result.artifact_id is not None
