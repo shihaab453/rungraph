@@ -124,6 +124,8 @@ class Member(_Strict):
     def _path(cls, value: str) -> str:
         if not isinstance(value, str) or not value:
             raise ValueError("member path must be non-empty")
+        if value == ".":
+            return value
         if "\\" in value or value.startswith("/"):
             raise ValueError("member path must be relative and use forward slashes")
         parts = PurePosixPath(value).parts

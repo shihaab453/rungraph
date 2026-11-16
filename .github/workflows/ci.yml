@@ -408,3 +408,45 @@ jobs:
                           f.write(f"### Packaging advisory: FAIL\n{type(exc).__name__}: {exc}\nSee job log for details. No artifacts uploaded.\n")
                   raise
           PY
+
+  # Advisory fresh-install smoke: build the four wheels, install them into a
+  # clean venv and run the installed console scripts. Not a required ruleset
+  # context, but it catches a wheel that imports or dispatches differently from
+  # the source tree.
+  wheel-smoke:
+    name: wheel smoke (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build and install the wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build
+          python -m build --wheel --out-dir dist .
+          for pkg in runevidence-tensorboard runevidence-mlflow runevidence-hydra; do
+            python -m build --wheel --out-dir dist "packages/$pkg"
+          done
+          python -m venv v
+          v/bin/pip install dist/*.whl
+      - name: Run the installed commands
+        shell: bash
+        run: |
+          set -euo pipefail
+          v/bin/runevidence --version
+          v/bin/rungraph --help > /dev/null
+          mkdir -p smoke
+          printf 'x\n' > smoke/data.txt
+          v/bin/runevidence init smoke --id smoke --name smoke
+          v/bin/runevidence validate smoke --strict
+          v/bin/rungraph discover smoke --json > /dev/null
+          v/bin/rungraph init smoke --id ws --name ws
+          v/bin/rungraph validate smoke --strict

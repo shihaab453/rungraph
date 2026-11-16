@@ -194,3 +194,10 @@ def test_discovery_reports_a_duplicate_manifest(tmp_path: Path):
     result = discover(tmp_path)
     assert any("duplicate manifest" in error for error in result.errors)
     assert result.exit_code == 2
+
+
+def test_a_member_at_the_workspace_root_is_allowed(tmp_path: Path):
+    make_manifest(tmp_path)
+    write_workspace(tmp_path, members=[{"id": "root", "path": "."}])
+    loaded = load_workspace(tmp_path)
+    assert loaded.members["root"].manifest is not None
