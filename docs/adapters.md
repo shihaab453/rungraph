@@ -347,7 +347,16 @@ How it reads the folder:
   `HistogramProto` summaries as structured `HistogramValue` results in schema
   0.7, with 1,024 buckets and a 16 MiB histogram-JSON budget. TF2 `[k,3]`
   tensor histograms are not recorded.
+- **Images and audio (0.8):** `init --include-images` and `init --include-audio`
+  record legacy `Summary.Image` and `Summary.Audio` payloads as digest-only
+  `ImageValue`/`AudioValue` references in schema 0.8. PNG and RIFF/WAVE only;
+  the bytes stay in the event file and `validate` re-hashes them.
+- **Numeric tensors (0.9):** `init --include-tensors` records float32, float64,
+  int32 and int64 tensors as canonical `TensorValue` digests in schema 0.9,
+  with 1-8 dimensions and at most 1,000,000 elements. The scalar/string readers
+  keep their own entries; every other dtype is skipped.
 
-The adapter emits `Manifest05`, so `runevidence validate` verifies the scalar
-locators. See
+Without a media or tensor flag the adapter emits `Manifest05`; the flags select
+0.6 (strings), 0.7 (histograms), 0.8 (media) or 0.9 (tensors), and
+`runevidence validate` verifies the resulting locators. See
 [Schema 0.5 TensorBoard scalar locators](../README.md#schema-05-tensorboard-scalar-locators-slice-d).
