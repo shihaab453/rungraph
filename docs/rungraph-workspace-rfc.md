@@ -1,24 +1,26 @@
-# RunGraph workspace RFC (v0.2)
+# RunGraph workspace RFC (v0.3)
 
 Status: draft for independent review. No implementation is authorised until this contract is
 accepted.
 
 ## 0. Changes in this version
 
-- Adds the read-only `discover` surface and full membership authoring (D0/D1).
-- Replaces the fingerprint-based baseline with a schema-independent workspace assertion
-  projection, and defines baseline member matching.
-- Defines typed global node identities, duplicate-local-ID policy and workspace claim nodes.
-- Completes the document contract (requiredness, IDs, caps, duplicate keys, path rules).
-- Defines edge validation, conflict rules, bounded cycle reporting and traversal limits.
-- Defines decisive claim-state predicates, including the dependency closure and member-claim
-  mapping; `contradicted` becomes the output label `contradiction-recorded`.
-- Adds `compare`, `matrix` and `leaderboard`, row identity, ranking/ties and comparability
-  availability, and marks D6 BOUNDED until the A5/C6 coverage slice lands.
-- Defines the patch grammar, all-or-nothing write protocol, lock order, commit point and
-  backup/cleanup outcomes.
-- Pins finding severities, exit codes and JSON envelopes for every command.
-- Expands the verification plan with the named failure cases from review.
+- v0.3 folds the second review: discovery uses stable IDs from an existing document and
+  scans fully so nested manifests are found; provisional suffixing skips taken IDs.
+- Adds workspace-claim refs (`{"claim": ...}`), member-declared relationships and member
+  evidence citations to the graph, and fixes the claim-cycle set.
+- Rewrites the claim predicates so `supported` and `contradiction-recorded` can coexist,
+  context-only citations are `uncited`, `unresolved` always implies `at-risk`, and member
+  claims map through a table plus `claim-at-risk`.
+- Defines the closure to include `derived_from` and to define `impact(X)` exactly.
+- Uses the result ID as the row identity, with `ambiguous` matrix cells and `--result`.
+- Completes the patch command mapping, member flags, `edit-claim` merge/replace and
+  `set-workspace` rules.
+- Adds every JSON envelope/payload and the missing finding/error codes.
+- Adds baseline canonical encoding, schema-changed and re-keyed cases.
+- v0.2 folded: read-only discovery, membership authoring, typed identity, document table,
+  edge rules, report policy, baseline projection, three comparison routes, patch protocol,
+  per-command exits and the expanded test plan.
 
 ## 1. Problem and scope
 
@@ -35,8 +37,8 @@ and any claim that structural consistency establishes scientific truth.
 
 ## 2. Workspace document
 
-File `rungraph.json` at the workspace root. Every field is required unless marked
-"optional"; unknown fields are rejected.
+File `rungraph.json` at the workspace root. Every field is required unless it has a default
+or is marked "optional"; unknown fields are rejected.
 
 | Field | Type | Rule |
 | --- | --- | --- |
@@ -63,8 +65,14 @@ each), `source` (optional string or null, max 4 KiB), `metadata` (optional objec
 manifest relationship enum, excluding `supports`/`contradicts`), `source` and `target` (refs),
 `note` (optional string or null, max 4 KiB).
 
-**Ref**: `{"member": "<member-id>", "id": "<local-id>"}` with both required strings. The local
-ID must match the manifest ID pattern; it is not trimmed or case-folded.
+**Ref**: one of
+
+- `{"member": "<member-id>", "id": "<local-id>"}` (both required strings; the local ID must
+  match the manifest ID pattern and is not trimmed or case-folded), or
+- `{"claim": "<workspace-claim-id>"}` (a workspace claim citing another workspace claim).
+
+The canonical text form is `member#local-id` or `claim:<id>`. `#` and `:` are not in the
+manifest ID pattern, so both are unambiguous.
 
 Rules:
 
@@ -78,36 +86,47 @@ Rules:
   Symlinked member folders are refused by discovery and by validation.
 - A member at `path: "."` must be the only member. A member nested inside another member's
   folder is `workspace-member-nested` (error).
-- `manifest` is resolved as `member path / manifest`; it must be a regular `.json` file.
+- `manifest` is resolved as `member path / manifest`; it must be a regular `.json` file. A
+  symlinked manifest file is refused (`lstat`), as is a manifest that escapes the member
+  folder. A declared member under an ignored folder (for example `build/`) is honoured when
+  it exists: the ignore list governs discovery only.
+- A host is treated as case-insensitive when `os.path.normcase("A") == os.path.normcase("a")`;
+  on such a host member paths are compared case-folded and a case-variant duplicate is
+  refused. On a case-sensitive host, two different spellings are distinct paths but the same
+  inode is still a duplicate.
 - Discovery and validation never follow a symlinked folder and never descend into reference
   directories listed in §3.
 
 ## 3. Discovery
 
-`rungraph discover ROOT [--check] [--directory-artifacts] [--json]` is read-only and works
-without a workspace document:
+`rungraph discover ROOT [--check] [--directory-artifacts] [--json]` is read-only:
 
-- Scans `ROOT` depth-first in sorted relative-path order, skipping `.git`, `.hg`, `.svn`,
+- Scans the whole tree under `ROOT` in sorted relative-path order, collecting every
+  `runevidence.json` (or a declared `manifest` name), skipping `.git`, `.hg`, `.svn`,
   `.venv`, `venv`, `__pycache__`, `.pytest_cache`, `node_modules`, `.tox`, `build`, `dist`,
-  and any folder that is a symlink or junction.
-- A folder containing `manifest` (default `runevidence.json`) is a member. It is not
-  descended into further; a manifest found inside another member is
+  and any folder that is a symlink or junction. It does not stop at the first member, so a
+  manifest nested inside a member folder is found and reported as
   `workspace-member-nested` (error).
+- If `ROOT/rungraph.json` exists and loads, each discovered folder that matches a declared
+  member path takes that member's stable ID; every other folder gets a provisional ID.
+  Without a document, all IDs are provisional.
 - Provisional member ID: `prov-` + `valid_slug(relative folder path)`; empty path (root) is
-  `prov-root`. Collisions are suffixed `-2`, `-3` in sorted relative-path order, so the result
-  does not depend on traversal timing.
-- Reports, for every found manifest: relative path, provisional ID, whether it loads, its
-  schema version, and a duplicate when another path resolves to the same file.
+  `prov-root`. Collisions are suffixed `-2`, `-3` in sorted relative-path order, skipping any
+  suffix that is already a taken ID, so the result does not depend on traversal timing.
+- Reports, for every found manifest: relative path, stable or provisional ID, whether it
+  loads, its schema version, and a duplicate when another path resolves to the same file.
 - Caps: at most 10,000 manifests and depth 64; beyond either, exit 2 with
   `discovery-limit` and no partial list.
 - An empty discovery exits 2 and writes nothing, matching the empty-scan rule.
 - `--check` runs the same per-member checks as `validate` (including
-  `--directory-artifacts` when given) and includes their findings; without it, discovery is
-  metadata-only. It never writes.
+  `--directory-artifacts` when given) and includes their findings. Without it, discovery is
+  metadata-only, but a nested member, duplicate, unreadable manifest or limit is still an
+  error (exit 2); `--check` evidence errors exit 1.
 - JSON: `format: "rungraph-discover"`, `version: "0.1"`, `root`, `members` (ordered),
   `duplicates`, `errors`, `exit_code`.
 
-`init` uses this discovery (not a second scanner). It refuses an empty discovery.
+`init` uses this discovery (not a second scanner). It refuses an empty discovery and uses the
+stable IDs from an existing document when present.
 
 ## 4. Identity and graph
 
@@ -126,61 +145,91 @@ make the member invalid for these commands). Workspace claims must use the `clai
   findings and is `workspace-member-invalid` for graph/report/impact; it is never resolved
   arbitrarily. Any workspace ref to that member is `workspace-reference-ambiguous`.
 - Nodes are built from every loadable member: member, project, run, artifact, result,
-  evidence, plus workspace claims. Edges:
+  evidence, plus workspace claims. A member node has a `contains` edge to its project, runs,
+  artifacts, results and evidence.
+- Edges are the union of:
   - inline manifest edges (`result_of`, `reported_in`, `produced_by`, `input_to`, the latter
     reversed for traversal as in `lineage`),
+  - **member-declared `relationships`** (the full delivered type set),
+  - **member evidence citations** (`supports`/`contradicts` from each evidence node to its
+    cited objects),
   - workspace relationships,
-  - claim `supports`/`contradicts` edges from the claim node to each ref.
-- Endpoint kinds are checked against the delivered manifest rules (`checks/graph.py`
-  `_ALLOWED`): an edge with a wrong endpoint kind is `workspace-edge-invalid` (error) and is
-  not traversed.
-- Identical edges from inline and workspace data are merged. A workspace relationship that
-  gives an artifact a second producing run, or contradicts a member's recorded provenance, is
-  `workspace-provenance-conflict` (error) and not traversed.
+  - workspace claim citations, including `{"claim": ...}` refs.
+- Endpoint kinds use the delivered rules: `checks/graph.py` `ALLOWED_ENDPOINTS` for
+  relationships and evidence citations, `run_lineage.py` `_ALLOWED` for traversal. Workspace
+  claim citations may target a result, evidence or workspace claim; any other target is
+  `workspace-edge-invalid` (error) and is not traversed.
+- Identical edges from inline, member and workspace data are merged. A workspace relationship
+  that gives an artifact a second producing run, or contradicts a member's recorded
+  provenance, is `workspace-provenance-conflict` (error) and not traversed.
 - A relationship of type `supports` or `contradicts` is refused; claims are the only
   claim-citation mechanism.
-- Cycles: only `derived_from` edges and claim-to-claim citations are cycle-checked, matching
-  manifest semantics. One example path per strongly connected component, at most 100
-  examples; a cycle wholly inside one member is reported once by the member and once in the
-  workspace list tagged with that member.
-- `graph` output: `format: "rungraph-graph"`, `version: "0.1"`, `nodes` (`id`, `kind`,
-  `member`, `status`, `label`), `edges` (`source`, `target`, `relation`, `origin`), `cycles`,
-  `unresolved`. Unresolved refs are nodes with `status: "unresolved"`, never dropped.
+- Cycles: only `derived_from` edges and claim-citation edges (member evidence or workspace
+  claim, including `{"claim": ...}`) are cycle-checked, matching manifest semantics. One
+  example path per strongly connected component, at most 100 examples; a cycle wholly inside
+  one member is reported once by the member and once in the workspace list tagged with that
+  member.
+- The dependency closure used by report/impact is: the cited object; for a result, its
+  artifact and run, the run's input artifacts and their producing runs recursively, the
+  artifacts the run produced, and any `derived_from` ancestors of those artifacts; for an
+  evidence or workspace claim, its own citations recursively. `derived_from` and
+  member/workspace relationship edges are followed. `impact(X)` is exactly
+  `{claim : X is in closure(claim)}`; the report uses the same function.
+- `graph` output: `format: "rungraph-graph"`, `version: "0.1"`, `exit_code`, `nodes` (`id`,
+  `kind`, `member`, `status`, `label`), `edges` (`source`, `target`, `relation`, `origin`),
+  `cycles`, `unresolved`. Unresolved refs are nodes with `status: "unresolved"`, never
+  dropped.
 - `--from` traverses outgoing dependency edges (the lineage direction); `--depth` is 1–100,
-  default full traversal; `--format dot` renders the same model, it is not a second model.
+  default full traversal; `--json` is the only machine format and `--format dot` renders the
+  same model, it is not a second model.
 
 ## 5. Claim states
 
-A workspace claim's `supports`/`contradicts` targets must be results or evidence. Other
-object kinds are context citations: they are shown but do not satisfy support and do not count
-as cited evidence. A claim with no result/evidence targets is `uncited`.
+A workspace claim's `supports`/`contradicts` targets may be a member result, a member evidence
+entry, or another workspace claim. A member artifact, run or project citation is context only:
+it is shown but does not count as support and does not make the claim cited. A claim with no
+result/evidence/claim support target is `uncited`.
 
 For a member claim, the delivered manifest semantics apply unchanged (result, artifact or run
-targets; project/evidence targets are invalid), and its delivered `coverage` flags are mapped
-to the labels below rather than recomputed.
+targets; project/evidence targets are invalid). Its states are:
 
-The dependency closure of a cited result/evidence is: the object itself; its artifact and run;
-the run's input artifacts and their producing runs, recursively; and the artifacts the run
-produced (outputs). This union covers both the lineage direction and the delivered
-at-risk check. An error-level finding whose subject is any object in the closure, or any file
+| Delivered signal | State |
+| --- | --- |
+| `claim-unverified` (no resolvable support) | `unresolved` |
+| `dangling-reference` on a cited object | `unresolved` |
+| `unsupported-claim` / no support target | `uncited` |
+| `conflicting-evidence` | `contradiction-recorded` |
+| `claim-at-risk` | `at-risk` |
+| otherwise | `supported` |
+
+Structural coverage flags cannot imply `at-risk`; only the delivered `claim-at-risk` finding
+(and the closure rule below) can.
+
+The dependency closure of a cited object is: the object itself; for a result, its artifact and
+run, the run's input artifacts and their producing runs recursively, the artifacts the run
+produced, and `derived_from` ancestors of those artifacts; for an evidence or workspace
+claim, its own citations recursively. A workspace claim citing a member claim or another
+workspace claim inherits that claim's `unresolved`, `at-risk` and `contradiction-recorded`
+states. An error-level finding whose subject is any object in the closure, or any file
 finding for an artifact in the closure, "touches" the claim. A finding with no subject touches
 the member only.
 
 Predicates:
 
-- `unresolved`: any support/contradicts ref names a missing member, a missing local ID, or an
-  ambiguous duplicate local ID.
-- `contradiction-recorded`: at least one `contradicts` ref resolves to a result/evidence object
-  whose closure has no error-level finding. (The label is a recorded relation, not truth.)
-- `at-risk`: any support/contradicts ref, or any object in its closure, is touched by an
-  error-level finding, or a ref is unresolved.
-- `supported`: at least one support target resolves; every support target resolves; no
-  support/contradicts target or closure is touched by an error; no contradiction-recorded.
-- `uncited`: no support targets (contradicts may still exist).
+- `unresolved`: any support/contradicts ref names a missing member, a missing local ID, an
+  ambiguous duplicate local ID, or a missing workspace claim.
+- `contradiction-recorded`: at least one `contradicts` target resolves and is not unresolved.
+- `at-risk`: any support/contradicts target or closure is touched by an error-level finding,
+  or any ref is unresolved. `unresolved` therefore always implies `at-risk`.
+- `supported`: at least one support target is a result, evidence or claim; every support
+  target resolves; no support target or closure is touched by an error. A recorded
+  contradiction does **not** block `supported`; it is a separate label.
+- `uncited`: no result/evidence/claim support target (context-only or contradiction-only).
 
-Allowed combinations: `unresolved` may accompany any other state; `contradiction-recorded`
-may accompany `at-risk` or `supported`; `supported` and `at-risk` are mutually exclusive;
-`uncited` and `supported` are mutually exclusive. For a single sort label the precedence is
+Allowed combinations: `unresolved` with `at-risk`; `contradiction-recorded` with `supported`
+or `at-risk`; `supported` with `contradiction-recorded`; `uncited` with
+`contradiction-recorded`. Never `supported` with `at-risk` or `unresolved`; never `uncited`
+with `supported`. For a single sort label the precedence is
 `unresolved` > `contradiction-recorded` > `at-risk` > `supported` > `uncited`. All applicable
 labels are printed in text and JSON.
 
@@ -211,16 +260,20 @@ workspace fails to load (matching the delivered `runevidence impact`).
 
 ### `compare`, `matrix`, `leaderboard`
 
-- Row identity is `(member, run, result name)`. A metric that appears in several runs yields
-  several rows; there is no implicit selection. `--run` accepts `member#run` (repeatable).
-- `compare`: two selected rows or all rows for one metric, with recorded values and explicit
-  missing/non-numeric accounting. No evidence-integrity check (C7 is separate).
-- `matrix`: rows = `(member, run)`, columns = metric names; missing/non-numeric cells counted.
+- Row identity is `(member, run, result ID)`; the display name is the result name. A result
+  that appears with the same name as another result in the same run is a distinct row, and a
+  matrix cell with more than one row is `ambiguous` and counted, never silently averaged.
+  `--run` accepts `member#run` (repeatable); `--result` accepts `member#result` for an exact
+  row.
+- `compare`: the selected rows (all, one metric, or `--result`) with recorded values and
+  explicit missing/non-numeric accounting. No evidence-integrity check (C7 is separate).
+- `matrix`: rows = `(member, run)`, columns = metric names; missing/non-numeric/ambiguous cells
+  are counted.
 - `leaderboard`: only finite numeric values; `--direction max|min` required; `--top` 1–1000;
-  ties share a rank; excluded rows are counted by reason. This is a recorded-value ranking,
-  not a fairness or validity claim.
+  equal values share a rank; excluded rows are counted by reason. This is a recorded-value
+  ranking, not a fairness or validity claim.
 - Comparability: per result pair, use the existing experimental comparability surface when
-  both members are schema 0.2 and the pair can be selected; statuses are `comparable`,
+  both members are schema 0.1 or 0.2 and the pair can be selected; statuses are `comparable`,
   `not-comparable`, `unavailable: schema`, `unavailable: insufficient-evidence`,
   `unavailable: mapping`. Matrix and leaderboard show a per-member
   `conditions: available|unavailable` column and never claim fairness. Schemas 0.3–0.10 are
@@ -236,11 +289,15 @@ baseline document.
 
 For each member, the projection is a canonical list of recorded objects
 (`kind`, `id`, `data`) built from the manifest model for **every schema 0.1–0.10**; it is a
-new read-only projection, not `fingerprint` (which is 0.1-only). Added, removed and changed
-objects are listed by `(kind, id)`. Members: added (no baseline entry), removed (no current
-entry), re-pathed (same ID, different path, reported as re-pathed not added/removed).
-Workspace claims and relationships are compared by ID, including added, removed, edited and
-re-ordered refs. A missing or unreadable baseline member is reported, not guessed.
+new read-only projection, not `fingerprint` (which is 0.1-only). `data` is canonical JSON
+(sorted keys, UTF-8, no NaN/Infinity); a member whose schema version changed between baseline
+and current is reported as `schema-changed` and still compared by object ID. Added, removed
+and changed objects are listed by `(kind, id)`. Members: added (no baseline entry), removed
+(no current entry), re-pathed (same ID, different path, reported as re-pathed not
+added/removed), and re-keyed (same path, different ID, reported as renamed, not
+added/removed). Workspace claims and relationships are compared by ID, including added,
+removed, edited and re-ordered refs. A missing or unreadable baseline member is reported
+(`workspace-baseline-missing`, warning), not guessed.
 
 ## 8. Command surface
 
@@ -250,16 +307,26 @@ New console script `rungraph` (the `runevidence` CLI is unchanged):
 rungraph discover ROOT [--check] [--directory-artifacts] [--json]
 rungraph init [ROOT] [--id ID] [--name NAME] [--force] [--dry-run]
 rungraph validate [ROOT] [--json] [--strict] [--directory-artifacts] [--redact-manifest-path]
-rungraph graph [ROOT] [--from NODE] [--depth N] [--format json|dot] [--fail-on-unresolved]
+rungraph graph [ROOT] [--from NODE] [--depth N] [--json] [--format dot] [--fail-on-unresolved]
 rungraph report [ROOT] [--baseline DIR] [--json] [--strict] [--directory-artifacts] [--redact-manifest-path]
 rungraph impact [ROOT] --from NODE [--json]
-rungraph compare ROOT --metric NAME [--run MEMBER#RUN]... [--json]
+rungraph compare ROOT --metric NAME [--run MEMBER#RUN]... [--result MEMBER#RESULT]... [--json]
 rungraph matrix ROOT [--run MEMBER#RUN]... [--metric NAME]... [--json]
 rungraph leaderboard ROOT --metric NAME --direction max|min [--top N] [--run MEMBER#RUN]... [--json]
-rungraph member add|remove|move|rename ROOT ... [--dry-run] [--json]
-rungraph claim add|edit|remove ROOT --patch FILE [--dry-run] [--json]
-rungraph relationship add|remove ROOT --patch FILE [--dry-run] [--json]
+rungraph patch ROOT --file PATCH [--dry-run] [--json]
+rungraph member add|remove|move|rename ROOT [flags] [--dry-run] [--json]
+rungraph claim add|edit|remove ROOT [flags] [--dry-run] [--json]
+rungraph relationship add|remove ROOT [flags] [--dry-run] [--json]
 ```
+
+All authoring commands accept `--expected-sha256 HEX` and refuse when the loaded document
+does not match it; `rungraph patch --file` is the only multi-operation route and the only one
+that applies `set-workspace`. The convenience commands build one-operation patches:
+
+- `member add --id ID --path PATH [--manifest NAME] [--role ROLE]`
+- `member remove|move|rename --id ID` (`move` adds `--path`, `rename` adds `--new-id`)
+- `claim add|edit|remove --file CLAIM_JSON` (or `--id` for remove)
+- `relationship add|remove --file RELATIONSHIP_JSON` (or `--id` for remove)
 
 `init` writes a fresh document from discovery; `--force` backs up to `.bak`, `.bak.2`, …
 and does not merge hand-written claims or relationships (it says so). `init` on an empty
@@ -283,7 +350,7 @@ Authoring patches are JSON:
     {"op": "remove-member", "id": "exp-b"},
     {"op": "move-member", "id": "exp-a", "path": "experiments/a2"},
     {"op": "rename-member", "id": "exp-a", "new_id": "exp-a2"},
-    {"op": "add-claim", "claim": {"id": "c1", "claim": "...", "supports": []}},
+    {"op": "add-claim", "claim": {"id": "c1", "claim": "...", "supports": [], "contradicts": []}},
     {"op": "edit-claim", "id": "c1", "claim": {"claim": "..."}},
     {"op": "remove-claim", "id": "c1"},
     {"op": "add-relationship", "relationship": {"id": "r1", "type": "derived_from", "source": {}, "target": {}}},
@@ -293,15 +360,24 @@ Authoring patches are JSON:
 }
 ```
 
+- `add-member` takes a complete member object (`id`, `path`, optional `manifest`/`role`);
+  `remove-member`/`move-member`/`rename-member` take the existing `id`.
+- `edit-claim` is a full-object patch of the fields present: a field that is present replaces
+  the stored value; a field that is absent is retained; `supports`/`contradicts` replace the
+  whole list when present; `id` is immutable.
+- `set-workspace` is available only through `rungraph patch`; it changes the workspace `id`,
+  `name`, `description` or `metadata` and updates nothing else. Changing the workspace `id`
+  rewrites `claim:` node IDs; a patch that renames the workspace and references a claim in the
+  same transaction refuses (do it in two patches).
 - Operations apply in order to one in-memory document; all references are validated after the
   last operation. Any refusal writes nothing.
 - `expected_sha256` must equal the loaded document bytes when the document exists; if it is
   null or missing, the command refuses when the document exists. This is a stale-byte check,
   not compare-and-swap against non-cooperating writers.
 - Lock the workspace folder before loading and hold it through the save where the host
-  supports POSIX directory `flock`; a second writer exits 2 (`BUSY`) and writes nothing. On
-  hosts without it, the existing unlock/no-serialization boundary applies and is printed by
-  `--version`-level docs, not this command.
+  supports POSIX directory `flock`; a second writer exits 2 (`BUSY`) and writes nothing. Where
+  the host has no such lock, the delivered unlocked-writer boundary applies: no `BUSY`, no
+  serialization guarantee, and the docs say so.
 - Dry-run takes no lock and writes nothing.
 - Write: stage a complete replacement in the same folder, fsync it, replace atomically, then
   remove the staging file. `init --force` backs up first; if backup fails nothing is replaced;
@@ -324,19 +400,47 @@ Exit codes:
 
 | Command | 0 | 1 | 2 |
 | --- | --- | --- | --- |
-| `discover` | listed | `--check` found errors | empty, limits, unreadable root |
+| `discover` | listed | `--check` found evidence errors | empty, limits, nested/duplicate, unreadable root |
 | `init` | written or dry-run | — | refusal, empty discovery |
 | `validate` | no errors | evidence errors | workspace or any member manifest unreadable/schema-invalid, usage |
 | `graph` | built | `--fail-on-unresolved` and unresolved | load/usage |
 | `report` | no errors | evidence errors | workspace/member load, usage |
 | `impact` | object resolves | — | object/workspace load failure |
 | `compare`/`matrix`/`leaderboard` | rendered | — | load/usage/no rows after filters |
-| `member`/`claim`/`relationship` | written or dry-run | — | refusal |
+| `member`/`claim`/`relationship`/`patch` | written or dry-run | — | refusal |
 
-`--strict` promotes warnings to exit 1 for validate and report. JSON envelopes:
-`format` (`rungraph-validate`, `rungraph-graph`, `rungraph-report`, `rungraph-compare`,
-`rungraph-impact`, `rungraph-discover`), `version: "0.1"`, `exit_code`, and the payload;
-errors use `{"format": "<command>", "version": "0.1", "error": {"code": "...", "message": "..."}, "exit_code": 2}`.
+`--strict` promotes warnings to exit 1 for validate and report. Every command with `--json`
+uses one envelope: `format: "rungraph-<command>"`, `version: "0.1"`, `exit_code`, and its
+payload. Formats: `rungraph-discover`, `rungraph-init`, `rungraph-validate`,
+`rungraph-graph`, `rungraph-report`, `rungraph-impact`, `rungraph-compare`,
+`rungraph-matrix`, `rungraph-leaderboard`, `rungraph-member`, `rungraph-claim`,
+`rungraph-relationship`, `rungraph-patch`.
+
+Payloads:
+
+- `discover`: `root`, ordered `members` (`path`, `id`, `stable`, `loads`, `schema_version`,
+  `duplicate`), `duplicates`, `errors`.
+- `init`: `path`, `members`, `backup` or null, `written`.
+- `validate`: `workspace`, per-member counts/findings, `findings`, `check_policy`
+  (`directory_artifacts`).
+- `graph`: `nodes`, `edges`, `cycles`, `unresolved`.
+- `report`: the four sections plus `check_policy` and `baseline`.
+- `impact`: `source`, `claims` (each with `path`), `unresolved`.
+- `compare`: `metric`, `rows`, `missing`, `non_numeric`, `comparability`.
+- `matrix`: `metrics`, `rows`, `cells`, `missing`, `non_numeric`, `ambiguous`.
+- `leaderboard`: `metric`, `direction`, `rows` (rank, member, run, result, value), `excluded`
+  by reason, `conditions`.
+- `member`/`claim`/`relationship`/`patch`: `changed` (a list of operations applied), `path`,
+  `dry_run`, `written`.
+
+Error envelope: `{"format": "rungraph-error", "version": "0.1", "command": "<command>",
+"error": {"code": "...", "message": "..."}, "exit_code": 2}`.
+
+`workspace-claim-unverified` is the warning for a workspace claim with no
+result/evidence/claim support target (the `uncited` state) and is not an error.
+`discovery-limit` is an error with the cap named. `BUSY` is a CLI refusal code from the
+admission lock, reported in the error envelope, not a finding.
+
 `--redact-manifest-path` replaces workspace and member paths in validate/report output.
 
 ## 11. Admission checklist
@@ -369,31 +473,45 @@ caps, ID grammar, duplicate member IDs, hardlink duplicate, case variant, `.` me
 nested member, symlinked member, manifest escaping, version refusal, claim/relationship
 round-trip, duplicate citation, duplicate relationship.
 
-Discovery: deterministic order and IDs under reordered traversal, collision suffixes,
-ignored dirs, symlinked folders, nested manifest, empty discovery, 10,001-manifest cap,
-depth-64 cap, `--check` parity with `validate`, no files created.
+Discovery: deterministic order and IDs under reordered traversal, stable IDs from an
+existing document, collision suffixes that skip taken IDs, declared member under an ignored
+folder, ignored dirs, symlinked folders, nested manifest found by the full scan, empty
+discovery, 10,001-manifest cap, depth-64 cap, `--check` parity with `validate`, metadata
+errors exit 2 with and without `--check`, no files created.
 
 Validate: a three-member workspace (generic, MLflow, TensorBoard) with missing file, changed
 value, unresolved ref, ambiguous duplicate local ID, invalid endpoint kind, cross-member
 `provenance-conflict`, and one cycle; exit codes and JSON; a member load failure alongside
 another member's evidence errors (highest code); `--redact-manifest-path`.
 
-Graph: every node/edge class, member nodes, workspace-claim nodes, unresolved nodes, a
-cross-member derived cycle, `--from`/`--depth`, DOT, `--fail-on-unresolved`.
+Graph: every node/edge class including member-declared relationships and member evidence
+citations; member nodes; workspace-claim nodes; `{"claim": ...}` citations; unresolved nodes;
+a cross-member derived cycle; a claim-to-claim cycle; `--from`/`--depth`; DOT;
+`--fail-on-unresolved`.
 
-Claims: all five states and their allowed combinations; a cited at-risk member claim; a
-claim-to-claim cycle; a contradiction-only claim; a context-only citation; an output-artifact
-break where report and impact agree; duplicate local ID refusal.
+Claims: every state and allowed combination, including `supported` + `contradiction-recorded`,
+`unresolved` + `at-risk`, context-only and contradiction-only claims; a cited at-risk member
+claim inherits its state; an evidence closure; an output-artifact break where report and
+impact agree; duplicate local ID refusal; the member-coverage mapping table; a claim with no
+subject finding.
 
-Baseline: each schema 0.1–0.10, added/removed/re-pathed members, missing baseline member,
-workspace claim/relationship edits, no `fingerprint` use.
+Baseline: each schema 0.1–0.10, canonical `data`, schema-changed member, added/removed/
+re-pathed/re-keyed members, missing baseline member, workspace claim/relationship edits,
+no `fingerprint` use.
 
 Impact/compare/matrix/leaderboard: cross-member propagation, unresolved refs, multiple runs
-per metric, ties, missing/non-numeric/non-finite, schema-unavailable pairs, `--run` filters.
+per metric, duplicate result names with distinct IDs (`--result` selection, `ambiguous` matrix
+cells), ties, missing/non-numeric/non-finite, 0.1 and 0.2 comparable pairs, schema-unavailable
+pairs, `--run` filters.
 
-Authoring: add/remove/move/rename member, add/edit/remove claim and relationship, multi-op
-patch failing at operation N writes nothing, stale bytes, lock refusal, dry-run, backup
-failure, replace failure, post-replace cleanup failure, two `init` runs at once.
+Authoring: add/remove/move/rename member through the convenience flags; `rungraph patch` with
+mixed operations and `set-workspace`; `edit-claim` merge/replace semantics; every operation
+kind; a multi-op patch failing at operation N writes nothing; stale bytes; lock refusal;
+dry-run; backup failure; replace failure; post-replace cleanup failure; two `init` runs at
+once; a patch that renames the workspace while citing a claim refuses.
+
+JSON: every `--json` route emits its named envelope and payload; the error envelope is
+`rungraph-error` with `command`; `--strict` and exit codes match §10.
 
 Read-only commands create no files (folder tree before/after). `runevidence --help` and golden
 output unchanged. Full suite on 3.12 and 3.10/pydantic 2.6; wheel smoke with both scripts.
