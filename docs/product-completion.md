@@ -121,7 +121,7 @@ with the qualification record). Two qualifiers are defined as follows:
 | F1 | MLflow summary freshness (RE-10) | IN_PROGRESS | accepting changed MLflow bytes must not leave a recorded summary silently stale: `validate` verifies the summary against the file, and `rehash` refreshes it. The current NOTE reports that no re-read happened; it does not establish freshness. P0-1 requires this to reach `COMPLETE` | reproduced as a `validate --strict` exit 0 with a stale value |
 | F2 | MLflow metric memory (ML-1) | IN_PROGRESS | metric histories are read under a declared byte and row cap and an oversized history has a defined outcome. P0-2 requires this to reach `COMPLETE` | the adapter reads the whole file today |
 | F3 | Writer concurrency | BOUNDED | cooperative serialization where supported, and the exclusion is explicit everywhere else | documented limitation |
-| F4 | Resource and depth limits | VERIFIED | every scanner has a declared cap, and removing the cap makes a named test fail | `tests/test_tensorboard_tensors.py::test_one_million_elements_is_the_boundary`, `::test_sixteen_mib_summary_of_millions_of_empty_tensor_spans_stays_bounded`, `tests/test_tensorboard_events.py::test_varint_bounds_are_refused`, `tests/test_csv_profile.py` |
+| F4 | Resource and depth limits | VERIFIED | every scanner except the MLflow metric reader (F2) has a declared cap, and removing the cap makes a named test fail | `tests/test_tensorboard_tensors.py::test_one_million_elements_is_the_boundary`, `::test_sixteen_mib_summary_of_millions_of_empty_tensor_spans_stays_bounded`, `tests/test_csv_profile.py::test_columns_at_cap_and_one_over`, `::test_rows_at_cap_and_one_over` (the 16 MiB memory test is skipped on non-Linux hosts) |
 
 ---
 
