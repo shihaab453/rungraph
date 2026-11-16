@@ -18,14 +18,15 @@ schema it needs. Schemas 0.1–0.4 and their behavior are untouched.
 | `--include-images` | legacy `Summary.Image` | 0.8 | `tensorboard-image` | digest reference |
 | `--include-audio` | legacy `Summary.Audio` | 0.8 | `tensorboard-audio` | digest reference |
 | `--include-tensors` | numeric `TensorProto` | 0.9 | `tensorboard-tensor` | digest reference |
+| `--include-tf2-media` | TF2 image/audio string tensors | 0.10 | `tensorboard-tf2-image`, `tensorboard-tf2-audio` | digest reference per element |
 
-Precedence: tensors → 0.9, media → 0.8, histograms → 0.7, strings → 0.6, else
-0.5. Flags combine; the manifest carries only the kinds actually requested.
+Precedence: TF2 media → 0.10, tensors → 0.9, media → 0.8, histograms → 0.7,
+strings → 0.6, else 0.5. Flags combine; the manifest carries only the kinds actually requested.
 
 ```bash
 runevidence init logs/ --adapter tensorboard \
   --include-strings --include-histograms \
-  --include-images --include-audio --include-tensors
+  --include-images --include-audio --include-tensors --include-tf2-media
 runevidence validate logs/
 runevidence inspect logs/
 ```
@@ -54,6 +55,8 @@ non-scalar tags are skipped in both cases.
 - **Images and audio (0.8):** digest-only references. PNG images carry verified
   IHDR width/height; RIFF/WAVE audio carries the byte length. The bytes stay in
   the event file and `validate` re-hashes them.
+- **TF2 media (0.10):** `tf.summary.image`/`audio` string tensors, `[2+k]` images
+  with verified width/height and `[k,2]` audio with labels, one digest per element.
 - **Tensors (0.9):** float32/float64/int32/int64 arrays as canonical digests
   (dtype, shape, element count, SHA-256). Content and typed writer forms hash
   equally; int32 uses the low 32 bits; NaN payloads and `-0.0` are preserved.
@@ -81,6 +84,8 @@ and so on.
 | Histogram buckets | 1,024 |
 | Histogram JSON / media payload | 16 MiB |
 | Tensor dimensions / elements | 8 / 1,000,000 |
+| TF2 media payloads per entry | 64 |
+| TF2 media label | 4,096 bytes (not stored) |
 
 Tensor payloads and media references add no manifest budget of their own; the
 shared 10,000-result and tag limits bound them.
@@ -112,9 +117,9 @@ be marked `--volatile`.
 
 ## Deliberate limits
 
-- TF2 `tf.summary.image`/`tf.summary.audio` string tensors and TF2 `[k,3]`
-  histogram tensors are not interpreted specially; `[k,3]` histograms are
-  recorded as plain tensors when `--include-tensors` is on.
+- TF2 `tf.summary.image`/`tf.summary.audio` are read under
+  `--include-tf2-media` (0.10). TF2 `[k,3]` histogram tensors are recorded as
+  plain tensors when `--include-tensors` is on.
 - Graph definitions, run metadata and plugin-specific payloads are not results.
 - No arrays or media bytes are inlined; nothing is extracted.
 - Exact comparison only; there is no tolerance, statistical or distributional
@@ -127,4 +132,5 @@ be marked `--volatile`.
 - [Schema 0.7 histograms](schema-0.7-tensorboard-histograms.md)
 - [Schema 0.8 media](schema-0.8-tensorboard-media.md)
 - [Schema 0.9 tensors](schema-0.9-tensorboard-tensors.md)
+- [Schema 0.10 TF2 media](schema-0.10-tf2-media.md)
 - [Adapter guide](adapters.md)

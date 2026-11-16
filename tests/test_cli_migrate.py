@@ -307,7 +307,7 @@ def test_second_invocation_is_idempotent(tmp_path):
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("target", ["0.1", "0.10", "", "1.0", "0.2.0"])
+@pytest.mark.parametrize("target", ["0.1.0", "0.11", "", "1.0", "0.2.0"])
 def test_unsupported_target_refused_without_touching_anything(tmp_path, target):
     folder = tmp_path / CANARY_PATH
     path = write_manifest(folder)

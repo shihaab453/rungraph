@@ -2860,3 +2860,704 @@ def scan_tensorboard_09(
         _media_results(audio_states),
         _media_results(tensor_states),
     )
+
+
+# --- Schema 0.10: TF2 image/audio string tensors -----------------------------
+
+MAX_TF2_ELEMENTS = 64
+_TF2_RETAIN = 128
+_TF2_LABEL_BYTES = 4096
+_TF2_DIGITS_BYTES = 32
+_TF2_SIGNIFICANT_DIGITS = 5
+
+
+@dataclass(slots=True)
+class _Tf2State:
+    dtype: int = 0
+    dim_count: int = 0
+    dims: list[int] | None = None
+    dim_failed: bool = False
+    unknown_rank: bool = False
+    content_nonempty: bool = False
+    typed_field: bool = False
+    wrong_wire: bool = False
+    strings: list[tuple[int, int]] | None = None
+    string_count: int = 0
+    failed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Tf2MediaRecord:
+    tag: bytes
+    step: int
+    kind: str
+    elements: tuple[tuple[int, dict], ...]
+
+
+def _merge_tf2_shape_v10(data, start, end, state) -> None:
+    position = start
+    while position < end:
+        field_number, wire_type, position = _read_key(data, position, end)
+        if field_number == 2:
+            if wire_type != 2:
+                _refuse()
+            dim_start, dim_end = _read_length(data, position, end)
+            size = _parse_tensor_dim_v09(data, dim_start, dim_end)
+            if size is None:
+                _refuse()
+            if state.dim_count < 8:
+                if state.dims is None:
+                    state.dims = []
+                state.dims.append(size)
+            else:
+                state.dim_failed = True
+            state.dim_count += 1
+            position = dim_end
+        elif field_number == 3:
+            if wire_type != 0:
+                _refuse()
+            value, position = _read_varint(data, position, end)
+            state.unknown_rank = value != 0
+        else:
+            position = _skip_field(data, position, end, wire_type)
+
+
+def _merge_tf2_tensor(data, start, end, state) -> None:
+    position = start
+    while position < end:
+        field_number, wire_type, position = _read_key(data, position, end)
+        if field_number == 1:
+            if wire_type != 0:
+                _refuse()
+            state.dtype, position = _read_varint(data, position, end)
+        elif field_number == 2:
+            if wire_type != 2:
+                _refuse()
+            shape_start, shape_end = _read_length(data, position, end)
+            _merge_tf2_shape_v10(data, shape_start, shape_end, state)
+            position = shape_end
+        elif field_number == 4:
+            if wire_type != 2:
+                _refuse()
+            content_start, content_end = _read_length(data, position, end)
+            if content_end > content_start:
+                state.content_nonempty = True
+            position = content_end
+        elif field_number == 8:
+            if wire_type == 2:
+                value_start, value_end = _read_length(data, position, end)
+                if state.string_count < _TF2_RETAIN:
+                    if state.strings is None:
+                        state.strings = []
+                    state.strings.append((value_start, value_end))
+                else:
+                    state.failed = True
+                state.string_count += 1
+                position = value_end
+            elif wire_type in (0, 1, 5):
+                state.wrong_wire = True
+                position = _skip_field(data, position, end, wire_type)
+            else:
+                _refuse()
+        elif field_number in (5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18):
+            if wire_type == 2:
+                value_start, value_end = _read_length(data, position, end)
+                if value_end > value_start:
+                    state.typed_field = True
+                position = value_end
+            elif wire_type in (0, 1, 5):
+                state.typed_field = True
+                position = _skip_field(data, position, end, wire_type)
+            else:
+                _refuse()
+        else:
+            position = _skip_field(data, position, end, wire_type)
+
+
+def _parse_tf2_dimension_text(data, start, end):
+    length = end - start
+    if length == 0 or length > _TF2_DIGITS_BYTES:
+        return None
+    raw = bytes(data[start:end])
+    if not raw.isdigit():
+        return None
+    significant = raw.lstrip(b"0") or b"0"
+    if len(significant) > _TF2_SIGNIFICANT_DIGITS:
+        return None
+    value = int(significant)
+    if not (1 <= value <= 65_535):
+        return None
+    return value
+
+
+def _finalize_tf2(data, state):
+    """Return (kind, [(element, value)]) or None for a failing entry."""
+    if (
+        state.failed
+        or state.dtype != 7
+        or state.unknown_rank
+        or state.dim_failed
+        or state.content_nonempty
+        or state.typed_field
+        or state.wrong_wire
+        or state.dims is None
+    ):
+        return None
+    dims = state.dims
+    strings = state.strings or []
+    if len(strings) != state.string_count:
+        return None
+    if len(dims) == 1:
+        total = dims[0]
+        if not (3 <= total <= 2 + MAX_TF2_ELEMENTS) or total != len(strings):
+            return None
+        width = _parse_tf2_dimension_text(data, *strings[0])
+        height = _parse_tf2_dimension_text(data, *strings[1])
+        if width is None or height is None:
+            return None
+        elements: list[tuple[int, dict]] = []
+        for index in range(2, total):
+            payload_start, payload_end = strings[index]
+            image = _ImageState(
+                present=True,
+                wire_width=width,
+                wire_height=height,
+                encoded=(payload_start, payload_end),
+            )
+            value = _finalize_image(data, image)
+            if value is None:
+                return None
+            elements.append((index - 2, value))
+        return "image", tuple(elements)
+    if len(dims) == 2 and dims[1] == 2:
+        count = dims[0]
+        if not (1 <= count <= MAX_TF2_ELEMENTS) or len(strings) != count * 2:
+            return None
+        elements = []
+        for row in range(count):
+            payload_start, payload_end = strings[row * 2]
+            label_start, label_end = strings[row * 2 + 1]
+            if label_end - label_start > _TF2_LABEL_BYTES:
+                return None
+            audio = _AudioState(
+                present=True,
+                encoded=(payload_start, payload_end),
+            )
+            value = _finalize_audio(data, audio)
+            if value is None:
+                return None
+            elements.append((row, value))
+        return "audio", tuple(elements)
+    return None
+
+
+def _parse_value_10(data, start, end, step):
+    tag_start = -1
+    tag_end = -1
+    kind = 0
+    simple_value = 0.0
+    tensor_restart = start
+    hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+    hist_limits: list[float] = []
+    hist_counts: list[float] = []
+    hist_present = False
+    hist_failed = False
+    image = _ImageState()
+    audio = _AudioState()
+    digest = _TensorDigestState()
+    tf2 = _Tf2State()
+    tf2_present = False
+    position = start
+    while position < end:
+        field_number, wire_type, position = _read_key(data, position, end)
+        if field_number == 1:
+            if wire_type != 2:
+                _refuse()
+            tag_start, tag_end = _read_length(data, position, end)
+            position = tag_end
+        elif field_number == 2:
+            if wire_type != 5 or end - position < 4:
+                _refuse()
+            simple_value = _F32.unpack_from(data, position)[0]
+            kind = 2
+            tensor_restart = position + 4
+            hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+            hist_limits = []
+            hist_counts = []
+            hist_present = False
+            hist_failed = False
+            image = _ImageState()
+            audio = _AudioState()
+            digest = _TensorDigestState()
+            tf2 = _Tf2State()
+            tf2_present = False
+            position += 4
+        elif field_number in (3, 5):
+            if wire_type != 2:
+                _refuse()
+            payload_start, payload_end = _read_length(data, position, end)
+            kind = field_number
+            tensor_restart = payload_end
+            hist_present = field_number == 5
+            if field_number != 5:
+                hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+                hist_limits = []
+                hist_counts = []
+                hist_failed = False
+            elif not hist_failed:
+                hist_values, hist_limits, hist_counts, ok = _decode_histogram_part(
+                    data,
+                    payload_start,
+                    payload_end,
+                    hist_values,
+                    hist_limits,
+                    hist_counts,
+                )
+                hist_failed = not ok
+            image = _ImageState()
+            audio = _AudioState()
+            digest = _TensorDigestState()
+            tf2 = _Tf2State()
+            tf2_present = False
+            position = payload_end
+        elif field_number == 4:
+            if wire_type != 2:
+                _refuse()
+            payload_start, payload_end = _read_length(data, position, end)
+            kind = 4
+            tensor_restart = payload_end
+            image.present = True
+            if not image.failed:
+                image.failed = not _decode_image_part(
+                    data, payload_start, payload_end, image
+                )
+            hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+            hist_limits = []
+            hist_counts = []
+            hist_present = False
+            hist_failed = False
+            audio = _AudioState()
+            digest = _TensorDigestState()
+            tf2 = _Tf2State()
+            tf2_present = False
+            position = payload_end
+        elif field_number == 6:
+            if wire_type != 2:
+                _refuse()
+            payload_start, payload_end = _read_length(data, position, end)
+            kind = 6
+            tensor_restart = payload_end
+            audio.present = True
+            if not audio.failed:
+                audio.failed = not _decode_audio_part(
+                    data, payload_start, payload_end, audio
+                )
+            hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+            hist_limits = []
+            hist_counts = []
+            hist_present = False
+            hist_failed = False
+            image = _ImageState()
+            digest = _TensorDigestState()
+            tf2 = _Tf2State()
+            tf2_present = False
+            position = payload_end
+        elif field_number == 7:
+            if wire_type != 2:
+                _refuse()
+            _, position = _read_length(data, position, end)
+        elif field_number == 8:
+            if wire_type != 2:
+                _refuse()
+            tensor_start, tensor_end = _read_length(data, position, end)
+            kind = 8
+            tf2_present = True
+            _merge_tensor_v09(data, tensor_start, tensor_end, digest)
+            _merge_tf2_tensor(data, tensor_start, tensor_end, tf2)
+            hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+            hist_limits = []
+            hist_counts = []
+            hist_present = False
+            hist_failed = False
+            image = _ImageState()
+            audio = _AudioState()
+            position = tensor_end
+        elif field_number == 9:
+            if wire_type != 2:
+                _refuse()
+            _, position = _read_length(data, position, end)
+        else:
+            position = _skip_field(data, position, end, wire_type)
+    tensor = None
+    if kind == 8:
+        tensor = _TensorState()
+        _scan_tensor_region(data, tensor_restart, end, tensor, strings=True)
+    hist = _MediaResult(
+        hist_present,
+        _finalize_histogram(hist_values, hist_limits, hist_counts, hist_failed)
+        if hist_present
+        else None,
+    )
+    image_result = _MediaResult(
+        image.present, _finalize_image(data, image) if image.present else None
+    )
+    audio_result = _MediaResult(
+        audio.present, _finalize_audio(data, audio) if audio.present else None
+    )
+    tensor_value = _finalize_tensor_v09(data, digest) if kind == 8 else None
+    tf2_result = _finalize_tf2(data, tf2) if tf2_present else None
+    return (
+        tag_start,
+        tag_end,
+        step,
+        kind,
+        simple_value,
+        tensor,
+        hist,
+        image_result,
+        audio_result,
+        tensor_value,
+        tf2_present,
+        tf2_result,
+    )
+
+
+def _iter_summary_values_10(data, start, end, step):
+    position = start
+    while position < end:
+        field_number, wire_type, position = _read_key(data, position, end)
+        if field_number == 1:
+            if wire_type != 2:
+                _refuse()
+            value_start, value_end = _read_length(data, position, end)
+            yield _parse_value_10(data, value_start, value_end, step)
+            position = value_end
+        else:
+            position = _skip_field(data, position, end, wire_type)
+
+
+def _iter_winning_summaries_10(data, start, end, step):
+    position = start
+    while position < end:
+        field_number, wire_type, position = _read_key(data, position, end)
+        if field_number == 5:
+            if wire_type != 2:
+                _refuse()
+            summary_start, summary_end = _read_length(data, position, end)
+            yield from _iter_summary_values_10(data, summary_start, summary_end, step)
+            position = summary_end
+        else:
+            position = _skip_field(data, position, end, wire_type)
+
+
+def _iter_event_values_10(data, start, end):
+    step = 0
+    what = 0
+    last_other_end = start
+    summary_bytes = 0
+    position = start
+    while position < end:
+        field_number, wire_type, position = _read_key(data, position, end)
+        if field_number == 1:
+            if wire_type != 1 or end - position < 8:
+                _refuse()
+            position += 8
+        elif field_number == 2:
+            if wire_type != 0:
+                _refuse()
+            raw, position = _read_varint(data, position, end)
+            step = _signed_int64(raw)
+        elif 3 <= field_number <= 9:
+            if wire_type != 2:
+                _refuse()
+            payload_start, payload_end = _read_length(data, position, end)
+            if field_number == 5:
+                what = 5
+                summary_bytes += payload_end - payload_start
+            else:
+                what = field_number
+                last_other_end = payload_end
+                summary_bytes = 0
+            position = payload_end
+        else:
+            position = _skip_field(data, position, end, wire_type)
+    if what != 5:
+        return
+    if summary_bytes > MAX_SUMMARY_BYTES:
+        _refuse()
+    yield from _iter_winning_summaries_10(data, last_other_end, end, step)
+
+
+def _iter_winning_values_10(data):
+    for payload_start, payload_end in _iter_records(data):
+        yield from _iter_event_values_10(data, payload_start, payload_end)
+
+
+def iter_supported_summaries_10(data):
+    """Yield every supported 0.10 summary in file order."""
+    for (
+        tag_start,
+        tag_end,
+        step,
+        kind,
+        simple_value,
+        tensor,
+        hist,
+        image,
+        audio,
+        tensor_value,
+        tf2_present,
+        tf2_result,
+    ) in _iter_winning_values_10(data):
+        tag = _tag_bytes(data, tag_start, tag_end)
+        category, value, float32 = _classify(data, kind, simple_value, tensor)
+        if category == _SUPPORTED:
+            yield ScalarRecord(tag=tag, step=step, value=value, float32=float32)
+        string_category, raw = _classify_string(data, kind, tensor)
+        if string_category == _STRING_SUPPORTED:
+            yield StringRecord(tag=tag, step=step, value=raw)
+        if kind == 5 and hist.present and hist.value is not None:
+            yield HistogramRecord(tag=tag, step=step, value=hist.value)
+        if kind == 4 and image.present and image.value is not None:
+            yield ImageRecord(tag=tag, step=step, value=image.value)
+        if kind == 6 and audio.present and audio.value is not None:
+            yield AudioRecord(tag=tag, step=step, value=audio.value)
+        if kind == 8 and tensor_value is not None:
+            if category != _SUPPORTED and string_category != _STRING_SUPPORTED:
+                yield TensorRecord(tag=tag, step=step, value=tensor_value)
+        if kind == 8 and tf2_result is not None:
+            tf2_kind, elements = tf2_result
+            if category != _SUPPORTED and string_category != _STRING_SUPPORTED:
+                yield Tf2MediaRecord(
+                    tag=tag,
+                    step=step,
+                    kind="tf2-image" if tf2_kind == "image" else "tf2-audio",
+                    elements=elements,
+                )
+
+
+@dataclass(slots=True)
+class _Tf2RequestState:
+    supported: int = 0
+    values: dict[tuple[int, int], dict] | None = None
+    wanted: set[tuple[int, int]] | None = None
+    unsupported: bool = False
+    non_scalar: bool = False
+
+
+def _normalise_tf2_requests(requests):
+    """Return {(tag, step): state} for four-tuple TF2 requests."""
+    states: dict[tuple[bytes, int], _Tf2RequestState] = {}
+    for tag, step, occurrence, element in requests:
+        key = (tag, step)
+        state = states.get(key)
+        if state is None:
+            state = _Tf2RequestState(values={}, wanted=set())
+            states[key] = state
+        state.wanted.add((occurrence, element))
+    return states
+
+
+def _tf2_results(states, requests):
+    results = {}
+    for tag, step, occurrence, element in requests:
+        state = states[(tag, step)]
+        if state.supported > occurrence:
+            value = state.values.get((occurrence, element))
+            if value is None:
+                results[(tag, step, occurrence, element)] = MediaSelection(
+                    ScalarOutcome.mismatch
+                )
+            else:
+                results[(tag, step, occurrence, element)] = MediaSelection(
+                    ScalarOutcome.value, value
+                )
+        elif state.supported:
+            results[(tag, step, occurrence, element)] = MediaSelection(
+                ScalarOutcome.mismatch
+            )
+        elif state.unsupported:
+            results[(tag, step, occurrence, element)] = MediaSelection(
+                ScalarOutcome.unsupported_scalar
+            )
+        elif state.non_scalar:
+            results[(tag, step, occurrence, element)] = MediaSelection(
+                ScalarOutcome.unsupported_value
+            )
+        else:
+            results[(tag, step, occurrence, element)] = MediaSelection(
+                ScalarOutcome.mismatch
+            )
+    return results
+
+
+def scan_tensorboard_10(
+    data,
+    scalar_requests,
+    string_requests,
+    histogram_requests,
+    image_requests,
+    audio_requests,
+    tensor_requests,
+    tf2_image_requests,
+    tf2_audio_requests,
+):
+    """Select every 0.10 request kind in one traversal.
+
+    The five delivered TensorBoard kinds and numeric tensors keep their 0.5-0.9
+    ladders; the two TF2 kinds use the entry/element table from the RFC.
+    """
+    scalar_states, scalar_by_tag, scalar_lengths = _normalise_requests(scalar_requests)
+    string_states, string_by_tag, string_lengths = _normalise_requests(string_requests)
+    hist_states, hist_by_tag, hist_lengths = _normalise_requests(histogram_requests)
+    image_states, image_by_tag, image_lengths = _normalise_requests(image_requests)
+    audio_states, audio_by_tag, audio_lengths = _normalise_requests(audio_requests)
+    tensor_states, tensor_by_tag, tensor_lengths = _normalise_requests(tensor_requests)
+    tf2_image_states = _normalise_tf2_requests(tf2_image_requests)
+    tf2_audio_states = _normalise_tf2_requests(tf2_audio_requests)
+    if not (
+        scalar_states
+        or string_states
+        or hist_states
+        or image_states
+        or audio_states
+        or tensor_states
+        or tf2_image_states
+        or tf2_audio_states
+    ):
+        return {}, {}, {}, {}, {}, {}, {}, {}
+
+    for (
+        tag_start,
+        tag_end,
+        step,
+        kind,
+        simple_value,
+        tensor,
+        hist,
+        image,
+        audio,
+        tensor_value,
+        tf2_present,
+        tf2_result,
+    ) in _iter_winning_values_10(data):
+        tag_length = 0 if tag_start < 0 else tag_end - tag_start
+        tag = b"" if tag_start < 0 else data[tag_start:tag_end]
+        if type(tag) is not bytes:
+            tag = bytes(tag)
+        category = None
+        string_category = None
+
+        scalar_state = None
+        if tag_length in scalar_lengths:
+            by_step = scalar_by_tag.get(tag)
+            if by_step is not None:
+                scalar_state = by_step.get(step)
+        if scalar_state is not None:
+            category, value, float32 = _classify(data, kind, simple_value, tensor)
+            if category == _SUPPORTED:
+                occurrence = scalar_state.supported
+                scalar_state.supported += 1
+                if occurrence in scalar_state.wanted:
+                    scalar_state.values[occurrence] = (value, float32)
+            elif category == _UNSUPPORTED_SCALAR:
+                scalar_state.unsupported = True
+            else:
+                scalar_state.non_scalar = True
+
+        string_state = None
+        if tag_length in string_lengths:
+            by_step = string_by_tag.get(tag)
+            if by_step is not None:
+                string_state = by_step.get(step)
+        if string_state is not None:
+            string_category, raw = _classify_string(data, kind, tensor)
+            if string_category == _STRING_SUPPORTED:
+                occurrence = string_state.supported
+                string_state.supported += 1
+                if occurrence in string_state.wanted:
+                    string_state.values[occurrence] = raw
+            elif string_category == _STRING_FAILING:
+                string_state.unsupported = True
+            else:
+                string_state.non_scalar = True
+
+        for states_by_tag, lengths, field_kind, result in (
+            (hist_by_tag, hist_lengths, 5, hist),
+            (image_by_tag, image_lengths, 4, image),
+            (audio_by_tag, audio_lengths, 6, audio),
+        ):
+            state = None
+            if tag_length in lengths:
+                by_step = states_by_tag.get(tag)
+                if by_step is not None:
+                    state = by_step.get(step)
+            if state is None:
+                continue
+            if kind == field_kind and result.present:
+                if result.value is not None:
+                    occurrence = state.supported
+                    state.supported += 1
+                    if occurrence in state.wanted:
+                        state.values[occurrence] = result.value
+                else:
+                    state.unsupported = True
+            else:
+                state.non_scalar = True
+
+        tensor_state = None
+        if tag_length in tensor_lengths:
+            by_step = tensor_by_tag.get(tag)
+            if by_step is not None:
+                tensor_state = by_step.get(step)
+        if tensor_state is not None:
+            if kind != 8:
+                tensor_state.non_scalar = True
+            else:
+                if category is None:
+                    category, _, _ = _classify(data, kind, simple_value, tensor)
+                if string_category is None:
+                    string_category, _ = _classify_string(data, kind, tensor)
+                if category == _SUPPORTED or string_category == _STRING_SUPPORTED:
+                    tensor_state.non_scalar = True
+                elif tensor_value is not None:
+                    occurrence = tensor_state.supported
+                    tensor_state.supported += 1
+                    if occurrence in tensor_state.wanted:
+                        tensor_state.values[occurrence] = tensor_value
+                else:
+                    tensor_state.unsupported = True
+
+        for states, requested_kind, expected_kind in (
+            (tf2_image_states, "image", "tf2-image"),
+            (tf2_audio_states, "audio", "tf2-audio"),
+        ):
+            if not states:
+                continue
+            state = states.get((tag, step))
+            if state is None:
+                continue
+            if kind != 8:
+                state.non_scalar = True
+                continue
+            if tf2_result is not None and tf2_result[0] == requested_kind:
+                occurrence = state.supported
+                state.supported += 1
+                for element, value in tf2_result[1]:
+                    if (occurrence, element) in state.wanted:
+                        state.values[(occurrence, element)] = value
+            elif tf2_present:
+                state.unsupported = True
+            else:
+                state.non_scalar = True
+
+    return (
+        _scalar_results(scalar_states),
+        _string_results(string_states),
+        _media_results(hist_states),
+        _media_results(image_states),
+        _media_results(audio_states),
+        _media_results(tensor_states),
+        _tf2_results(tf2_image_states, tf2_image_requests),
+        _tf2_results(tf2_audio_states, tf2_audio_requests),
+    )

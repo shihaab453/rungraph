@@ -957,7 +957,7 @@ def test_surrogate_path_is_refused_before_any_read(tmp_path):
 
 
 def test_duplicate_generated_result_name_is_refused(tmp_path, monkeypatch):
-    monkeypatch.setattr(adapter_module, "_name_digest", lambda artifact_id, occurrence, kind="scalar": "0" * 16)
+    monkeypatch.setattr(adapter_module, "_name_digest", lambda artifact_id, occurrence, kind="scalar", element=0: "0" * 16)
     root = tmp_path / "experiment"
     _write(
         root / "logs" / "a.tfevents",
@@ -3344,4 +3344,138 @@ def test_09_manifest_refuses_forced_regeneration(tmp_path, capsys):
     before = (root / MANIFEST_FILENAME).read_bytes()
     assert main(["init", str(root), "--adapter", "tensorboard", "--force"]) == 2
     assert cli_module.INIT_0_9_REFUSAL in capsys.readouterr().out
+    assert (root / MANIFEST_FILENAME).read_bytes() == before
+
+
+# --- Schema 0.10 TF2 media --------------------------------------------------
+
+
+def _tf2_png(width=8, height=8, body=b"\x01"):
+    import zlib as _zlib
+
+    def chunk(kind, data):
+        return (
+            struct.pack(">I", len(data))
+            + kind
+            + data
+            + struct.pack(">I", _zlib.crc32(kind + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", body)
+        + chunk(b"IEND", b"")
+    )
+
+
+def _tf2_image_tensor(payloads):
+    parts = [_varint_field(1, 7), _bytes_field(2, _tf2_shape(2 + len(payloads)))]
+    parts.append(_bytes_field(8, b"8"))
+    parts.append(_bytes_field(8, b"8"))
+    parts.extend(_bytes_field(8, payload) for payload in payloads)
+    return b"".join(parts)
+
+
+def _tf2_shape(*dims):
+    return b"".join(_bytes_field(2, _varint_field(1, d)) for d in dims)
+
+
+def _tf2_audio_tensor(rows):
+    parts = [_varint_field(1, 7), _bytes_field(2, _tf2_shape(len(rows), 2))]
+    for payload, label in rows:
+        parts.append(_bytes_field(8, payload))
+        parts.append(_bytes_field(8, label))
+    return b"".join(parts)
+
+
+def test_include_tf2_media_writes_schema_10_with_elements(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    payloads = (_tf2_png(), _tf2_png(body=b"\x02"))
+    _write(
+        root / "run" / "e.tfevents",
+        _records(_event(step=0, summary_bytes=_summary(_value(b"samples", tensor_bytes=_tf2_image_tensor(payloads))))),
+    )
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tf2-media"]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.10"
+    locators = [result["locator"] for result in document["results"]]
+    assert [locator["element"] for locator in locators] == [0, 1]
+    assert all(locator["kind"] == "tensorboard-tf2-image" for locator in locators)
+    names = [result["name"] for result in document["results"]]
+    assert names == ["samples @ 0 (tf2 image) element 0", "samples @ 0 (tf2 image) element 1"]
+    assert main(["validate", str(root)]) == 0
+    capsys.readouterr()
+
+
+def test_tf2_audio_elements_and_compact_display(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    rows = ((_media_wav(), b"clip"), (_media_wav(b"\x00\x00" * 2), b""))
+    _write(
+        root / "run" / "e.tfevents",
+        _records(_event(step=1, summary_bytes=_summary(_value(b"clip", tensor_bytes=_tf2_audio_tensor(rows))))),
+    )
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tf2-media"]) == 0
+    capsys.readouterr()
+    assert main(["inspect", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "audio(wav," in out
+    assert "tensorboard-tf2-audio" not in out
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert [r["locator"]["element"] for r in document["results"]] == [0, 1]
+
+
+def test_tf2_checker_mismatch_and_element_missing(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(
+        root / "run" / "e.tfevents",
+        _records(_event(step=0, summary_bytes=_summary(_value(b"samples", tensor_bytes=_tf2_image_tensor((_tf2_png(),)))))),
+    )
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tf2-media"]) == 0
+    capsys.readouterr()
+    path = root / MANIFEST_FILENAME
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["results"][0]["value"]["sha256"] = "b" * 64
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert main(["validate", str(root)]) == 1
+    out = capsys.readouterr().out
+    assert "does not match the recorded value" in out
+    assert "tensorboard-tf2-image:step=0,occurrence=0,element=0" in out
+
+    document["results"][0]["value"]["sha256"] = "a" * 64
+    document["results"][0]["locator"]["element"] = 1
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert main(["validate", str(root)]) == 1
+    assert "was not found" in capsys.readouterr().out
+
+
+def test_tf2_budget_and_capability(tmp_path, capsys):
+    from runevidence_tensorboard import adapter as adapter_module
+
+    def message(**flags):
+        return adapter_module._budget_message(adapter_module._State(None, **flags))
+
+    assert message(include_tf2_media=True) == adapter_module.BUDGET_MESSAGE_08
+
+    root = tmp_path / "experiment"
+    _write(root / "metrics.json", b"{}")
+    assert main(["init", str(root), "--adapter", "generic", "--include-tf2-media"]) == 2
+    assert "does not support --include-tf2-media" in capsys.readouterr().out
+
+
+def test_init_force_refuses_an_existing_10_manifest(tmp_path, capsys):
+    from runevidence import cli as cli_module
+
+    root = tmp_path / "experiment"
+    _write(
+        root / "run" / "e.tfevents",
+        _records(_event(step=0, summary_bytes=_summary(_value(b"samples", tensor_bytes=_tf2_image_tensor((_tf2_png(),)))))),
+    )
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tf2-media"]) == 0
+    capsys.readouterr()
+    before = (root / MANIFEST_FILENAME).read_bytes()
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tf2-media", "--force"]) == 2
+    assert cli_module.INIT_0_10_REFUSAL in capsys.readouterr().out
     assert (root / MANIFEST_FILENAME).read_bytes() == before

@@ -70,6 +70,11 @@ outputs are unchanged.
 
 ## Histograms (schema 0.7)
 
+`init --include-tf2-media` also records TensorFlow 2 image and audio summaries:
+`tf.summary.image` writes `[width, height, png…]` and `tf.summary.audio` writes
+`[k, 2]` string tensors. Each payload becomes a schema 0.10 `tensorboard-tf2-image`
+or `tensorboard-tf2-audio` result with an `element` index.
+
 `init --include-tensors` also records numeric `Summary.Value.tensor` payloads as
 schema 0.9 `tensorboard-tensor` results: dtype, shape, element count and a
 canonical SHA-256, never the array itself. `--tags` matches tensor tags too.
