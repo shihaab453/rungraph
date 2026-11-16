@@ -66,16 +66,7 @@ from .models import (
 
 # Comparability is defined on the 0.1/0.2 recorded-condition projections.
 # Every later schema refuses rather than compare silently.
-_UNSUPPORTED_COMPARABILITY_SCHEMAS = (
-    SCHEMA_VERSION_0_3,
-    SCHEMA_VERSION_0_4,
-    SCHEMA_VERSION_0_5,
-    SCHEMA_VERSION_0_6,
-    SCHEMA_VERSION_0_7,
-    SCHEMA_VERSION_0_8,
-    SCHEMA_VERSION_0_9,
-    SCHEMA_VERSION_0_10,
-)
+_UNSUPPORTED_COMPARABILITY_SCHEMAS: tuple[str, ...] = ()
 
 __all__ = [
     "APPLICATION_STATUS",
@@ -613,11 +604,6 @@ def compare_paths(
     except Exception:
         return _internal_error()
 
-    if baseline_loaded.manifest.schema_version in _UNSUPPORTED_COMPARABILITY_SCHEMAS:
-        return _error_outcome(UNSUPPORTED_VERSION, "baseline")
-    if target_loaded.manifest.schema_version in _UNSUPPORTED_COMPARABILITY_SCHEMAS:
-        return _error_outcome(UNSUPPORTED_VERSION, "target")
-
     try:
         projection = bridge.compare_recorded_conditions(
             baseline_loaded,
@@ -903,11 +889,6 @@ def preflight_paths(
     target_loaded = _load_for_preflight(target, "target")
     if isinstance(target_loaded, PreflightOutcome):
         return target_loaded
-
-    if baseline_loaded.manifest.schema_version in _UNSUPPORTED_COMPARABILITY_SCHEMAS:
-        return _preflight_failure(EXIT_UNAVAILABLE, UNSUPPORTED_VERSION, "baseline")
-    if target_loaded.manifest.schema_version in _UNSUPPORTED_COMPARABILITY_SCHEMAS:
-        return _preflight_failure(EXIT_UNAVAILABLE, UNSUPPORTED_VERSION, "target")
 
     if baseline_result_id is None:
         return _preflight_list_outcome(baseline_loaded, target_loaded)

@@ -1,4 +1,4 @@
-"""Author recorded run conditions on an existing schema 0.2 manifest.
+"""Author recorded run conditions on an existing schema 0.2-0.10 manifest.
 
 This module is the core transformation of the ``conditions`` command. It owns
 one validated load, one bounded patch read from a local file or binary stdin,
@@ -60,7 +60,7 @@ MAX_ABS_FLOAT = 1e100
 MAX_CONTAINER_WIDTH = 128
 MAX_NODES = 4096
 
-TARGET_VERSION = "0.2"
+SUPPORTED_VERSIONS = ("0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10")
 
 # Fixed field order: operation order, new-child order and result array order.
 FIELDS: tuple[str, ...] = (
@@ -204,8 +204,7 @@ def _author_conditions(
     except (ManifestLoadError, OSError, RecursionError):
         raise ConditionsError("MANIFEST_LOAD_FAILED") from None
 
-    if loaded.manifest.schema_version != TARGET_VERSION:
-        # A 0.3 or 0.4 manifest loads but conditions authoring is 0.2-only.
+    if loaded.manifest.schema_version not in SUPPORTED_VERSIONS:
         # The version selects the fixed command text; it is not echoed alone.
         raise ConditionsError(
             "UNSUPPORTED_VERSION", version=loaded.manifest.schema_version
@@ -503,7 +502,7 @@ def _validate_candidate(candidate: dict) -> Manifest:
         # The loaded source already validated, so the patch introduced the
         # invalidity. No partial repair and no write.
         raise ConditionsError("PATCH_INVALID") from None
-    if manifest.schema_version != TARGET_VERSION:
+    if manifest.schema_version not in SUPPORTED_VERSIONS:
         raise ConditionsError("INTERNAL_ERROR")
     return manifest
 

@@ -68,7 +68,7 @@ with the qualification record). Two qualifiers are defined as follows:
 | A2 | Generic folder ingestion | PARTIAL | a plain folder becomes a valid manifest with hashed artifacts and detected runs; a scan that finds nothing refuses with exit 2 instead of writing an empty manifest | generic adapter; `tests/test_adapters.py`, dogfood examples. **An empty folder currently writes a 0/0 manifest** (P0-4) |
 | A3 | Tool adapters (Hydra, MLflow file store, TensorBoard) | PARTIAL | each adapter discovers its real layout and records hashes; a scan that finds no files aborts with exit 2 and writes nothing; unreadable or unsafe *contents* inside an accepted layout are recorded as hashed artifacts with the extracted value omitted and a note, never silently dropped. A TensorBoard folder with files but no event files records them as artifacts and reports zero runs by design | adapter packages; `test_adapter_unreadable_integration.py`, `test_hydra_adapter.py`, `test_tensorboard_adapter.py`. **An empty folder writes a 0/0 manifest** (P0-4) |
 | A4 | Safe authoring of results, claims, evidence and relationships | NOT_STARTED | a user can add, edit and remove results, claims, evidence references and relationships from the CLI with validation, dry-run, stale-write protection and no hand-edited JSON; manifest-level objects are A4, workspace claims are D3 | artifacts and conditions are authorable; `rehash` refreshes locator-backed JSON values. Results, claims, evidence and relationships are hand-written |
-| A5 | Run-condition authoring | PARTIAL | strict patch, presence rules, dry-run, refusal writes nothing; works on every schema generation that carries the condition fields | `conditions`; currently accepts **schema 0.2 only** (`conditions_authoring.py` `TARGET_VERSION` gate), so 0.3–0.9 manifests are refused |
+| A5 | Run-condition authoring | COMPLETE | strict patch, presence rules, dry-run, refusal writes nothing; works on every schema generation that carries the condition fields | `conditions` accepts schemas 0.2–0.10; `tests/test_cli_conditions.py` |
 | A6 | Code and environment provenance capture | NOT_STARTED | one command records the source revision (commit id) and an environment snapshot into the existing condition fields, offline. `source_revision` keeps its meaning; dirty state lives inside the environment snapshot. Values stay off the command line, the snapshot is opt-in and never includes credentials or environment variables the caller did not select | fields exist; capture does not. Depends on A5 covering the manifest's schema generation |
 | A7 | Safe mutation of an existing manifest | VERIFIED | byte-level stale-write detection on `add`, `rehash`, `migrate` and `conditions`, with atomic replacement; backup generations on `init --force`, `migrate` and `conditions`; cooperative admission lock where the host supports it; declared Windows limit. `init --force` regenerates with a backup but is not a compare-and-swap, and plain `add`/`rehash` do **not** keep a previous generation | `cli.py` `_finish_edit`, `save_raw`, `_backup_existing`; `manifest.py` `save_manifest`; `test_edit.py` |
 
@@ -92,7 +92,7 @@ with the qualification record). Two qualifiers are defined as follows:
 | C3 | Impact analysis | VERIFIED | the claims potentially affected by a recorded object are returned with the dependency path | `impact`; route tests |
 | C4 | Structural coverage review | VERIFIED | unsupported, contradicted and uncited claims are flagged with explainable reasons | `coverage`, `coverage-gate`; route tests |
 | C5 | Cross-run comparison, matrix and leaderboard | VERIFIED | recorded values align by name with explicit non-numeric/missing accounting and no fairness claim; single manifest only | `compare`, `matrix`, `leaderboard`; route tests |
-| C6 | Recorded-condition comparability | IN_PROGRESS | five mandatory recorded conditions are compared for a named pair, with a stable preflight and a clearly experimental verdict, across 0.2 and every later schema generation that carries the fields (0.3–0.9, and 0.10 if it lands) | `comparability`; `run_comparability.py` refuses 0.3–0.9 today, so TensorBoard manifests cannot use it |
+| C6 | Recorded-condition comparability | COMPLETE | five mandatory recorded conditions are compared for a named pair, with a stable preflight and a clearly experimental verdict, across 0.1–0.10 (0.1 through the legacy metadata projection, 0.2–0.10 through the first-class fields) | `comparability` and preflight accept 0.1–0.10; the verdict remains experimental; `tests/test_run_comparability.py`, `tests/test_cli_comparability_preflight.py` |
 | C7 | Evidence-aware comparison | NOT_STARTED | a comparison states whether recorded conditions permit it *and* whether the compared results are backed by intact, verified evidence; missing or changed artifacts, failed source-value checks and unverifiable values change the outcome instead of being ignored. The existing comparability function performs no artifact I/O and must not be presented as doing so | not started |
 | C8 | Change analysis between recorded snapshots | VERIFIED | two recorded manifests can be compared for semantic equality (`fingerprint`, `fingerprint-compare`) and for review-relevant differences (`coverage-diff`, `impact-diff`, `review-diff`, `review-gate`), with exit codes and machine-readable output; undocumented in the public command reference | `run_fingerprint*.py`, `run_*_diff.py`, `run_review_gate.py`; route tests |
 
@@ -152,14 +152,14 @@ capability depends on it.
 
 ### P1 — missing primary capabilities
 
-5. **Composition core (D0–D6)**: a versioned workspace document with stable member IDs,
+5. **Composition core (D0–D6)** (delivered in two slices): a versioned workspace document with stable member IDs,
    workspace discovery, a global provenance graph, cross-manifest claims and evidence,
    cross-manifest impact, cross-manifest `compare`/`matrix`/`leaderboard`, and one
    consolidated report. Read-only first; authoring of the document and of workspace claims
    follows. The workspace document is required from the start because a cross-member
    reference has no valid meaning without a qualified identity; it is a separate versioned
    format, never a change to a frozen manifest schema.
-6. **Condition and comparability coverage (A5, C6)**: extend condition authoring and the
+6. **Condition and comparability coverage (A5, C6)** (delivered): extend condition authoring and the
    comparability preflight/verdict from the 0.2 projection to every schema generation that
    carries the condition fields (0.3–0.9, and 0.10 if it lands). This is a dependency of the
    comparison workflow: a TensorBoard manifest cannot currently record conditions or be

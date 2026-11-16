@@ -210,8 +210,8 @@ def test_load_manifest_dispatches_09(tmp_path):
     assert isinstance(load_manifest(path).manifest, Manifest09)
 
 
-def test_schema_09_is_unsupported_by_comparability():
-    assert "0.9" in _UNSUPPORTED_COMPARABILITY_SCHEMAS
+def test_schema_09_is_supported_by_comparability():
+    assert "0.9" not in _UNSUPPORTED_COMPARABILITY_SCHEMAS
 
 
 def test_migrate_09_to_08_is_a_downgrade(tmp_path):

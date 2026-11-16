@@ -340,7 +340,7 @@ def _conditions_of(run, schema_version: str, side: str):
     Schema 0.1 always falls back to Stage 2 metadata. A 0.2 run that never
     supplied ``conditions`` also falls back for every dimension.
     """
-    if schema_version != "0.2":
+    if schema_version == "0.1":
         return None
     if "conditions" not in getattr(run, "model_fields_set", frozenset()):
         return None
@@ -362,7 +362,7 @@ def _condition_child(conditions, name: str, side: str):
 
 def _explicit_artifact_selector(run, name: str, schema_version: str, side: str):
     """Return ``(present, value)`` for one selector, without resolving it."""
-    if schema_version != "0.2":
+    if schema_version == "0.1":
         return False, None
     if "conditions" not in getattr(run, "model_fields_set", frozenset()):
         return False, None
@@ -712,7 +712,7 @@ def _shape_dataset(dataset, parents: list[str], side: str, schema_version: str) 
     # First-class Artifact.dataset_id requires schema 0.2; the legacy metadata
     # label remains the fallback. A null legacy label is no identity
     # observation, as in Stage 2.
-    first_present = schema_version == "0.2" and (
+    first_present = schema_version != "0.1" and (
         "dataset_id" in getattr(dataset, "model_fields_set", frozenset())
     )
     first_value = getattr(dataset, "dataset_id", None) if first_present else None
@@ -896,7 +896,7 @@ def _shape_result(result, side: str, schema_version: str) -> dict:
             _raise(INPUT_SHAPE_UNSUPPORTED, side)
         legacy_definition = _shape_definition(legacy_definition, side)
 
-    first_present = schema_version == "0.2" and (
+    first_present = schema_version != "0.1" and (
         "metric_definition"
         in getattr(result, "model_fields_set", frozenset())
     )

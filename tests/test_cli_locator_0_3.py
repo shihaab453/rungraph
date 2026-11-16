@@ -290,11 +290,11 @@ def test_all_26_routes_stay_total_on_object_locator(tmp_path, capsys):
         if route in expected:
             assert code == expected[route], route
         if route == "comparability":
-            assert _one_json(out)["error"]["code"] == "UNSUPPORTED_VERSION"
+            assert "UNSUPPORTED_VERSION" not in out
         if route == "fingerprint":
             assert code == 2
         if route == "conditions":
-            assert "UNSUPPORTED_VERSION" in out
+            assert "UNSUPPORTED_VERSION" not in out
         if route == "rehash":
             assert out == REFRESH_TEXT
         if route in ("run", "claim", "lineage"):

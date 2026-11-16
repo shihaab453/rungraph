@@ -130,8 +130,10 @@ def _loaded(tag: str) -> LoadedManifest:
 
 def _loaded_0_3(tag: str, *, split: str = "test") -> LoadedManifest:
     manifest = _make_manifest(tag)
+    metadata = dict(manifest.runs[0].metadata)
+    metadata["evaluation"] = {**metadata["evaluation"], "split": split}
     run = manifest.runs[0].model_copy(
-        update={"conditions": RunConditions(evaluation_split=split)}
+        update={"conditions": RunConditions(evaluation_split=split), "metadata": metadata}
     )
     manifest = manifest.model_copy(
         update={"schema_version": "0.3", "runs": [run]}
@@ -500,67 +502,40 @@ def test_target_load_failure_shape(tmp_path):
     assert outcome.text == "ERROR MANIFEST_LOAD_FAILED (target) (exit 2)"
 
 
-def test_0_3_baseline_is_refused_before_comparison(monkeypatch):
-    # Conflicting first-class conditions would otherwise be NOT_COMPARABLE, but
-    # 0.3 is refused outright; it must never return COMPARABLE.
-    baseline = _loaded_0_3("b", split="test")
-    target_manifest = _make_manifest("t")
-    target_manifest = target_manifest.model_copy(
-        update={
-            "schema_version": "0.2",
-            "runs": [
-                target_manifest.runs[0].model_copy(
-                    update={"conditions": RunConditions(evaluation_split="validation")}
-                )
-            ],
-        }
-    )
-    target = LoadedManifest(
-        manifest=target_manifest,
-        path=Path("/synthetic/t/runevidence.json"),
-        source_bytes=b"",
-    )
-    outcome = _compare(monkeypatch, baseline, target)
-    _assert_error(outcome, code=command.UNSUPPORTED_VERSION, side="baseline")
-    assert outcome.text == "ERROR UNSUPPORTED_VERSION (baseline) (exit 2)"
-    assert "COMPARABLE_RECORDED_CONDITIONS" not in json.dumps(outcome.document)
-
-
-def test_0_3_target_is_refused(monkeypatch):
-    baseline, _ = _pair()
-    target = _loaded_0_3("t")
-    outcome = _compare(monkeypatch, baseline, target)
-    _assert_error(outcome, code=command.UNSUPPORTED_VERSION, side="target")
-    assert outcome.text == "ERROR UNSUPPORTED_VERSION (target) (exit 2)"
-
-
-def test_0_3_baseline_takes_precedence_when_both_are_0_3(monkeypatch):
-    outcome = _compare(monkeypatch, _loaded_0_3("b"), _loaded_0_3("t"))
-    _assert_error(outcome, code=command.UNSUPPORTED_VERSION, side="baseline")
-    assert outcome.text == "ERROR UNSUPPORTED_VERSION (baseline) (exit 2)"
-
-
-def test_0_4_baseline_is_refused_before_comparison(monkeypatch):
-    baseline = _loaded_0_4("b")
+def test_0_3_baseline_compares_first_class_conditions(monkeypatch):
+    baseline = _loaded_0_3("b", split="validation")
     target = _loaded("t")
     outcome = _compare(monkeypatch, baseline, target)
-    _assert_error(outcome, code=command.UNSUPPORTED_VERSION, side="baseline")
-    assert outcome.text == "ERROR UNSUPPORTED_VERSION (baseline) (exit 2)"
-    assert "COMPARABLE_RECORDED_CONDITIONS" not in json.dumps(outcome.document)
+    assert outcome.exit_code == command.EXIT_NOT_COMPARABLE
+    assert "NOT_COMPARABLE_RECORDED_CONDITIONS" in json.dumps(outcome.document)
 
 
-def test_0_4_target_is_refused(monkeypatch):
+def test_0_3_target_compares(monkeypatch):
     baseline, _ = _pair()
-    target = _loaded_0_4("t")
-    outcome = _compare(monkeypatch, baseline, target)
-    _assert_error(outcome, code=command.UNSUPPORTED_VERSION, side="target")
-    assert outcome.text == "ERROR UNSUPPORTED_VERSION (target) (exit 2)"
+    outcome = _compare(monkeypatch, baseline, _loaded_0_3("t"))
+    assert outcome.exit_code == command.EXIT_COMPARABLE
+    assert "COMPARABLE_RECORDED_CONDITIONS" in json.dumps(outcome.document)
 
 
-def test_0_4_baseline_takes_precedence_when_both_are_0_4(monkeypatch):
+def test_0_3_both_compare(monkeypatch):
+    outcome = _compare(monkeypatch, _loaded_0_3("b"), _loaded_0_3("t"))
+    assert outcome.exit_code == command.EXIT_COMPARABLE
+
+
+def test_0_4_baseline_compares(monkeypatch):
+    outcome = _compare(monkeypatch, _loaded_0_4("b"), _loaded("t"))
+    assert outcome.exit_code == command.EXIT_COMPARABLE
+
+
+def test_0_4_target_compares(monkeypatch):
+    baseline, _ = _pair()
+    outcome = _compare(monkeypatch, baseline, _loaded_0_4("t"))
+    assert outcome.exit_code == command.EXIT_COMPARABLE
+
+
+def test_0_4_both_compare(monkeypatch):
     outcome = _compare(monkeypatch, _loaded_0_4("b"), _loaded_0_4("t"))
-    _assert_error(outcome, code=command.UNSUPPORTED_VERSION, side="baseline")
-    assert outcome.text == "ERROR UNSUPPORTED_VERSION (baseline) (exit 2)"
+    assert outcome.exit_code == command.EXIT_COMPARABLE
 
 
 def test_mapping_failure_shape_and_text(monkeypatch):

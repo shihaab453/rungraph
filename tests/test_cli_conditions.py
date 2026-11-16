@@ -693,9 +693,8 @@ def test_0_1_and_omitted_version_refuse_before_reading_the_patch(tmp_path, versi
     assert (text_code, text_err) == (2, "")
     assert text_out == (
         "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
-        "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
-        "runevidence migrate PATH --to 0.2; schema 0.3 has no downgrade path. "
-        "Nothing was written.\n"
+        "schema 0.2 or later manifest. A schema 0.1 manifest can be migrated with "
+        "runevidence migrate PATH --to 0.2. Nothing was written.\n"
     )
     assert str(folder) not in text_out
 
@@ -782,54 +781,46 @@ def test_future_schema_version_is_manifest_load_failed(tmp_path):
     assert names(folder) == [MANIFEST]
 
 
-def test_schema_0_3_is_unsupported_for_conditions_authoring(tmp_path):
-    # 0.3 loads (locator slice A), but conditions authoring remains 0.2-only.
+def test_schema_0_3_authoring_sets_conditions(tmp_path):
     folder = tmp_path / CANARY_PATH
     path = write_manifest(folder, base_doc(version="0.3"))
-    before = disk_bytes(path)
     patch = write_patch(tmp_path, json.dumps({"evaluation_split": "test"}))
 
     code, out, err = _run_cli_captured(
         ["conditions", str(folder), "--run", "r1", "--patch", patch, "--json"]
     )
 
-    assert (code, err) == (2, "")
-    assert_error(out, "UNSUPPORTED_VERSION")
-    assert disk_bytes(path) == before
-    assert names(folder) == [MANIFEST]
+    assert (code, err) == (0, "")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.3"
+    run = next(item for item in document["runs"] if item["id"] == "r1")
+    assert run["conditions"]["evaluation_split"] == "test"
 
 
-def test_schema_0_4_uses_the_schema_0_4_unsupported_text(tmp_path):
-    # 0.4 loads (csv-cell slice C), but conditions authoring remains 0.2-only.
+def test_schema_0_4_authoring_sets_and_clears_conditions(tmp_path):
     folder = tmp_path / CANARY_PATH
     path = write_manifest(folder, base_doc(version="0.4"))
-    before = disk_bytes(path)
     patch = write_patch(tmp_path, json.dumps({"evaluation_split": "test"}))
 
     code, out, err = _run_cli_captured(
-        ["conditions", str(folder), "--run", "r1", "--patch", patch, "--json"]
+        ["conditions", str(folder), "--run", "r1", "--patch", patch]
     )
+    assert (code, err) == (0, "")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    run = next(item for item in document["runs"] if item["id"] == "r1")
+    assert run["conditions"]["evaluation_split"] == "test"
 
-    assert (code, err) == (2, "")
-    assert_error(out, "UNSUPPORTED_VERSION")
-    assert disk_bytes(path) == before
-
-    text_code, text_out, text_err = _run_cli_captured(
-        ["conditions", str(folder), "--run", "r1", "--clear", "environment"]
+    code, out, err = _run_cli_captured(
+        ["conditions", str(folder), "--run", "r1", "--clear", "evaluation_split"]
     )
-    assert (text_code, text_err) == (2, "")
-    assert text_out == (
-        "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
-        "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
-        "runevidence migrate PATH --to 0.2; schema 0.3 and 0.4 have no downgrade path. "
-        "Nothing was written.\n"
-    )
-    assert str(folder) not in text_out
-    assert disk_bytes(path) == before
-    assert names(folder) == [MANIFEST]
+    assert (code, err) == (0, "")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.4"
+    run = next(item for item in document["runs"] if item["id"] == "r1")
+    assert "evaluation_split" not in run.get("conditions", {})
 
 
-def test_schema_0_3_conditions_text_is_byte_identical(tmp_path):
+def test_schema_0_3_clear_without_conditions_is_a_no_op(tmp_path):
     folder = tmp_path / CANARY_PATH
     path = write_manifest(folder, base_doc(version="0.3"))
     before = disk_bytes(path)
@@ -838,16 +829,8 @@ def test_schema_0_3_conditions_text_is_byte_identical(tmp_path):
         ["conditions", str(folder), "--run", "r1", "--clear", "environment"]
     )
 
-    assert (code, err) == (2, "")
-    assert out == (
-        "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
-        "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
-        "runevidence migrate PATH --to 0.2; schema 0.3 has no downgrade path. "
-        "Nothing was written.\n"
-    )
+    assert (code, err) == (0, "")
     assert disk_bytes(path) == before
-    assert names(folder) == [MANIFEST]
-
 
 def test_zero_run_matches_is_run_selection_invalid(tmp_path):
     folder = tmp_path / CANARY_PATH
