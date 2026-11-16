@@ -304,6 +304,9 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence conditions PATH --run RUN_ID [--patch FILE\|-] [--clear FIELD]... [--dry-run] [--json]` | Set or clear recorded run conditions on a schema 0.2 or later manifest from a local JSON patch; no condition values on the command line. Exits `0` on success, no-op or dry run; `2` on refusal or failure. See [Authoring run conditions](#authoring-run-conditions). |
 | `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read values only for supported, resolvable scalar JSON-located results in changed files (`--volatile`, `--no-volatile`, `--dry-run`). `--directory` re-records one exact directory artifact ID. |
 | `runevidence add PATH FILE...` | Track new files or folders without re-running `init` (`--id`, `--kind`, `--run`, `--no-run`, `--volatile`, `--dry-run`). `add PATH DIR --directory --id ID` records one folder as a directory artifact. |
+| `runevidence result add\|edit\|remove PATH --file RESULT\|--id ID [--dry-run] [--json]` | Add, edit or remove a recorded result. References must resolve; the edited manifest is validated and written atomically with a stale-byte check. |
+| `runevidence evidence add\|edit\|remove PATH --file CLAIM\|--id ID [--dry-run] [--json]` | Add, edit or remove a claim/evidence entry and its `supports`/`contradicts` IDs. |
+| `runevidence relationship add\|remove PATH --file REL\|--index N [--dry-run] [--json]` | Add or remove a recorded relationship. |
 | `runevidence schema [-o FILE]` | Print the 0.1 manifest JSON Schema (also committed at `schema/runevidence.schema.json`). The separate 0.2 schema is `schema/runevidence-0.2.schema.json`. |
 | `runevidence adapters` | List installed adapters. |
 
@@ -819,6 +822,20 @@ Adding a 0.2-only field while the manifest still declares 0.1 is a schema
 error. A reader that only understands 0.1 rejects every 0.2 manifest, even an
 empty one. `migrate` reads no artifact, calls no adapter and uses no network
 or environment state.
+
+### Authoring results, claims and relationships
+
+```bash
+runevidence result add path/to/experiment --file result.json
+runevidence evidence add path/to/experiment --file claim.json
+runevidence relationship add path/to/experiment --file relationship.json
+```
+
+Each command loads one validated manifest, applies one JSON object, checks that every
+referenced run/artifact/result/claim exists, validates the whole edited manifest and writes it
+atomically with a stale-byte check. `--dry-run` prints the plan and writes nothing; a refusal
+writes nothing. Removing a result or claim needs `--id`; removing a relationship needs its
+zero-based `--index` in the recorded `relationships` array.
 
 ### Authoring run conditions
 
