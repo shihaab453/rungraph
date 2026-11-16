@@ -13,8 +13,8 @@ HISTORICAL_SEVEN_ROUTES = ("validate", "inspect", "init", "rehash", "add", "sche
 # Exact reviewed 22-route CLI bytes in LF and CRLF checkout forms.
 # D17-S1R5 static writer-route review, independently adjudicated in D17-S1R6.
 HISTORICAL_22_ROUTE_CLI_HASH = frozenset({
-    "a4cd86ac0903b4827bf7a846949a253d3d8e1aff9a02602e12ea95512d3a03e6",  # LF
-    "ba6bd580723f1b1ad7bccda0a0379a09d210d5cf46e43b9800e54383f56338a6",  # CRLF
+    "71baf1cc8c9f1a494627864dea3bd5022936415fea29be6755adcd07a9276186",  # LF
+    "3d624a385130853a5c9c5daa1999f5993d1910c39d67734cbb202e58a0d046f3",  # CRLF
 })
 HISTORICAL_22_ROUTES = ("validate", "inspect", "compare", "leaderboard", "matrix", "run", "claim", "lineage",
                         "impact", "coverage", "coverage-gate", "fingerprint", "fingerprint-compare",
@@ -57,6 +57,11 @@ HISTORICAL_25_ROUTES = ("validate", "validate-batch", "inspect", "compare", "com
 # conditions snapshot, before the public read-only directory flag.
 # M42-SCANNER-S3B (2026-11-12) superseded these; HISTORICAL RECORD only.
 HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
+    # Slice G (2026-11-16): schema 0.9 tensors added --include-tensors, the 0.9
+    # init/conditions texts and the 0.9 migrate targets. Historical; superseded
+    # by the current pin.
+    "35762de77f57cf304ab5a189460a3b11b75b79fc846b3e892255d80fab44ada2",  # LF
+    "67aadf4aef0f9044cb1d18c1e920314bc2c70240067f6740cdfcfc51b0e895e1",  # CRLF
     # Slice F (2026-11-16): the media gate added --include-images/--include-audio,
     # the 0.8 init refusal, the 0.8 conditions text and the 0.8 migrate targets.
     # Historical record; superseded by the current pin.
