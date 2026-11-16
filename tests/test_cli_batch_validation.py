@@ -307,7 +307,7 @@ def test_one_load_and_check_per_input(tmp_path, capsys, monkeypatch):
         return real_load(target, *a, **k)
 
     def checks(loaded, *a, **k):
-        assert not a and k == {}  # validate's default: no untracked-file check
+        assert not a and k == {"enable_directory_artifacts": False}  # no untracked-file check
         events.append(("checks", str(loaded.path.parent)))
         return real_checks(loaded, *a, **k)
 
