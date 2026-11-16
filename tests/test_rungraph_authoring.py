@@ -225,3 +225,48 @@ def test_a_claim_into_an_ambiguous_member_id_is_refused(tmp_path: Path, capsys):
     assert main(["claim", "add", str(root), "--file", str(claim_file), "--expected-sha256", sha(root)]) == 2
     assert "duplicate IDs" in capsys.readouterr().out
     assert (root / "rungraph.json").read_bytes() == before
+
+
+def test_relationship_endpoints_into_an_ambiguous_member_are_refused(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    manifest_path = root / "a" / "runevidence.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["results"] = [
+        {"id": "r", "run_id": "r", "name": "accuracy", "value": 0.9},
+        {"id": "ok", "run_id": "r", "name": "other", "value": 0.8},
+    ]
+    manifest["evidence"] = []
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    init(root)
+    capsys.readouterr()
+    before = (root / "rungraph.json").read_bytes()
+    for source, target in (
+        ({"member": "prov-a", "id": "data"}, {"member": "prov-b", "id": "data"}),
+        ({"member": "prov-b", "id": "data"}, {"member": "prov-a", "id": "data"}),
+    ):
+        relationship = {
+            "id": "rel1",
+            "type": "derived_from",
+            "source": source,
+            "target": target,
+        }
+        relationship_file = tmp_path / "rel.json"
+        relationship_file.write_text(json.dumps(relationship), encoding="utf-8")
+        assert main(
+            ["relationship", "add", str(root), "--file", str(relationship_file), "--expected-sha256", sha(root)]
+        ) == 2
+        assert "duplicate IDs" in capsys.readouterr().out
+        assert (root / "rungraph.json").read_bytes() == before
+
+
+def test_a_whitespace_only_workspace_claim_is_refused(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    init(root)
+    capsys.readouterr()
+    claim = {"id": "w1", "claim": "   ", "supports": [], "contradicts": []}
+    claim_file = tmp_path / "claim.json"
+    claim_file.write_text(json.dumps(claim), encoding="utf-8")
+    before = (root / "rungraph.json").read_bytes()
+    assert main(["claim", "add", str(root), "--file", str(claim_file), "--expected-sha256", sha(root)]) == 2
+    assert "claim text must be non-blank" in capsys.readouterr().out
+    assert (root / "rungraph.json").read_bytes() == before

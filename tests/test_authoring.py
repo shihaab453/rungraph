@@ -153,3 +153,17 @@ def test_edit_result_needs_a_non_empty_name(tmp_path: Path, capsys):
     assert main(["result", "edit", str(path), "--file", write_json(tmp_path / "r.json", result)]) == 2
     assert "non-empty string 'name'" in capsys.readouterr().out
     assert path.read_bytes() == before
+
+
+def test_whitespace_only_authoring_text_is_refused(tmp_path: Path, capsys):
+    path = make_manifest(tmp_path)
+    before = path.read_bytes()
+    result = {"id": "acc", "run_id": "run", "name": "   ", "value": 0.9}
+    assert main(["result", "add", str(path), "--file", write_json(tmp_path / "r.json", result)]) == 2
+    assert "non-empty string 'name'" in capsys.readouterr().out
+    assert path.read_bytes() == before
+
+    claim = {"id": "c1", "claim": "   ", "supports": ["data"], "contradicts": []}
+    assert main(["evidence", "add", str(path), "--file", write_json(tmp_path / "c.json", claim)]) == 2
+    assert "non-empty string 'claim'" in capsys.readouterr().out
+    assert path.read_bytes() == before
