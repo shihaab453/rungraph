@@ -309,7 +309,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence result add\|edit\|remove PATH --file RESULT\|--id ID [--dry-run] [--json]` | Add, edit or remove a recorded result. References must resolve; the edited manifest is validated and written atomically with a stale-byte check. |
 | `runevidence evidence add\|edit\|remove PATH --file CLAIM\|--id ID [--dry-run] [--json]` | Add, edit or remove a claim/evidence entry and its `supports`/`contradicts` IDs. |
 | `runevidence relationship add\|remove PATH --file REL\|--index N [--dry-run] [--json]` | Add or remove a recorded relationship. |
-| `runevidence schema [-o FILE]` | Print the 0.1 manifest JSON Schema (also committed at `schema/runevidence.schema.json`). The separate 0.2 schema is `schema/runevidence-0.2.schema.json`. |
+| `runevidence schema [-o FILE\|--output FILE]` | Print the 0.1 manifest JSON Schema (also committed at `schema/runevidence.schema.json`). The separate 0.2 schema is `schema/runevidence-0.2.schema.json`. |
 | `runevidence adapters` | List installed adapters. |
 
 ### Analysis and review commands
@@ -328,13 +328,13 @@ below accepts `--json` unless noted, and exits `2` on a load or usage failure.
 | `runevidence lineage PATH --id CLAIM_ID` | Trace a claim's recorded upstream provenance, naming unresolved nodes and cycles. |
 | `runevidence impact PATH --id OBJECT_ID` | Find claims potentially affected by one recorded object, with the dependency path. |
 | `runevidence coverage PATH` | Review structural claim support, contradictions and provenance gaps (`--only-flagged`). |
-| `runevidence coverage-gate PATH` | CI gate on selected structural coverage flags; exit `1` when a selected flag is present. |
+| `runevidence coverage-gate PATH [--flag NAME]...` | CI gate on selected structural coverage flags (`--flag` is repeatable; default: any flag); exit `1` when a selected flag is present. |
 | `runevidence fingerprint PATH` | Hash normalized recorded assertions (not artifact contents). |
-| `runevidence fingerprint-compare A B` | Check recorded semantic equality of two manifests; exit `0` same, `1` different, `2` invalid. |
-| `runevidence coverage-diff A B` | Compare structural claim review flags between two recorded manifests. |
-| `runevidence review-diff A B` | Unify recorded claim impact and structural flag changes for review. |
+| `runevidence fingerprint-compare A B [--explain] [--show-notes]` | Check recorded semantic equality of two manifests; exit `0` same, `1` different, `2` invalid. `--explain` lists the deterministic changes; `--show-notes` includes raw relationship notes and requires `--explain`. |
+| `runevidence coverage-diff A B [--only-regressions]` | Compare structural claim review flags between two recorded manifests; `--only-regressions` shows new flags on surviving or newly added claims. |
+| `runevidence review-diff A B [--only-new-flags]` | Unify recorded claim impact and structural flag changes for review; `--only-new-flags` shows candidates introducing structural flags. |
 | `runevidence impact-diff A B` | Compare recorded snapshots and list the claims that need review. |
-| `runevidence review-gate A B` | CI policy gate over recorded review changes; exit `1` when policy is violated. |
+| `runevidence review-gate A B [--policy new-flags\|new-flags-or-removals\|any-review]` | CI policy gate over recorded review changes; exit `1` when policy is violated. The default policy is `new-flags`. |
 
 ### Workspace commands
 

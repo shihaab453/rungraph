@@ -30,7 +30,9 @@ rungraph leaderboard path/to/project --metric accuracy --direction max
 
 `discover` exits `2` when it finds no manifests, a duplicate or nested member, an unreadable
 manifest, or hits the 10,000-manifest or depth-64 cap. `init` refuses an empty discovery and
-writes nothing.
+writes nothing; `init --force` regenerates an existing document and keeps a backup. `compare`
+takes an optional `--run MEMBER#RUN` to restrict the metric rows to one run, and
+`leaderboard --top N` limits the ranking (default 10).
 
 ## The document
 
@@ -133,7 +135,10 @@ cycles are reported per strongly connected component with a bounded example list
 
 ```bash
 rungraph member add path/to/project --id exp-c --path experiments/c \
+  [--manifest name.json] [--role ROLE] \
   --expected-sha256 "$(sha256sum path/to/project/rungraph.json | cut -d" " -f1)"
+rungraph member move path/to/project --id exp-c --path experiments/c2
+rungraph member rename path/to/project --id exp-c --new-id exp-d
 rungraph claim add path/to/project --file claim.json --expected-sha256 ...
 rungraph patch path/to/project --file patch.json --expected-sha256 ...
 ```
