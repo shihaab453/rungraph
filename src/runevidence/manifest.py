@@ -23,6 +23,7 @@ from .models import (
     SCHEMA_VERSION_0_7,
     SCHEMA_VERSION_0_8,
     SCHEMA_VERSION_0_9,
+    SCHEMA_VERSION_0_10,
     Artifact,
     CsvCellLocator,
     JsonlLocator,
@@ -33,6 +34,7 @@ from .models import (
     Manifest07,
     Manifest08,
     Manifest09,
+    Manifest10,
     AudioValue,
     HistogramValue,
     TensorValue,
@@ -43,6 +45,8 @@ from .models import (
     TensorboardTensorLocator,
     TensorboardLocator,
     TensorboardStringLocator,
+    TensorboardTf2AudioLocator,
+    TensorboardTf2ImageLocator,
 )
 
 
@@ -97,6 +101,8 @@ _LOCATOR_TAGS: dict[str, type[BaseModel]] = {
     "tensorboard-image": TensorboardImageLocator,
     "tensorboard-audio": TensorboardAudioLocator,
     "tensorboard-tensor": TensorboardTensorLocator,
+    "tensorboard-tf2-image": TensorboardTf2ImageLocator,
+    "tensorboard-tf2-audio": TensorboardTf2AudioLocator,
 }
 
 
@@ -328,6 +334,8 @@ def validate_manifest(raw: object) -> Manifest:
             return Manifest08.model_validate(raw)
         if version == SCHEMA_VERSION_0_9:
             return Manifest09.model_validate(raw)
+        if version == SCHEMA_VERSION_0_10:
+            return Manifest10.model_validate(raw)
     return Manifest.model_validate(raw)
 
 
@@ -347,6 +355,8 @@ def _root_model_for(raw: object) -> type[BaseModel]:
             return Manifest08
         if version == SCHEMA_VERSION_0_9:
             return Manifest09
+        if version == SCHEMA_VERSION_0_10:
+            return Manifest10
     return Manifest
 
 
@@ -454,7 +464,7 @@ def artifact_to_dict(artifact: Artifact, schema_version: str = "0.1") -> dict:
     when it was supplied; an omitted label stays omitted.
     """
     if schema_version not in (
-        "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9"
+        "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10"
     ):
         raise ValueError(f"unsupported schema version {schema_version!r}")
     data = artifact.model_dump(mode="json", exclude_defaults=False)

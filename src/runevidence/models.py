@@ -61,6 +61,9 @@ SCHEMA_VERSION_0_8 = "0.8"
 # 0.9 adds TensorBoard numeric tensor digests. Only the manifest dispatcher
 # reaches Manifest09; the base Manifest stays at 0.1-0.3.
 SCHEMA_VERSION_0_9 = "0.9"
+# 0.10 adds TF2 image/audio string-tensor media. Only the manifest dispatcher
+# reaches Manifest10; the base Manifest stays at 0.1-0.3.
+SCHEMA_VERSION_0_10 = "0.10"
 SCHEMA_VERSIONS = (SCHEMA_VERSION, SCHEMA_VERSION_0_2, SCHEMA_VERSION_0_3)
 MAX_JSONL_LINE = 2**63 - 1
 MAX_CSV_CELL_HEADER = 65536
@@ -1238,6 +1241,68 @@ class TensorboardTensorLocator(_Strict):
         return value
 
 
+class _Tf2MediaLocator(_Strict):
+    """Shared fields for the 0.10 TF2 media locators."""
+
+    tag: StrictStr = Field(
+        min_length=1,
+        max_length=MAX_TENSORBOARD_TAG,
+        description=(
+            "Exact event tag, at most 4,096 code points and at most 4,096 "
+            "UTF-8 bytes. A lone surrogate is rejected."
+        ),
+    )
+    step: StrictInt = Field(
+        ge=-(2**63),
+        le=2**63 - 1,
+        description="Signed 64-bit event step; an absent Event.step means 0.",
+    )
+    occurrence: StrictInt = Field(
+        ge=0,
+        le=MAX_TENSORBOARD_OCCURRENCE,
+        description=(
+            "Required zero-based occurrence among conforming entries of this "
+            "kind with this exact (tag, step) in this artifact."
+        ),
+    )
+    element: StrictInt = Field(
+        ge=0,
+        le=63,
+        description=(
+            "Required zero-based payload index inside the entry, 0..63."
+        ),
+    )
+
+    @field_validator("tag", mode="after")
+    @classmethod
+    def _tag_is_utf8_encodable_and_bounded(cls, value: str) -> str:
+        try:
+            encoded = value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise PydanticCustomError(
+                "string_unicode", "tag contains a lone surrogate"
+            ) from None
+        if len(encoded) > MAX_TENSORBOARD_TAG:
+            raise ValueError("tag must be at most 4096 UTF-8 bytes")
+        return value
+
+
+class TensorboardTf2ImageLocator(_Tf2MediaLocator):
+    """Structured 0.10 locator for one TF2 image batch element."""
+
+    kind: Literal["tensorboard-tf2-image"] = Field(
+        description="Locator kind; 0.10 admits tensorboard-tf2-image."
+    )
+
+
+class TensorboardTf2AudioLocator(_Tf2MediaLocator):
+    """Structured 0.10 locator for one TF2 audio batch element."""
+
+    kind: Literal["tensorboard-tf2-audio"] = Field(
+        description="Locator kind; 0.10 admits tensorboard-tf2-audio."
+    )
+
+
 _LOCATOR_ADAPTER_05 = TypeAdapter(
     Annotated[
         Union[JsonlLocator, CsvCellLocator, TensorboardLocator],
@@ -1767,6 +1832,123 @@ class Result09(Result):
         return self
 
 
+_LOCATOR_ADAPTER_10 = TypeAdapter(
+    Annotated[
+        Union[
+            JsonlLocator,
+            CsvCellLocator,
+            TensorboardLocator,
+            TensorboardStringLocator,
+            TensorboardHistogramLocator,
+            TensorboardImageLocator,
+            TensorboardAudioLocator,
+            TensorboardTensorLocator,
+            TensorboardTf2ImageLocator,
+            TensorboardTf2AudioLocator,
+        ],
+        Field(discriminator="kind"),
+    ]
+)
+
+
+def _dispatch_locator_10(value: Any) -> Any:
+    """Normalize a 0.10 locator before the field union validates it."""
+    if value is None:
+        return None
+    if type(value) is str:
+        if not is_valid_locator_pointer(value):
+            raise ValueError("locator must be empty or use the JSON Pointer grammar")
+        return value
+    if isinstance(
+        value,
+        (
+            JsonlLocator,
+            CsvCellLocator,
+            TensorboardLocator,
+            TensorboardStringLocator,
+            TensorboardHistogramLocator,
+            TensorboardImageLocator,
+            TensorboardAudioLocator,
+            TensorboardTensorLocator,
+            TensorboardTf2ImageLocator,
+            TensorboardTf2AudioLocator,
+        ),
+    ):
+        return value
+    if type(value) is dict:
+        return _LOCATOR_ADAPTER_10.validate_python(value)
+    raise ValueError("locator must be a string, an object, or null")
+
+
+class Result10(Result):
+    """0.10 result: 0.9 locators plus the two TF2 media kinds."""
+
+    value: Annotated[
+        Union[Scalar, HistogramValue, ImageValue, AudioValue, TensorValue],
+        BeforeValidator(_dispatch_value_09),
+    ] = None
+    locator: Annotated[
+        Optional[
+            Union[
+                StrictStr,
+                JsonlLocator,
+                CsvCellLocator,
+                TensorboardLocator,
+                TensorboardStringLocator,
+                TensorboardHistogramLocator,
+                TensorboardImageLocator,
+                TensorboardAudioLocator,
+                TensorboardTensorLocator,
+                TensorboardTf2ImageLocator,
+                TensorboardTf2AudioLocator,
+            ]
+        ],
+        BeforeValidator(_dispatch_locator_10),
+    ] = None
+
+    @field_validator("locator", mode="before")
+    @classmethod
+    def _locator_scalar_shape(cls, value: Any) -> Any:
+        if value is None or type(value) is str or type(value) is dict:
+            return value
+        if isinstance(
+            value,
+            (
+                JsonlLocator,
+                CsvCellLocator,
+                TensorboardLocator,
+                TensorboardStringLocator,
+                TensorboardHistogramLocator,
+                TensorboardImageLocator,
+                TensorboardAudioLocator,
+                TensorboardTensorLocator,
+                TensorboardTf2ImageLocator,
+                TensorboardTf2AudioLocator,
+            ),
+        ):
+            return value
+        raise ValueError("locator must be a string, an object, or null")
+
+    @model_validator(mode="after")
+    def _media_value_locator(self) -> "Result10":
+        image_kinds = ("tensorboard-image", "tensorboard-tf2-image")
+        audio_kinds = ("tensorboard-audio", "tensorboard-tf2-audio")
+        expected = (
+            (HistogramValue, "histogram", ("tensorboard-histogram",)),
+            (ImageValue, "image", image_kinds),
+            (AudioValue, "audio", audio_kinds),
+            (TensorValue, "tensor", ("tensorboard-tensor",)),
+        )
+        for model, label, kinds in expected:
+            if isinstance(self.value, model):
+                locator = self.locator
+                if locator is not None and getattr(locator, "kind", None) not in kinds:
+                    raise ValueError(
+                        f"a {label} value requires a {kinds[0]} or null locator"
+                    )
+        return self
+
+
 class EvidenceReference(_Strict):
     id: Id = Field(pattern=ID_PATTERN)
     claim: str = Field(min_length=1, description="The statement being made, in plain words.")
@@ -1819,6 +2001,7 @@ class Manifest(_Strict):
             SCHEMA_VERSION_0_7,
             SCHEMA_VERSION_0_8,
             SCHEMA_VERSION_0_9,
+            SCHEMA_VERSION_0_10,
         ):
             # Default fields keep their normal 0.1 spelling. The per-model
             # presence overrides already removed only unset 0.2+ members.
@@ -2008,6 +2191,36 @@ class Manifest(_Strict):
                         "a tensorboard-image object, a tensorboard-audio object, or a "
                         "tensorboard-tensor object"
                     )
+        elif self.schema_version == SCHEMA_VERSION_0_10:
+            for result in self.results:
+                locator = result.locator
+                if locator is None:
+                    continue
+                if result.artifact_id is None:
+                    raise ValueError("a schema 0.10 locator requires artifact_id")
+                if type(locator) is str:
+                    if not is_valid_locator_pointer(locator):
+                        raise ValueError(
+                            "a schema 0.10 string locator must be empty or a JSON Pointer"
+                        )
+                else:
+                    allowed = (
+                        JsonlLocator,
+                        CsvCellLocator,
+                        TensorboardLocator,
+                        TensorboardStringLocator,
+                        TensorboardHistogramLocator,
+                        TensorboardImageLocator,
+                        TensorboardAudioLocator,
+                        TensorboardTensorLocator,
+                        TensorboardTf2ImageLocator,
+                        TensorboardTf2AudioLocator,
+                    )
+                    if not isinstance(locator, allowed):
+                        raise ValueError(
+                            "a schema 0.10 locator must be a string or one of the "
+                            "ten structured locator objects"
+                        )
         else:
             for result in self.results:
                 if isinstance(result.locator, JsonlLocator):
@@ -2055,6 +2268,13 @@ class Manifest09(Manifest):
 
     schema_version: Literal["0.9"]
     results: list[Result09] = Field(default_factory=list)
+
+
+class Manifest10(Manifest):
+    """Schema 0.10 manifest: 0.9 locators plus the two TF2 media kinds."""
+
+    schema_version: Literal["0.10"]
+    results: list[Result10] = Field(default_factory=list)
 
 
 def is_manifest(value: object) -> bool:
@@ -3099,4 +3319,199 @@ def json_schema_0_9() -> dict[str, Any]:
     _pin_schema_version(schema, SCHEMA_VERSION_0_9, required=True)
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     schema["$id"] = f"urn:runevidence:manifest:{SCHEMA_VERSION_0_9}"
+    return schema
+
+
+def _generated_schema_0_10() -> dict[str, Any]:
+    schema = Manifest10.model_json_schema()
+    _canonicalize_schema(schema)
+    _add_artifact_type_rules(schema["$defs"]["Artifact"])
+    return schema
+
+
+def json_schema_0_10() -> dict[str, Any]:
+    """JSON Schema for the 0.10 manifest (adds the two TF2 media kinds)."""
+    schema = _generated_schema_0_10()
+    _publish_common_0_2(schema)
+    _rewrite_descriptions(schema)
+    _rewrite_06_descriptions(schema)
+    _rewrite_media_descriptions(schema)
+    defs = schema["$defs"]
+    kinds = (
+        "jsonl/csv-cell/tensorboard/tensorboard-string/tensorboard-histogram/"
+        "tensorboard-image/tensorboard-audio/tensorboard-tensor/"
+        "tensorboard-tf2-image/tensorboard-tf2-audio"
+    )
+    jsonl = defs["JsonlLocator"]
+    jsonl["description"] = (
+        "Structured 0.10 jsonl locator for one physical JSONL line and a JSON "
+        f"Pointer. 0.10 admits {kinds}; ``line`` is one-based and uses ``StrictInt``."
+    )
+    jsonl["properties"]["kind"]["description"] = f"Locator kind; 0.10 admits {kinds}."
+    jsonl["properties"]["pointer"]["pattern"] = _LOCATOR_POINTER_JSON_PATTERN
+    csv_cell = defs["CsvCellLocator"]
+    csv_cell["description"] = (
+        "Structured 0.10 csv-cell locator for one CSV data cell. ``row`` is "
+        "one-based over data records and ``column`` one-based over the header."
+    )
+    csv_cell["properties"]["kind"]["description"] = "Locator kind; 0.10 admits csv-cell."
+    for name, label, text in (
+        ("TensorboardLocator", "tensorboard", "scalar"),
+        ("TensorboardStringLocator", "tensorboard-string", "string tensor"),
+        ("TensorboardHistogramLocator", "tensorboard-histogram", "histogram"),
+        ("TensorboardImageLocator", "tensorboard-image", "image summary"),
+        ("TensorboardAudioLocator", "tensorboard-audio", "audio summary"),
+        ("TensorboardTensorLocator", "tensorboard-tensor", "numeric tensor"),
+        ("TensorboardTf2ImageLocator", "tensorboard-tf2-image", "TF2 image element"),
+        ("TensorboardTf2AudioLocator", "tensorboard-tf2-audio", "TF2 audio element"),
+    ):
+        definition = defs[name]
+        definition["description"] = (
+            f"Structured 0.10 {label} locator for one supported TensorBoard {text}. "
+            "``tag`` is exact; ``occurrence`` is per artifact."
+        )
+        definition["properties"]["kind"]["description"] = f"Locator kind; 0.10 admits {label}."
+    for name, keys in (
+        ("ImageValue", ("kind", "media_type", "sha256", "size_bytes", "width", "height")),
+        ("AudioValue", ("kind", "media_type", "sha256", "size_bytes")),
+        ("TensorValue", ("kind", "dtype", "shape", "element_count", "sha256")),
+    ):
+        definition = defs[name]
+        definition["required"] = list(keys)
+        definition["additionalProperties"] = False
+    image = defs["ImageValue"]
+    image["properties"]["kind"] = {"const": "image", "type": "string"}
+    image["properties"]["media_type"] = {"const": "image/png", "type": "string"}
+    image["properties"]["sha256"]["pattern"] = "^[0-9a-f]{64}$"
+    image["properties"]["size_bytes"]["minimum"] = 1
+    image["properties"]["size_bytes"]["maximum"] = 16_777_216
+    for dim in ("width", "height"):
+        image["properties"][dim]["minimum"] = 1
+        image["properties"][dim]["maximum"] = 65_535
+    audio = defs["AudioValue"]
+    audio["properties"]["kind"] = {"const": "audio", "type": "string"}
+    audio["properties"]["media_type"] = {"const": "audio/wav", "type": "string"}
+    audio["properties"]["sha256"]["pattern"] = "^[0-9a-f]{64}$"
+    audio["properties"]["size_bytes"]["minimum"] = 1
+    audio["properties"]["size_bytes"]["maximum"] = 16_777_216
+    tensor = defs["TensorValue"]
+    tensor["properties"]["kind"] = {"const": "tensor", "type": "string"}
+    tensor["properties"]["dtype"] = {
+        "enum": ["float32", "float64", "int32", "int64"],
+        "type": "string",
+    }
+    tensor["properties"]["shape"] = {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 8,
+        "items": {"type": "integer", "minimum": 1, "maximum": 2**31 - 1},
+        "description": "1-8 dimensions, row-major; the product is element_count.",
+    }
+    tensor["properties"]["element_count"]["minimum"] = 1
+    tensor["properties"]["element_count"]["maximum"] = 1_000_000
+    tensor["properties"]["sha256"]["pattern"] = "^[0-9a-f]{64}$"
+    for name in ("TensorboardTf2ImageLocator", "TensorboardTf2AudioLocator"):
+        defs[name]["properties"]["element"] = {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 63,
+            "description": "Required zero-based payload index inside the entry.",
+        }
+    defs["Result10"]["properties"]["locator"] = {
+        "oneOf": [
+            {
+                "type": "string",
+                "pattern": _LOCATOR_POINTER_JSON_PATTERN,
+                "description": "Empty or a JSON Pointer into a .json artifact.",
+            },
+            {"$ref": "#/$defs/JsonlLocator"},
+            {"$ref": "#/$defs/CsvCellLocator"},
+            {"$ref": "#/$defs/TensorboardLocator"},
+            {"$ref": "#/$defs/TensorboardStringLocator"},
+            {"$ref": "#/$defs/TensorboardHistogramLocator"},
+            {"$ref": "#/$defs/TensorboardImageLocator"},
+            {"$ref": "#/$defs/TensorboardAudioLocator"},
+            {"$ref": "#/$defs/TensorboardTensorLocator"},
+            {"$ref": "#/$defs/TensorboardTf2ImageLocator"},
+            {"$ref": "#/$defs/TensorboardTf2AudioLocator"},
+            {"type": "null"},
+        ],
+        "default": None,
+        "title": "Locator",
+        "description": (
+            "RFC 6901 pointer, a structured locator object, or null. In 0.10 any "
+            "non-null locator requires artifact_id."
+        ),
+    }
+    defs["Result10"]["properties"]["value"] = {
+        "anyOf": [
+            {"type": "boolean"},
+            {"type": "integer"},
+            {"type": "number"},
+            {"type": "string"},
+            {"type": "null"},
+            {"$ref": "#/$defs/HistogramValue"},
+            {"$ref": "#/$defs/ImageValue"},
+            {"$ref": "#/$defs/AudioValue"},
+            {"$ref": "#/$defs/TensorValue"},
+        ],
+        "default": None,
+        "title": "Value",
+        "description": (
+            "A scalar, a structured histogram, an image reference, an audio "
+            "reference, or a canonical tensor digest."
+        ),
+    }
+    defs["Result10"]["allOf"] = [
+        {
+            "if": {
+                "required": ["locator"],
+                "properties": {"locator": {"not": {"type": "null"}}},
+            },
+            "then": {
+                "required": ["artifact_id"],
+                "properties": {"artifact_id": {"type": "string"}},
+            },
+        }
+    ]
+    for kind, locator_kinds in (
+        ("histogram", ["tensorboard-histogram"]),
+        ("image", ["tensorboard-image", "tensorboard-tf2-image"]),
+        ("audio", ["tensorboard-audio", "tensorboard-tf2-audio"]),
+        ("tensor", ["tensorboard-tensor"]),
+    ):
+        defs["Result10"]["allOf"].append(
+            {
+                "if": {
+                    "required": ["value"],
+                    "properties": {
+                        "value": {
+                            "type": "object",
+                            "required": ["kind"],
+                            "properties": {"kind": {"const": kind}},
+                        }
+                    },
+                },
+                "then": {
+                    "properties": {
+                        "locator": {
+                            "anyOf": [
+                                {"type": "null"},
+                                *[
+                                    {
+                                        "type": "object",
+                                        "required": ["kind"],
+                                        "properties": {"kind": {"const": locator_kind}},
+                                    }
+                                    for locator_kind in locator_kinds
+                                ],
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    _pin_schema_version(schema, SCHEMA_VERSION_0_10, required=True)
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["$id"] = f"urn:runevidence:manifest:{SCHEMA_VERSION_0_10}"
     return schema

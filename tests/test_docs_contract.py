@@ -41,9 +41,9 @@ def test_guide_names_every_init_include_flag():
 
 
 def test_readme_names_every_migrate_target():
-    listed = "0.2\\|0.3\\|0.4\\|0.5\\|0.6\\|0.7\\|0.8\\|0.9"
+    listed = "0.2\\|0.3\\|0.4\\|0.5\\|0.6\\|0.7\\|0.8\\|0.9\\|0.10"
     assert f"--to {listed}" in README, "the README migrate row is missing a target"
-    assert TARGET_VERSIONS[-1] == "0.9"
+    assert TARGET_VERSIONS[-1] == "0.10"
 
 
 def test_guide_locator_kinds_match_the_models():

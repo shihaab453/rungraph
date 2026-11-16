@@ -755,7 +755,7 @@ def test_bad_manifest_json_is_manifest_load_failed(tmp_path):
 
 def test_future_schema_version_is_manifest_load_failed(tmp_path):
     folder = tmp_path / CANARY_PATH
-    path = write_manifest(folder, base_doc(version="0.10"))
+    path = write_manifest(folder, base_doc(version="0.11"))
     before = disk_bytes(path)
     patch = write_patch(tmp_path, json.dumps({"evaluation_split": "test"}))
 
@@ -777,7 +777,7 @@ def test_future_schema_version_is_manifest_load_failed(tmp_path):
         "validated. Nothing was written.\n"
     )
     assert str(folder) not in text_out
-    assert "0.10" not in text_out
+    assert "0.11" not in text_out
     assert disk_bytes(path) == before
     assert names(folder) == [MANIFEST]
 
