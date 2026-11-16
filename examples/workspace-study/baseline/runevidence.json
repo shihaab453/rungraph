@@ -1,0 +1,44 @@
+{
+  "schema_version": "0.1",
+  "project": {
+    "id": "baseline",
+    "name": "baseline"
+  },
+  "runs": [
+    {
+      "id": "run-baseline",
+      "name": "baseline"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "baseline-metrics",
+      "path": "metrics.json",
+      "sha256": "2ea013958eab1300bb0f828ef266d7c5a6545d335f74da8c3ac782661fc694c1",
+      "size_bytes": 22,
+      "kind": "metrics",
+      "run_id": "run-baseline"
+    }
+  ],
+  "results": [
+    {
+      "id": "baseline-accuracy",
+      "run_id": "run-baseline",
+      "name": "test_accuracy",
+      "value": 0.5,
+      "artifact_id": "baseline-metrics",
+      "locator": "/accuracy"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "claim-baseline",
+      "claim": "baseline reports accuracy 0.5",
+      "supports": [
+        "baseline-accuracy"
+      ],
+      "contradicts": [],
+      "source": "README.md"
+    }
+  ]
+}

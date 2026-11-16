@@ -1086,6 +1086,7 @@ stays free of tool dependencies:
   scalars, string tensors, histograms, image/audio references and numeric
   tensor digests under opt-in flags. See the
   [TensorBoard guide](https://github.com/shihaab453/rungraph/blob/main/docs/tensorboard-guide.md).
+  `examples/tensorboard-scalars/` is a committed two-run log directory.
 
   ```bash
   pip install -e . -e ./packages/runevidence-tensorboard
@@ -1110,7 +1111,8 @@ rungraph compare path/to/project --metric accuracy
 ```
 
 `rungraph.json` names the members and may carry cross-member claims and relationships.
-See [docs/rungraph-workspace.md](https://github.com/shihaab453/rungraph/blob/main/docs/rungraph-workspace.md)
+`examples/workspace-study/` is a two-member workspace with a cross-member claim. See
+[docs/rungraph-workspace.md](https://github.com/shihaab453/rungraph/blob/main/docs/rungraph-workspace.md)
 for the document, claim states, graph, impact, comparison and limits.
 
 ## Limits and guarantees
