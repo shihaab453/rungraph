@@ -72,20 +72,22 @@ def summary_owner(manifest: Manifest, result: Result) -> tuple[Optional[Adapter]
 def valid_summary(summary: object) -> bool:
     """True when an adapter returned a finite numeric triple.
 
-    A third-party plugin can return anything; a malformed value must become a
-    warning or a refusal, never a written manifest."""
-    value = getattr(summary, "value", None)
-    step = getattr(summary, "step", None)
-    timestamp = getattr(summary, "timestamp", None)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    A third-party plugin can return anything, including an object whose
+    attribute raises; a malformed value must become a warning or a refusal,
+    never a written manifest or a traceback."""
+    try:
+        value = getattr(summary, "value", None)
+        step = getattr(summary, "step", None)
+        timestamp = getattr(summary, "timestamp", None)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        if isinstance(step, bool) or not isinstance(step, int):
+            return False
+        if isinstance(timestamp, bool) or not isinstance(timestamp, int):
+            return False
+        return bool(math.isfinite(value))
+    except Exception:
         return False
-    if not math.isfinite(value):
-        return False
-    if isinstance(step, bool) or not isinstance(step, int):
-        return False
-    if isinstance(timestamp, bool) or not isinstance(timestamp, int):
-        return False
-    return True
 
 
 def _state(exc: OSError) -> str:
@@ -146,20 +148,43 @@ def _consume(fd: int, cap: int) -> tuple[Optional[bytes], str]:
     return bytes(buffer), "ok"
 
 
-def _read_direct(path: Path, cap: int) -> tuple[Optional[bytes], str]:
-    """Platforms without dir_fd: the leaf is no-follow, parents are not walked."""
+_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+
+
+def _is_link_or_reparse(info: os.stat_result) -> bool:
+    if stat.S_ISLNK(info.st_mode):
+        return True
+    # Windows directory junctions are reparse points, not symlinks.
+    return bool(_REPARSE_POINT and getattr(info, "st_file_attributes", 0) & _REPARSE_POINT)
+
+
+def _read_direct(root: Path, parts: tuple[str, ...], cap: int) -> tuple[Optional[bytes], str]:
+    """Platforms without dir_fd: walk every component with lstat.
+
+    Nothing here is a descriptor walk, so it cannot rule out a replacement
+    between the check and the open; it does refuse an existing symlink or
+    reparse point in any component, which is the best available on these
+    hosts."""
+    current = root
+    for part in parts:
+        current = current / part
+        try:
+            info = os.lstat(os.fspath(current))
+        except OSError as exc:
+            return None, _state(exc)
+        except (ValueError, UnicodeError):
+            return None, "missing"
+        if _is_link_or_reparse(info):
+            return None, "not-regular"
+        if part != parts[-1]:
+            if not stat.S_ISDIR(info.st_mode):
+                return None, "not-regular"
+        elif not stat.S_ISREG(info.st_mode):
+            # Windows cannot open a directory O_RDONLY, so classify it before
+            # the open rather than reporting the permission error as unreadable.
+            return None, "not-regular"
     try:
-        info = os.stat(os.fspath(path))
-    except OSError as exc:
-        return None, _state(exc)
-    except (ValueError, UnicodeError):
-        return None, "missing"
-    if not stat.S_ISREG(info.st_mode):
-        # Windows cannot open a directory O_RDONLY, so classify it before the
-        # open rather than reporting the permission error as unreadable.
-        return None, "not-regular"
-    try:
-        fd = os.open(os.fspath(path), _LEAF_FLAGS)
+        fd = os.open(os.fspath(root.joinpath(*parts)), _LEAF_FLAGS)
     except OSError as exc:
         return None, _state(exc)
     except (ValueError, UnicodeError):
@@ -185,7 +210,7 @@ def read_bounded(root: Path, rel_path: str, cap: int = MAX_METRIC_BYTES) -> tupl
     if path.is_absolute() or not parts or any(part in ("", ".", "..") for part in parts):
         return None, "not-regular"
     if not _DIR_FD:
-        return _read_direct(root.joinpath(*parts), cap)
+        return _read_direct(root, parts, cap)
     fds: list[int] = []
     leaf = -1
     try:

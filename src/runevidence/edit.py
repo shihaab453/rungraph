@@ -279,10 +279,17 @@ def plan_rehash(
     for res in manifest.results:
         if res.locator is not None or res.artifact_id not in selected:
             continue
-        if not refresh_summaries or not summary_shape(manifest, res):
+        if not summary_shape(manifest, res):
             continue
         fc, art = selected[res.artifact_id], artifacts.get(res.artifact_id)
         if art is None:
+            continue
+        if not refresh_summaries:
+            if fc.id in new_bytes or fc.was_volatile or fc.volatile:
+                plan.notes.append(
+                    f"{res.id}: MLflow metric summary (value, step, timestamp) was not re-read "
+                    f"from {art.path}; follow the RE-10 safe refresh procedure"
+                )
             continue
         if fc.volatile:
             plan.notes.append(

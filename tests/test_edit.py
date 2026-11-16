@@ -683,8 +683,21 @@ def test_rehash_does_not_refresh_a_0_3_summary(tmp_path, capsys):
     code, out, _ = rehash_out(capsys, root, "metric-file-0")
 
     assert code == 0
+    assert "was not re-read" in out
     assert "0.5 ->" not in out
     assert read_doc(root)["results"][0]["value"] == 0.5
+
+
+def test_rehash_does_not_note_an_unchanged_0_3_summary(tmp_path, capsys):
+    root = make_mlflow(tmp_path)
+    doc = read_doc(root)
+    doc["schema_version"] = "0.3"
+    write_doc(root, doc)
+
+    code, out, _ = rehash_out(capsys, root, "metric-file-0")
+
+    assert code == 0
+    assert "was not re-read" not in out
 
 
 class _RaisingOwner:
@@ -700,16 +713,27 @@ class _MalformedOwner:
         return self.summary
 
 
+class _ExplodingValue:
+    @property
+    def value(self):
+        raise RuntimeError("boom")
+
+    step = 3
+    timestamp = 1
+
+
 @pytest.mark.parametrize(
     "owner",
     [
         _RaisingOwner(),
         _MalformedOwner(Summary("0.9", 3, 1)),
         _MalformedOwner(Summary(float("nan"), 3, 1)),
+        _MalformedOwner(Summary(10**400, 3, 1)),
         _MalformedOwner(Summary(0.9, True, 1)),
+        _MalformedOwner(_ExplodingValue()),
         _MalformedOwner({"value": 0.9, "step": 3, "timestamp": 1}),
     ],
-    ids=["raises", "string-value", "nan", "bool-step", "dict"],
+    ids=["raises", "string-value", "nan", "huge-int", "bool-step", "raising-property", "dict"],
 )
 def test_rehash_refuses_a_broken_adapter_and_writes_nothing(tmp_path, capsys, monkeypatch, owner):
     root = make_mlflow(tmp_path)

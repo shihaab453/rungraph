@@ -131,3 +131,19 @@ def test_fifo_cannot_block_the_open(tmp_path: Path):
     fifo = tmp_path / "fifo"
     os.mkfifo(fifo)
     assert read_bounded(tmp_path, "fifo") == (None, "not-regular")
+
+
+def test_fallback_also_refuses_a_symlinked_parent(tmp_path: Path, monkeypatch):
+    import runevidence.summaries as summaries
+
+    (tmp_path / "real" / "metrics").mkdir(parents=True)
+    (tmp_path / "real" / "metrics" / "acc").write_bytes(b"1 0.5 1\n")
+    (tmp_path / "alias").symlink_to(tmp_path / "real")
+    monkeypatch.setattr(summaries, "_DIR_FD", False)
+
+    data, state = summaries.read_bounded(tmp_path, "alias/metrics/acc")
+    assert data is None
+    assert state in ("not-regular", "unreadable")
+    assert summaries.read_bounded(tmp_path, "real/metrics/acc") == (b"1 0.5 1\n", "ok")
+    (tmp_path / "sub").mkdir()
+    assert summaries.read_bounded(tmp_path, "sub") == (None, "not-regular")
