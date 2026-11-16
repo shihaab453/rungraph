@@ -533,17 +533,8 @@ def test_init_over_a_declared_0_5_refuses_before_any_write(tmp_path):
         assert canary not in out
 
 
-@pytest.mark.parametrize(
-    "version,expected",
-    [
-        ("0.3", CONDITIONS_0_3_TEXT),
-        ("0.4", CONDITIONS_0_4_TEXT),
-        ("0.5", CONDITIONS_0_5_TEXT),
-    ],
-)
-def test_conditions_version_texts_are_frozen_and_write_nothing(
-    tmp_path, version, expected
-):
+@pytest.mark.parametrize("version", ["0.3", "0.4", "0.5"])
+def test_conditions_clear_is_a_no_op_on_a_manifest_without_conditions(tmp_path, version):
     folder = tmp_path / "exp"
     if version == "0.5":
         document = tb_doc()
@@ -592,8 +583,8 @@ def test_conditions_version_texts_are_frozen_and_write_nothing(
         ["conditions", str(folder), "--run", "run", "--clear", "environment"]
     )
 
-    assert (code, err) == (2, "")
-    assert out == expected + "\n"
+    assert (code, err) == (0, "")
+    assert "UNSUPPORTED_VERSION" not in out
     assert_no_writes(folder, before)
 
 

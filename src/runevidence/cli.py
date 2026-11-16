@@ -1346,9 +1346,8 @@ _CONDITIONS_ERROR_TEXT = {
     ),
     "UNSUPPORTED_VERSION": (
         "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
-        "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
-        "runevidence migrate PATH --to 0.2; schema 0.3 has no downgrade path. "
-        "Nothing was written."
+        "schema 0.2 or later manifest. A schema 0.1 manifest can be migrated with "
+        "runevidence migrate PATH --to 0.2. Nothing was written."
     ),
     "RESERVED_PATH": (
         "ERROR (RESERVED_PATH): the target resolves to a backup name; choose the "
@@ -1394,54 +1393,6 @@ _CONDITIONS_ERROR_TEXT = {
     "LOCK_UNAVAILABLE": LOCK_UNAVAILABLE_TEXT,
 }
 
-# Schema 0.4 and 0.5 have no downgrade path and the shared 0.3 sentence would
-# name the wrong version, so each source version selects its own fixed line.
-_CONDITIONS_UNSUPPORTED_VERSION_0_4 = (
-    "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
-    "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
-    "runevidence migrate PATH --to 0.2; schema 0.3 and 0.4 have no downgrade path. "
-    "Nothing was written."
-)
-_CONDITIONS_UNSUPPORTED_VERSION_0_5 = (
-    "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
-    "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
-    "runevidence migrate PATH --to 0.2; schema 0.3, 0.4 and 0.5 have no downgrade path. "
-    "Nothing was written."
-)
-_CONDITIONS_UNSUPPORTED_VERSION_0_6 = (
-    "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
-    "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
-    "runevidence migrate PATH --to 0.2; schema 0.3, 0.4, 0.5 and 0.6 have no downgrade "
-    "path. Nothing was written."
-)
-_CONDITIONS_UNSUPPORTED_VERSION_0_7 = (
-    "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
-    "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
-    "runevidence migrate PATH --to 0.2; schema 0.3, 0.4, 0.5, 0.6 and 0.7 have no "
-    "downgrade path. Nothing was written."
-)
-
-
-_CONDITIONS_UNSUPPORTED_VERSION_0_8 = (
-    "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
-    "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
-    "runevidence migrate PATH --to 0.2; schema 0.3, 0.4, 0.5, 0.6, 0.7 and 0.8 have no "
-    "downgrade path. Nothing was written."
-)
-_CONDITIONS_UNSUPPORTED_VERSION_0_9 = (
-    "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
-    "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
-    "runevidence migrate PATH --to 0.2; schema 0.3, 0.4, 0.5, 0.6, 0.7, 0.8 and 0.9 have "
-    "no downgrade path. Nothing was written."
-)
-_CONDITIONS_UNSUPPORTED_VERSION_0_10 = (
-    "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
-    "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
-    "runevidence migrate PATH --to 0.2; schema 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9 and 0.10 "
-    "have no downgrade path. Nothing was written."
-)
-
-
 def _conditions_failure(code: str, as_json: bool, *, version: str | None = None) -> int:
     """Emit exactly one fixed document for a refused conditions update."""
     if code not in _CONDITIONS_ERROR_TEXT:
@@ -1455,20 +1406,6 @@ def _conditions_failure(code: str, as_json: bool, *, version: str | None = None)
             "error": {"code": code},
         }
         print(json.dumps(document, indent=2, ensure_ascii=True, allow_nan=False))
-    elif code == "UNSUPPORTED_VERSION" and version == "0.4":
-        print(_CONDITIONS_UNSUPPORTED_VERSION_0_4)
-    elif code == "UNSUPPORTED_VERSION" and version == "0.5":
-        print(_CONDITIONS_UNSUPPORTED_VERSION_0_5)
-    elif code == "UNSUPPORTED_VERSION" and version == "0.6":
-        print(_CONDITIONS_UNSUPPORTED_VERSION_0_6)
-    elif code == "UNSUPPORTED_VERSION" and version == "0.7":
-        print(_CONDITIONS_UNSUPPORTED_VERSION_0_7)
-    elif code == "UNSUPPORTED_VERSION" and version == "0.8":
-        print(_CONDITIONS_UNSUPPORTED_VERSION_0_8)
-    elif code == "UNSUPPORTED_VERSION" and version == "0.9":
-        print(_CONDITIONS_UNSUPPORTED_VERSION_0_9)
-    elif code == "UNSUPPORTED_VERSION" and version == "0.10":
-        print(_CONDITIONS_UNSUPPORTED_VERSION_0_10)
     else:
         print(_CONDITIONS_ERROR_TEXT[code])
     return EXIT_INVALID
@@ -2798,7 +2735,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "conditions",
-        help="set or clear recorded run conditions on a schema 0.2 manifest from a local JSON patch (no condition values on the command line)",
+        help="set or clear recorded run conditions on a schema 0.2 or later manifest from a local JSON patch (no condition values on the command line)",
     )
     p.add_argument("path", type=Path, help=f"experiment folder (containing {MANIFEST_FILENAME}) or manifest file")
     p.add_argument("--run", required=True, metavar="RUN_ID", help="exactly one run ID whose conditions are edited")

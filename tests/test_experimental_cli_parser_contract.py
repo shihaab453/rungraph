@@ -57,6 +57,10 @@ HISTORICAL_25_ROUTES = ("validate", "validate-batch", "inspect", "compare", "com
 # conditions snapshot, before the public read-only directory flag.
 # M42-SCANNER-S3B (2026-11-12) superseded these; HISTORICAL RECORD only.
 HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
+    # Schema coverage (2026-11-16): conditions and comparability accept 0.2-0.10;
+    # the per-version conditions refusal texts were removed. Historical only.
+    "c13658e807a6b21ae28360f1c8dc48a93077c78c4803387cec9324b641991fc6",  # LF
+    "c59b4a93475c9cac0f73179051c0ead21103fc0285cee514e0f8fa7ce6226ccb",  # CRLF
     # Slice H (2026-11-16): schema 0.10 TF2 media added the two locator kinds, the
     # flag and the 0.10 texts/targets. Historical; superseded by the current pin.
     "71baf1cc8c9f1a494627864dea3bd5022936415fea29be6755adcd07a9276186",  # LF
@@ -147,8 +151,8 @@ HISTORICAL_READER_DIGEST_23 = (
 # pin is an exact byte SHA-256. Nothing is normalized during checking. Static
 # != plugin safety.
 CLI_HASH = frozenset({
-    "c13658e807a6b21ae28360f1c8dc48a93077c78c4803387cec9324b641991fc6",  # LF
-    "c59b4a93475c9cac0f73179051c0ead21103fc0285cee514e0f8fa7ce6226ccb",  # CRLF
+    "f56cc6ad27a4739870107d8e9e4eaf2319c453301f2290e52402309f2c0249e7",  # LF
+    "fc5bc0684eb7741772f258c7b9587e96ef446fcfcc30bfaaea25cefefdbc9e02",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.

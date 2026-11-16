@@ -195,8 +195,8 @@ def test_load_manifest_dispatches_10(tmp_path):
     assert isinstance(load_manifest(path).manifest, Manifest10)
 
 
-def test_schema_10_is_unsupported_by_comparability():
-    assert "0.10" in _UNSUPPORTED_COMPARABILITY_SCHEMAS
+def test_schema_10_is_supported_by_comparability():
+    assert "0.10" not in _UNSUPPORTED_COMPARABILITY_SCHEMAS
 
 
 @pytest.mark.parametrize("target", ["0.9", "0.8", "0.3"])

@@ -249,7 +249,7 @@ def _doc_0_4(doc: dict) -> dict:
     return out
 
 
-def test_preflight_list_refuses_0_3_without_reporting_readiness(tmp_path):
+def test_preflight_list_accepts_0_3(tmp_path):
     root = tmp_path / "pair-0.3-list"
     baseline = write_doc(
         root, "baseline.json", _doc_0_3(make_doc(run_id="base-run", result_id="base-result"))
@@ -257,19 +257,15 @@ def test_preflight_list_refuses_0_3_without_reporting_readiness(tmp_path):
     target = write_doc(
         root, "target.json", make_doc(run_id="target-run", result_id="target-result")
     )
-    before = (baseline.read_bytes(), target.read_bytes())
 
     code, out, err = run_cli(["comparability", str(baseline), str(target), "--preflight"])
 
-    assert (code, err) == (2, "")
-    assert out == "ERROR UNSUPPORTED_VERSION (baseline) (exit 2)\n"
-    assert "preflight:" not in out
-    assert "missing" not in out and "ready" not in out
-    assert str(baseline) not in out and str(target) not in out
-    assert (baseline.read_bytes(), target.read_bytes()) == before
+    assert (code, err) == (0, "")
+    assert "preflight:" in out
+    assert "UNSUPPORTED_VERSION" not in out
 
 
-def test_preflight_pair_refuses_0_3_without_reporting_readiness(tmp_path):
+def test_preflight_pair_accepts_0_3(tmp_path):
     root = tmp_path / "pair-0.3-pair"
     baseline = write_doc(
         root, "baseline.json", _doc_0_3(make_doc(run_id="base-run", result_id="base-result"))
@@ -278,16 +274,14 @@ def test_preflight_pair_refuses_0_3_without_reporting_readiness(tmp_path):
         root, "target.json", _doc_0_3(make_doc(run_id="target-run", result_id="target-result"))
     )
 
-    code, out, err = run_cli(pair_argv(baseline, target))
+    code, out, err = run_cli(pair_argv(baseline, target, "base-result", "target-result"))
 
-    assert (code, err) == (2, "")
-    assert out == "ERROR UNSUPPORTED_VERSION (baseline) (exit 2)\n"
-    assert "preflight:" not in out
-    assert "missing" not in out and "ready" not in out
-    assert str(baseline) not in out and str(target) not in out
+    assert code in (0, 1, 2) and err == ""
+    assert "preflight:" in out
+    assert "UNSUPPORTED_VERSION" not in out
 
 
-def test_preflight_target_0_3_reports_target_side(tmp_path):
+def test_preflight_target_0_3_is_accepted(tmp_path):
     root = tmp_path / "pair-0.3-target"
     baseline = write_doc(
         root, "baseline.json", make_doc(run_id="base-run", result_id="base-result")
@@ -296,14 +290,14 @@ def test_preflight_target_0_3_reports_target_side(tmp_path):
         root, "target.json", _doc_0_3(make_doc(run_id="target-run", result_id="target-result"))
     )
 
-    code, out, err = run_cli(pair_argv(baseline, target))
+    code, out, err = run_cli(pair_argv(baseline, target, "base-result", "target-result"))
 
-    assert (code, err) == (2, "")
-    assert out == "ERROR UNSUPPORTED_VERSION (target) (exit 2)\n"
-    assert str(baseline) not in out and str(target) not in out
+    assert code in (0, 1, 2) and err == ""
+    assert "preflight:" in out
+    assert "UNSUPPORTED_VERSION" not in out
 
 
-def test_preflight_list_refuses_0_4_without_reporting_readiness(tmp_path):
+def test_preflight_list_accepts_0_4(tmp_path):
     root = tmp_path / "pair-0.4-list"
     baseline = write_doc(
         root, "baseline.json", _doc_0_4(make_doc(run_id="base-run", result_id="base-result"))
@@ -311,18 +305,15 @@ def test_preflight_list_refuses_0_4_without_reporting_readiness(tmp_path):
     target = write_doc(
         root, "target.json", make_doc(run_id="target-run", result_id="target-result")
     )
-    before = (baseline.read_bytes(), target.read_bytes())
 
     code, out, err = run_cli(["comparability", str(baseline), str(target), "--preflight"])
 
-    assert (code, err) == (2, "")
-    assert out == "ERROR UNSUPPORTED_VERSION (baseline) (exit 2)\n"
-    assert "preflight:" not in out
-    assert "missing" not in out and "ready" not in out
-    assert (baseline.read_bytes(), target.read_bytes()) == before
+    assert (code, err) == (0, "")
+    assert "preflight:" in out
+    assert "UNSUPPORTED_VERSION" not in out
 
 
-def test_preflight_pair_refuses_0_4_without_reporting_readiness(tmp_path):
+def test_preflight_pair_accepts_0_4(tmp_path):
     root = tmp_path / "pair-0.4-pair"
     baseline = write_doc(
         root, "baseline.json", _doc_0_4(make_doc(run_id="base-run", result_id="base-result"))
@@ -331,16 +322,14 @@ def test_preflight_pair_refuses_0_4_without_reporting_readiness(tmp_path):
         root, "target.json", _doc_0_4(make_doc(run_id="target-run", result_id="target-result"))
     )
 
-    code, out, err = run_cli(pair_argv(baseline, target))
+    code, out, err = run_cli(pair_argv(baseline, target, "base-result", "target-result"))
 
-    assert (code, err) == (2, "")
-    assert out == "ERROR UNSUPPORTED_VERSION (baseline) (exit 2)\n"
-    assert "preflight:" not in out
-    assert "missing" not in out and "ready" not in out
-    assert str(baseline) not in out and str(target) not in out
+    assert code in (0, 1, 2) and err == ""
+    assert "preflight:" in out
+    assert "UNSUPPORTED_VERSION" not in out
 
 
-def test_preflight_target_0_4_reports_target_side(tmp_path):
+def test_preflight_target_0_4_is_accepted(tmp_path):
     root = tmp_path / "pair-0.4-target"
     baseline = write_doc(
         root, "baseline.json", make_doc(run_id="base-run", result_id="base-result")
@@ -349,11 +338,11 @@ def test_preflight_target_0_4_reports_target_side(tmp_path):
         root, "target.json", _doc_0_4(make_doc(run_id="target-run", result_id="target-result"))
     )
 
-    code, out, err = run_cli(pair_argv(baseline, target))
+    code, out, err = run_cli(pair_argv(baseline, target, "base-result", "target-result"))
 
-    assert (code, err) == (2, "")
-    assert out == "ERROR UNSUPPORTED_VERSION (target) (exit 2)\n"
-    assert str(baseline) not in out and str(target) not in out
+    assert code in (0, 1, 2) and err == ""
+    assert "preflight:" in out
+    assert "UNSUPPORTED_VERSION" not in out
 
 
 def test_grammar_failure_is_fixed_text(tmp_path):

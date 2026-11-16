@@ -174,8 +174,8 @@ def test_load_manifest_dispatches_07(tmp_path):
     assert isinstance(loaded.manifest, Manifest07)
 
 
-def test_schema_07_is_unsupported_by_comparability():
-    assert "0.7" in _UNSUPPORTED_COMPARABILITY_SCHEMAS
+def test_schema_07_is_supported_by_comparability():
+    assert "0.7" not in _UNSUPPORTED_COMPARABILITY_SCHEMAS
 
 
 def test_migrate_07_to_06_is_a_downgrade(tmp_path):

@@ -635,7 +635,7 @@ def test_target_load_failure_text_shape(tmp_path, capsys):
     _assert_no_canaries(out, err)
 
 
-def test_0_3_pair_json_refuses_and_is_never_comparable(tmp_path, capsys):
+def test_0_3_pair_json_compares_and_is_not_an_unsupported_version(tmp_path, capsys):
     baseline = _write(
         tmp_path, "baseline-0.3.json", _manifest_0_3("b", split="test")
     )
@@ -643,14 +643,11 @@ def test_0_3_pair_json_refuses_and_is_never_comparable(tmp_path, capsys):
         tmp_path, "target-0.3.json", _manifest_0_3("t", split="validation")
     )
     code, out, err = _run(capsys, _argv(baseline, target, json_flag=True))
-    assert code == 2
+    assert code == 1
     assert err == ""
     _assert_no_canaries(out, err)
-    document = _single_json(out)
-    _assert_error_document(
-        document, code=command.UNSUPPORTED_VERSION, side="baseline"
-    )
-    assert COMPARABLE not in out
+    assert NOT_COMPARABLE in out
+    assert "UNSUPPORTED_VERSION" not in out
     assert str(baseline) not in out and str(target) not in out
 
 
@@ -662,23 +659,21 @@ def test_0_3_baseline_text_is_fixed_and_value_free(tmp_path, capsys):
         tmp_path, "target-0.3.json", _manifest_0_3("t", split="validation")
     )
     code, out, err = _run(capsys, _argv(baseline, target))
-    assert code == 2
+    assert code == 1
     assert err == ""
-    assert out == "ERROR UNSUPPORTED_VERSION (baseline) (exit 2)\n"
+    assert NOT_COMPARABLE in out
     _assert_no_canaries(out, err)
 
 
-def test_0_3_target_is_refused(tmp_path, capsys):
+def test_0_3_target_compares(tmp_path, capsys):
     baseline, _ = _pair(tmp_path)
     target = _write(
         tmp_path, "target-0.3.json", _manifest_0_3("t", split="test")
     )
     code, out, err = _run(capsys, _argv(baseline, target, json_flag=True))
-    assert code == 2
+    assert code == 0
     assert err == ""
-    _assert_error_document(
-        _single_json(out), code=command.UNSUPPORTED_VERSION, side="target"
-    )
+    assert COMPARABLE in out
     assert str(baseline) not in out and str(target) not in out
 
 
