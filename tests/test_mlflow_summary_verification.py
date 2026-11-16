@@ -144,11 +144,12 @@ class _ExplodingValue:
         _MalformedOwner(Summary("0.9", 3, 1)),
         _MalformedOwner(Summary(float("nan"), 3, 1)),
         _MalformedOwner(Summary(10**400, 3, 1)),
+        _MalformedOwner(Summary(0.9, 10**5000, 1)),
         _MalformedOwner(Summary(0.9, True, 1)),
         _MalformedOwner(_ExplodingValue()),
         _MalformedOwner({"value": 0.9, "step": 3, "timestamp": 1}),
     ],
-    ids=["raises", "string-value", "nan", "huge-int", "bool-step", "raising-property", "dict"],
+    ids=["raises", "string-value", "nan", "huge-int", "huge-step", "bool-step", "raising-property", "dict"],
 )
 def test_a_broken_adapter_warns_instead_of_crashing(tmp_path, capsys, monkeypatch, owner):
     root = make_manifest(tmp_path, value=0.1)
@@ -156,6 +157,30 @@ def test_a_broken_adapter_warns_instead_of_crashing(tmp_path, capsys, monkeypatc
     assert main(["validate", str(root)]) == 0
     assert "result-unverified [m]" in capsys.readouterr().out
     assert main(["validate", str(root), "--strict"]) == 1
+
+
+class _ReadOnceValue:
+    def __init__(self):
+        self.calls = 0
+
+    @property
+    def value(self):
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("read twice")
+        return 0.5
+
+    step = 3
+    timestamp = 1700000000000
+
+
+def test_the_summary_attributes_are_read_only_once(tmp_path, capsys, monkeypatch):
+    root = make_manifest(tmp_path)
+    owner = _MalformedOwner(_ReadOnceValue())
+    monkeypatch.setattr("runevidence.summaries.summary_claimants", lambda *a, **k: ([owner], "ok"))
+
+    assert main(["validate", str(root), "--strict"]) == 0
+    assert "0 errors, 0 warnings" in capsys.readouterr().out
 
 
 def test_two_claimants_warn(tmp_path, capsys, monkeypatch):

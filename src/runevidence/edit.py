@@ -30,11 +30,11 @@ from .manifest import LoadedManifest, artifact_to_dict, validate_manifest
 from .models import Artifact, Manifest, is_own_file
 from .summaries import (
     SUMMARY_SCHEMAS,
+    checked_summary,
     describe_state,
     read_bounded,
     summary_owner,
     summary_shape,
-    valid_summary,
 )
 
 GLOB_CHARS = set("*?[")
@@ -279,13 +279,17 @@ def plan_rehash(
     for res in manifest.results:
         if res.locator is not None or res.artifact_id not in selected:
             continue
-        if not summary_shape(manifest, res):
-            continue
         fc, art = selected[res.artifact_id], artifacts.get(res.artifact_id)
         if art is None:
             continue
-        if not refresh_summaries:
-            if fc.id in new_bytes or fc.was_volatile or fc.volatile:
+        if not refresh_summaries or not summary_shape(manifest, res):
+            # Preserve the delivered NOTE for a result that matches the legacy
+            # key-presence shape but is not refreshed: every 0.3-0.10 summary,
+            # and a 0.1/0.2 result whose step/timestamp is not an integer.
+            if (
+                summary_shape(manifest, res, integer_metadata=False)
+                and (fc.id in new_bytes or fc.was_volatile or fc.volatile)
+            ):
                 plan.notes.append(
                     f"{res.id}: MLflow metric summary (value, step, timestamp) was not re-read "
                     f"from {art.path}; follow the RE-10 safe refresh procedure"
@@ -333,22 +337,30 @@ def plan_rehash(
                 f"Cannot refresh metric summary {res.id!r}: the adapter failed "
                 f"({type(exc).__name__}). Nothing was written."
             ) from None
-        if summary is None or not valid_summary(summary):
+        if summary is None:
             raise EditError(
                 f"Cannot refresh metric summary {res.id!r}: the adapter did not return a usable "
                 "summary (malformed or over a cap). Pick other targets, or mark it volatile "
                 "with --volatile. Nothing was written."
             )
+        checked = checked_summary(summary)
+        if checked is None:
+            raise EditError(
+                f"Cannot refresh metric summary {res.id!r}: the adapter did not return a usable "
+                "summary (malformed, out of range, or over a cap). Pick other targets, or mark "
+                "it volatile with --volatile. Nothing was written."
+            )
+        value, step, timestamp = checked
         old = (res.value, res.metadata.get("step"), res.metadata.get("timestamp_ms"))
-        new = (summary.value, summary.step, summary.timestamp)
+        new = checked
         if old == new:
             continue
         j = _entry_index(raw["results"], res.id, "result")
-        raw["results"][j]["value"] = summary.value
+        raw["results"][j]["value"] = value
         metadata = raw["results"][j].setdefault("metadata", {})
-        metadata["step"] = summary.step
-        metadata["timestamp_ms"] = summary.timestamp
-        plan.values.append(ValueChange(res.id, res.name, res.value, summary.value))
+        metadata["step"] = step
+        metadata["timestamp_ms"] = timestamp
+        plan.values.append(ValueChange(res.id, res.name, res.value, value))
         if old[1] != new[1] or old[2] != new[2]:
             plan.notes.append(
                 f"{res.id}: step {old[1]!r} -> {new[1]!r}, timestamp_ms {old[2]!r} -> {new[2]!r}"

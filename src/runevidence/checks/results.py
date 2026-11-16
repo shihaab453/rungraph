@@ -1335,11 +1335,11 @@ def check_results(
     since there is no single JSON file to read the value from."""
     from ..summaries import (
         SUMMARY_SCHEMAS,
+        checked_summary,
         describe_state,
         read_bounded,
         summary_owner,
         summary_shape,
-        valid_summary,
     )
 
     findings: list[Finding] = []
@@ -1433,7 +1433,8 @@ def check_results(
                     summary = owner.read_summary(data)
                 except Exception:
                     summary = None
-                if summary is None or not valid_summary(summary):
+                checked = checked_summary(summary) if summary is not None else None
+                if checked is None:
                     unverified(
                         res.id,
                         f"Result {res.id!r} ({res.name}): the adapter did not return a usable "
@@ -1441,7 +1442,7 @@ def check_results(
                     )
                     continue
                 recorded = (res.value, res.metadata.get("step"), res.metadata.get("timestamp_ms"))
-                actual = (summary.value, summary.step, summary.timestamp)
+                actual = checked
                 if recorded != actual:
                     mismatched.add(res.id)
                     findings.append(
@@ -1453,8 +1454,8 @@ def check_results(
                             message=(
                                 f"Result {res.id!r} ({res.name}) records {res.value!r} at step "
                                 f"{recorded[1]!r}, timestamp_ms {recorded[2]!r} but "
-                                f"{artifact.path} contains {summary.value!r} at step "
-                                f"{summary.step}, timestamp_ms {summary.timestamp}"
+                                f"{artifact.path} contains {actual[0]!r} at step "
+                                f"{actual[1]}, timestamp_ms {actual[2]}"
                             ),
                         )
                     )

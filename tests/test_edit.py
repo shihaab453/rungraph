@@ -700,6 +700,22 @@ def test_rehash_does_not_note_an_unchanged_0_3_summary(tmp_path, capsys):
     assert "was not re-read" not in out
 
 
+@pytest.mark.parametrize("version", ["0.1", "0.3"])
+def test_rehash_notes_a_non_integer_metadata_summary(tmp_path, capsys, version):
+    root = make_mlflow(tmp_path)
+    doc = read_doc(root)
+    doc["schema_version"] = version
+    doc["results"][0]["metadata"]["step"] = "3"
+    write_doc(root, doc)
+    log_another_step(root)
+
+    code, out, _ = rehash_out(capsys, root, "metric-file-0")
+
+    assert code == 0
+    assert "was not re-read" in out
+    assert read_doc(root)["results"][0]["value"] == 0.5
+
+
 class _RaisingOwner:
     def read_summary(self, data):
         raise ZeroDivisionError
@@ -729,11 +745,12 @@ class _ExplodingValue:
         _MalformedOwner(Summary("0.9", 3, 1)),
         _MalformedOwner(Summary(float("nan"), 3, 1)),
         _MalformedOwner(Summary(10**400, 3, 1)),
+        _MalformedOwner(Summary(0.9, 10**5000, 1)),
         _MalformedOwner(Summary(0.9, True, 1)),
         _MalformedOwner(_ExplodingValue()),
         _MalformedOwner({"value": 0.9, "step": 3, "timestamp": 1}),
     ],
-    ids=["raises", "string-value", "nan", "huge-int", "bool-step", "raising-property", "dict"],
+    ids=["raises", "string-value", "nan", "huge-int", "huge-step", "bool-step", "raising-property", "dict"],
 )
 def test_rehash_refuses_a_broken_adapter_and_writes_nothing(tmp_path, capsys, monkeypatch, owner):
     root = make_mlflow(tmp_path)

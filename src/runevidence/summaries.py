@@ -39,12 +39,16 @@ def _normalized(path: str) -> str:
     return out
 
 
-def summary_shape(manifest: Manifest, result: Result) -> bool:
+def summary_shape(manifest: Manifest, result: Result, *, integer_metadata: bool = True) -> bool:
     """True when ``result`` follows the delivered MLflow summary convention.
 
     This is the diagnostic gate: a shape match that no installed adapter
     verifies produces an unverified warning. It never authorizes a rewrite by
-    itself; ``summary_claimants`` must still claim the result first."""
+    itself; ``summary_claimants`` must still claim the result first.
+
+    ``integer_metadata=False`` reproduces the delivered key-presence predicate
+    used for the existing unrefreshed NOTE, so 0.3+ behavior stays identical
+    even when step or timestamp is not an integer."""
     if result.locator is not None or result.artifact_id is None:
         return False
     run = next((item for item in manifest.runs if item.id == result.run_id), None)
@@ -53,8 +57,13 @@ def summary_shape(manifest: Manifest, result: Result) -> bool:
         return False
     if not isinstance(run.metadata.get("mlflow"), dict):
         return False
-    if not _is_int(result.metadata.get("step")) or not _is_int(result.metadata.get("timestamp_ms")):
-        return False
+    metadata = result.metadata if isinstance(result.metadata, dict) else {}
+    if integer_metadata:
+        if not _is_int(metadata.get("step")) or not _is_int(metadata.get("timestamp_ms")):
+            return False
+    else:
+        if "step" not in metadata or "timestamp_ms" not in metadata:
+            return False
     if artifact.kind != "metrics" or artifact.run_id != result.run_id:
         return False
     return _normalized(artifact.path).endswith("/metrics/" + result.name)
@@ -69,25 +78,36 @@ def summary_owner(manifest: Manifest, result: Result) -> tuple[Optional[Adapter]
     return None, reason
 
 
-def valid_summary(summary: object) -> bool:
-    """True when an adapter returned a finite numeric triple.
+_MIN_SAFE_INT = -(2**63)
+_MAX_SAFE_INT = 2**63 - 1
+
+
+def checked_summary(summary: object) -> Optional[tuple[float, int, int]]:
+    """The checked numeric triple, or None for any malformed return.
 
     A third-party plugin can return anything, including an object whose
-    attribute raises; a malformed value must become a warning or a refusal,
-    never a written manifest or a traceback."""
+    attribute raises or a huge integer that later cannot be formatted. Reading
+    each attribute once and returning the checked values also stops a property
+    that is valid on the first read from raising on the second."""
     try:
         value = getattr(summary, "value", None)
         step = getattr(summary, "step", None)
         timestamp = getattr(summary, "timestamp", None)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return False
+            return None
         if isinstance(step, bool) or not isinstance(step, int):
-            return False
+            return None
         if isinstance(timestamp, bool) or not isinstance(timestamp, int):
-            return False
-        return bool(math.isfinite(value))
+            return None
+        if not (_MIN_SAFE_INT <= step <= _MAX_SAFE_INT):
+            return None
+        if not (_MIN_SAFE_INT <= timestamp <= _MAX_SAFE_INT):
+            return None
+        if not math.isfinite(value):
+            return None
+        return float(value), step, timestamp
     except Exception:
-        return False
+        return None
 
 
 def _state(exc: OSError) -> str:
