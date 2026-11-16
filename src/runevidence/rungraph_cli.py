@@ -417,10 +417,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("root", nargs="?", default=".")
     p.add_argument("--metric", required=True)
     p.add_argument("--run")
+    p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_compare)
 
     p = sub.add_parser("matrix", help="recorded values as a member x metric matrix")
     p.add_argument("root", nargs="?", default=".")
+    p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_matrix)
 
     p = sub.add_parser("leaderboard", help="recorded numeric values ranked across members")
@@ -428,6 +430,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--metric", required=True)
     p.add_argument("--direction", choices=("max", "min"), required=True)
     p.add_argument("--top", type=int, default=10)
+    p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_leaderboard)
 
     p = sub.add_parser("patch", help="apply an all-or-nothing workspace patch")
