@@ -70,6 +70,10 @@ outputs are unchanged.
 
 ## Histograms (schema 0.7)
 
+`init --include-tensors` also records numeric `Summary.Value.tensor` payloads as
+schema 0.9 `tensorboard-tensor` results: dtype, shape, element count and a
+canonical SHA-256, never the array itself. `--tags` matches tensor tags too.
+
 `init --include-images` also records legacy `Summary.Value.image`
 (`Summary.Image`) summaries as schema 0.8 `tensorboard-image` results. Only PNG
 payloads are recorded, as digest-only references with verified IHDR dimensions;
