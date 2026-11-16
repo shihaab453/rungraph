@@ -1,26 +1,19 @@
-# RunGraph workspace RFC (v0.3)
+# RunGraph workspace RFC (v0.4)
 
 Status: draft for independent review. No implementation is authorised until this contract is
 accepted.
 
 ## 0. Changes in this version
 
-- v0.3 folds the second review: discovery uses stable IDs from an existing document and
-  scans fully so nested manifests are found; provisional suffixing skips taken IDs.
-- Adds workspace-claim refs (`{"claim": ...}`), member-declared relationships and member
-  evidence citations to the graph, and fixes the claim-cycle set.
-- Rewrites the claim predicates so `supported` and `contradiction-recorded` can coexist,
-  context-only citations are `uncited`, `unresolved` always implies `at-risk`, and member
-  claims map through a table plus `claim-at-risk`.
-- Defines the closure to include `derived_from` and to define `impact(X)` exactly.
-- Uses the result ID as the row identity, with `ambiguous` matrix cells and `--result`.
-- Completes the patch command mapping, member flags, `edit-claim` merge/replace and
-  `set-workspace` rules.
-- Adds every JSON envelope/payload and the missing finding/error codes.
-- Adds baseline canonical encoding, schema-changed and re-keyed cases.
-- v0.2 folded: read-only discovery, membership authoring, typed identity, document table,
-  edge rules, report policy, baseline projection, three comparison routes, patch protocol,
-  per-command exits and the expanded test plan.
+- v0.4 folds the third review: claim citations to artifacts/runs/projects are context, not
+  edges; the member-claim mapping matches the delivered findings; `supported` excludes
+  inherited and unresolved states; the closure is defined once per object kind and matches
+  `foundations`; row identity is the result ID everywhere; `workspace-claim-uncited` replaces
+  the confusing name; `--expected-sha256` precedence and `init --force` staleness are stated;
+  discovery includes declared members under ignored folders.
+- v0.3 folded the second review: stable discovery IDs, full scanning, workspace-claim refs,
+  member relationships/evidence edges, corrected claim predicates, per-kind closure,
+  result-ID rows, patch mapping, JSON envelopes and baseline cases.
 
 ## 1. Problem and scope
 
@@ -109,7 +102,9 @@ Rules:
   `workspace-member-nested` (error).
 - If `ROOT/rungraph.json` exists and loads, each discovered folder that matches a declared
   member path takes that member's stable ID; every other folder gets a provisional ID.
-  Without a document, all IDs are provisional.
+  Declared members are included even when their folder is in the ignore list, so `init
+  --force` does not silently drop a member under `build/` or a similar name. Without a
+  document, all IDs are provisional.
 - Provisional member ID: `prov-` + `valid_slug(relative folder path)`; empty path (root) is
   `prov-root`. Collisions are suffixed `-2`, `-3` in sorted relative-path order, skipping any
   suffix that is already a taken ID, so the result does not depend on traversal timing.
@@ -139,7 +134,9 @@ A global node ID is `<kind>:<member-id>#<local-id>`:
 
 The `member#local` shorthand is accepted by `--from` and `impact`; it resolves only if exactly
 one object in that member has the ID (manifest IDs are unique per member; duplicate local IDs
-make the member invalid for these commands). Workspace claims must use the `claim:` form.
+make the member invalid for these commands). Workspace claims use the full node ID
+`claim:<workspace-id>#<claim-id>` on the command line; a document ref uses
+`{"claim": "<claim-id>"}`.
 
 - A member with duplicate local IDs is reported by the member's existing `duplicate-id`
   findings and is `workspace-member-invalid` for graph/report/impact; it is never resolved
@@ -156,9 +153,11 @@ make the member invalid for these commands). Workspace claims must use the `clai
   - workspace relationships,
   - workspace claim citations, including `{"claim": ...}` refs.
 - Endpoint kinds use the delivered rules: `checks/graph.py` `ALLOWED_ENDPOINTS` for
-  relationships and evidence citations, `run_lineage.py` `_ALLOWED` for traversal. Workspace
-  claim citations may target a result, evidence or workspace claim; any other target is
-  `workspace-edge-invalid` (error) and is not traversed.
+  relationships and evidence citations, `run_lineage.py` `_ALLOWED` for traversal. A
+  workspace claim citation to a result, evidence or workspace claim is a traversed edge; a
+  citation to an artifact, run or project is **context**, not an edge: it is retained in the
+  document, listed in the graph's `context` array, and never affects states or impact. Any
+  other target (or an unknown kind) is `workspace-edge-invalid` (error).
 - Identical edges from inline, member and workspace data are merged. A workspace relationship
   that gives an artifact a second producing run, or contradicts a member's recorded
   provenance, is `workspace-provenance-conflict` (error) and not traversed.
@@ -169,16 +168,12 @@ make the member invalid for these commands). Workspace claims must use the `clai
   example path per strongly connected component, at most 100 examples; a cycle wholly inside
   one member is reported once by the member and once in the workspace list tagged with that
   member.
-- The dependency closure used by report/impact is: the cited object; for a result, its
-  artifact and run, the run's input artifacts and their producing runs recursively, the
-  artifacts the run produced, and any `derived_from` ancestors of those artifacts; for an
-  evidence or workspace claim, its own citations recursively. `derived_from` and
-  member/workspace relationship edges are followed. `impact(X)` is exactly
-  `{claim : X is in closure(claim)}`; the report uses the same function.
+- The dependency closure is defined once in §5; report and impact both call the same
+  function. `impact(X)` is exactly `{claim : X is in closure(claim)}`.
 - `graph` output: `format: "rungraph-graph"`, `version: "0.1"`, `exit_code`, `nodes` (`id`,
   `kind`, `member`, `status`, `label`), `edges` (`source`, `target`, `relation`, `origin`),
-  `cycles`, `unresolved`. Unresolved refs are nodes with `status: "unresolved"`, never
-  dropped.
+  `context` (claim citations retained but not traversed), `cycles`, `unresolved`. Unresolved
+  refs are nodes with `status: "unresolved"`, never dropped.
 - `--from` traverses outgoing dependency edges (the lineage direction); `--depth` is 1–100,
   default full traversal; `--json` is the only machine format and `--format dot` renders the
   same model, it is not a second model.
@@ -191,45 +186,68 @@ it is shown but does not count as support and does not make the claim cited. A c
 result/evidence/claim support target is `uncited`.
 
 For a member claim, the delivered manifest semantics apply unchanged (result, artifact or run
-targets; project/evidence targets are invalid). Its states are:
+targets; project/evidence targets are invalid). Its labels combine every signal; a claim with
+several findings carries several labels.
 
-| Delivered signal | State |
+| Delivered signal | Label |
 | --- | --- |
-| `claim-unverified` (no resolvable support) | `unresolved` |
 | `dangling-reference` on a cited object | `unresolved` |
-| `unsupported-claim` / no support target | `uncited` |
-| `conflicting-evidence` | `contradiction-recorded` |
+| `unsupported-claim` (error severity) | `at-risk` |
+| `unsupported-claim` (warning severity, cites nothing) | `uncited` |
 | `claim-at-risk` | `at-risk` |
+| `claim-unverified` | no state change; it is shown as a warning beside `supported` |
+| `conflicting-evidence` on the claim (same target in both lists) | `contradiction-recorded` |
+| `conflicting-evidence` on a result subject (a run reports one metric twice) | no claim state; a result-level finding |
+| any resolved `contradicts` target | `contradiction-recorded` |
+| no result/evidence/claim support target | `uncited` |
 | otherwise | `supported` |
 
-Structural coverage flags cannot imply `at-risk`; only the delivered `claim-at-risk` finding
-(and the closure rule below) can.
+Structural coverage flags cannot imply `at-risk`; only the delivered `claim-at-risk` finding,
+an inherited state, or the closure rule can.
 
-The dependency closure of a cited object is: the object itself; for a result, its artifact and
-run, the run's input artifacts and their producing runs recursively, the artifacts the run
-produced, and `derived_from` ancestors of those artifacts; for an evidence or workspace
-claim, its own citations recursively. A workspace claim citing a member claim or another
-workspace claim inherits that claim's `unresolved`, `at-risk` and `contradiction-recorded`
-states. An error-level finding whose subject is any object in the closure, or any file
-finding for an artifact in the closure, "touches" the claim. A finding with no subject touches
-the member only.
+The dependency closure is defined once, here, and used by both report and impact:
+
+- cited result: the result, its artifact, its run, the run's input artifacts and their
+  producing runs recursively, and `derived_from` ancestors of the artifact and inputs;
+- cited run: the run, its input artifacts recursively, and the artifacts it produced (the
+  delivered `foundations` for a run);
+- cited artifact: the artifact and its `derived_from` ancestors;
+- cited evidence or claim: its citations recursively;
+- every closure follows `derived_from` and member/workspace relationship edges.
+
+This matches the delivered `foundations` per object kind; a result's closure does **not**
+include the run's other outputs, so Impact and Claims cannot disagree.
+
+A workspace claim citing a member claim or another workspace claim inherits that claim's
+`unresolved`, `at-risk` and `contradiction-recorded` labels. Inheritance is applied before
+classification: an inherited `unresolved` or `at-risk` makes the citing claim ineligible for
+`supported`.
+
+An error-level finding whose subject is any object in the closure, or any file finding for an
+artifact in the closure, "touches" the claim. Workspace findings carry a subject: a member ID,
+a `claim:<workspace>#<id>` node ID, or the qualified reference text; a finding with no subject
+touches the member only.
 
 Predicates:
 
 - `unresolved`: any support/contradicts ref names a missing member, a missing local ID, an
-  ambiguous duplicate local ID, or a missing workspace claim.
-- `contradiction-recorded`: at least one `contradicts` target resolves and is not unresolved.
-- `at-risk`: any support/contradicts target or closure is touched by an error-level finding,
-  or any ref is unresolved. `unresolved` therefore always implies `at-risk`.
+  ambiguous duplicate local ID, or a missing workspace claim; or a cited claim carries
+  `unresolved`.
+- `contradiction-recorded`: at least one `contradicts` target resolves, or a cited claim
+  carries `contradiction-recorded`.
+- `at-risk`: any support/contradicts target or closure is touched by an error-level finding;
+  any ref is unresolved; or a cited claim carries `at-risk`. `unresolved` therefore always
+  implies `at-risk`.
 - `supported`: at least one support target is a result, evidence or claim; every support
-  target resolves; no support target or closure is touched by an error. A recorded
-  contradiction does **not** block `supported`; it is a separate label.
+  target resolves; no support target, contradiction target or closure is touched by an error;
+  no ref is unresolved; no cited claim carries `unresolved` or `at-risk`. A recorded
+  contradiction does **not** block `supported`.
 - `uncited`: no result/evidence/claim support target (context-only or contradiction-only).
 
 Allowed combinations: `unresolved` with `at-risk`; `contradiction-recorded` with `supported`
-or `at-risk`; `supported` with `contradiction-recorded`; `uncited` with
-`contradiction-recorded`. Never `supported` with `at-risk` or `unresolved`; never `uncited`
-with `supported`. For a single sort label the precedence is
+or `at-risk`; `supported` with `contradiction-recorded`; `uncited` with `at-risk` (a broken
+contradiction target or inherited state) or `unresolved`. Never `supported` with `at-risk` or
+`unresolved`; never `uncited` with `supported`. For a single sort label the precedence is
 `unresolved` > `contradiction-recorded` > `at-risk` > `supported` > `uncited`. All applicable
 labels are printed in text and JSON.
 
@@ -305,7 +323,7 @@ New console script `rungraph` (the `runevidence` CLI is unchanged):
 
 ```
 rungraph discover ROOT [--check] [--directory-artifacts] [--json]
-rungraph init [ROOT] [--id ID] [--name NAME] [--force] [--dry-run]
+rungraph init [ROOT] [--id ID] [--name NAME] [--force] [--dry-run] [--json]
 rungraph validate [ROOT] [--json] [--strict] [--directory-artifacts] [--redact-manifest-path]
 rungraph graph [ROOT] [--from NODE] [--depth N] [--json] [--format dot] [--fail-on-unresolved]
 rungraph report [ROOT] [--baseline DIR] [--json] [--strict] [--directory-artifacts] [--redact-manifest-path]
@@ -367,13 +385,15 @@ Authoring patches are JSON:
   whole list when present; `id` is immutable.
 - `set-workspace` is available only through `rungraph patch`; it changes the workspace `id`,
   `name`, `description` or `metadata` and updates nothing else. Changing the workspace `id`
-  rewrites `claim:` node IDs; a patch that renames the workspace and references a claim in the
-  same transaction refuses (do it in two patches).
+  changes the `claim:` node IDs in output, but stored refs use only the claim ID, so no
+  document rewrite is implied.
 - Operations apply in order to one in-memory document; all references are validated after the
   last operation. Any refusal writes nothing.
-- `expected_sha256` must equal the loaded document bytes when the document exists; if it is
-  null or missing, the command refuses when the document exists. This is a stale-byte check,
-  not compare-and-swap against non-cooperating writers.
+- `expected_sha256` is required whenever the document exists: the `--expected-sha256` flag
+  wins over a `expected_sha256` field in the patch, and if neither is present the command
+  refuses. This is a stale-byte check, not compare-and-swap against non-cooperating writers.
+  `init --force` loads the document, backs it up, re-reads the target before replacement, and
+  refuses if the bytes changed.
 - Lock the workspace folder before loading and hold it through the save where the host
   supports POSIX directory `flock`; a second writer exits 2 (`BUSY`) and writes nothing. Where
   the host has no such lock, the delivered unlocked-writer boundary applies: no `BUSY`, no
@@ -393,7 +413,7 @@ Workspace findings: `workspace-unreadable` (error), `workspace-schema-invalid` (
 `workspace-member-nested` (error), `workspace-member-invalid` (error),
 `workspace-reference-unresolved` (error), `workspace-reference-ambiguous` (error),
 `workspace-reference-cycle` (error), `workspace-edge-invalid` (error),
-`workspace-provenance-conflict` (error), `workspace-claim-unverified` (warning),
+`workspace-provenance-conflict` (error), `workspace-claim-uncited` (warning),
 `workspace-baseline-missing` (warning).
 
 Exit codes:
@@ -436,10 +456,11 @@ Payloads:
 Error envelope: `{"format": "rungraph-error", "version": "0.1", "command": "<command>",
 "error": {"code": "...", "message": "..."}, "exit_code": 2}`.
 
-`workspace-claim-unverified` is the warning for a workspace claim with no
+`workspace-claim-uncited` is the warning for a workspace claim with no
 result/evidence/claim support target (the `uncited` state) and is not an error.
-`discovery-limit` is an error with the cap named. `BUSY` is a CLI refusal code from the
-admission lock, reported in the error envelope, not a finding.
+`discovery-limit` is returned in the `rungraph-error` envelope with `command: "discover"` and
+the cap named. `BUSY` is a CLI refusal code from the admission lock, reported in the error
+envelope, not a finding.
 
 `--redact-manifest-path` replaces workspace and member paths in validate/report output.
 
@@ -490,10 +511,14 @@ a cross-member derived cycle; a claim-to-claim cycle; `--from`/`--depth`; DOT;
 `--fail-on-unresolved`.
 
 Claims: every state and allowed combination, including `supported` + `contradiction-recorded`,
-`unresolved` + `at-risk`, context-only and contradiction-only claims; a cited at-risk member
-claim inherits its state; an evidence closure; an output-artifact break where report and
-impact agree; duplicate local ID refusal; the member-coverage mapping table; a claim with no
-subject finding.
+`unresolved` + `at-risk`, `uncited` + `at-risk`, `uncited` + `unresolved`; context-only
+citations retained but not traversed (an error on a context artifact does not make `at-risk`);
+a cited at-risk member claim inherits its state and is never `supported`; an evidence closure;
+the per-kind closure (`foundations` parity: a cited result does not include the run's other
+outputs, a cited run does); an output-artifact break where report and impact agree; duplicate
+local ID refusal; the member mapping table for `claim-unverified`, `unsupported-claim`
+warning/error and same-target `conflicting-evidence`; an ordinary member contradiction; a
+claim with several findings; a claim with no subject finding.
 
 Baseline: each schema 0.1–0.10, canonical `data`, schema-changed member, added/removed/
 re-pathed/re-keyed members, missing baseline member, workspace claim/relationship edits,
@@ -506,9 +531,10 @@ pairs, `--run` filters.
 
 Authoring: add/remove/move/rename member through the convenience flags; `rungraph patch` with
 mixed operations and `set-workspace`; `edit-claim` merge/replace semantics; every operation
-kind; a multi-op patch failing at operation N writes nothing; stale bytes; lock refusal;
-dry-run; backup failure; replace failure; post-replace cleanup failure; two `init` runs at
-once; a patch that renames the workspace while citing a claim refuses.
+kind; a multi-op patch failing at operation N writes nothing; stale bytes; missing
+`--expected-sha256` when a document exists; patch-file/flag precedence; lock refusal; dry-run;
+backup failure; replace failure; post-replace cleanup failure; two `init` runs at once;
+`init --force` stale-byte refusal.
 
 JSON: every `--json` route emits its named envelope and payload; the error envelope is
 `rungraph-error` with `command`; `--strict` and exit codes match §10.
@@ -527,7 +553,7 @@ baseline matching, patch atomicity, each write refusal.
 3. Typed node IDs (`kind:member#local`) plus the `member#local` shorthand.
 4. A workspace-only claim/relationship namespace with its own IDs.
 5. Baseline as a prior workspace copy plus the schema-independent assertion projection.
-6. `compare`/`matrix`/`leaderboard` as three routes, row = `(member, run, name)`.
+6. `compare`/`matrix`/`leaderboard` as three routes, row = `(member, run, result ID)`.
 7. Patch grammar as above, all-or-nothing, stage/fsync/replace.
 8. Authoring staged after read-only in the same milestone; D6 BOUNDED until A5/C6.
 
