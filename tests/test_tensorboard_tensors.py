@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -248,3 +249,52 @@ def test_seeded_mutations_only_ever_refuse_the_profile():
             continue
         except Exception as exc:  # noqa: BLE001 - the fuzz asserts the exception class
             raise AssertionError(f"unexpected {type(exc).__name__}: {exc}") from exc
+
+
+_LINUX = __import__("platform").system() == "Linux"
+
+_MEASURE_SCRIPT = r"""
+import json, resource, sys
+from runevidence.tensorboard_events import scan_tensorboard_09
+
+data = sys.stdin.buffer.read()
+limit = 2_500_000 * 1024
+resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+with open("/proc/self/status") as status:
+    before = next(int(line.split()[1]) for line in status if line.startswith("VmHWM"))
+results = scan_tensorboard_09(data, [], [], [], [], [], [(b"x", 0, 1_500_000)])
+with open("/proc/self/status") as status:
+    after = next(int(line.split()[1]) for line in status if line.startswith("VmHWM"))
+selection = results[5][(b"x", 0, 1_500_000)]
+print(json.dumps({"delta_mb": (after - before) / 1024, "outcome": selection.outcome.value}))
+"""
+
+
+@pytest.mark.skipif(not _LINUX, reason="VmHWM measurement is Linux-only")
+def test_sixteen_mib_summary_of_millions_of_empty_tensor_spans_stays_bounded():
+    import json
+    import os
+    import subprocess
+    import sys
+
+    entry = tb.bytes_field(1, tb.value(tag=b"x", tensor_bytes=tb.bytes_field(7, b"")))
+    payload = entry * (16 * 1024 * 1024 // len(entry))
+    assert len(payload) <= 16 * 1024 * 1024
+    data = tb.records(tb.event(summary_bytes=payload))
+    repo = Path(__file__).resolve().parents[1]
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = str(repo / "src") + os.pathsep + environment.get("PYTHONPATH", "")
+    completed = subprocess.run(
+        [sys.executable, "-c", _MEASURE_SCRIPT],
+        input=data,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=300,
+        check=False,
+        cwd=repo,
+        env=environment,
+    )
+    assert completed.returncode == 0, completed.stderr.decode("utf-8", "replace")
+    measured = json.loads(completed.stdout)
+    assert measured["delta_mb"] <= 300, measured
+    assert measured["outcome"] == "unsupported-scalar"
