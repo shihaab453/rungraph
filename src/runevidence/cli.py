@@ -316,7 +316,9 @@ def cmd_validate_batch(args: argparse.Namespace) -> int:
             report = Report(manifest_path=Path(target), findings=exc.findings)
             exit_code = EXIT_INVALID
         else:
-            report = run_checks(loaded)
+            report = run_checks(
+                loaded, enable_directory_artifacts=args.directory_artifacts
+            )
             exit_code = report.exit_code(args.strict)
         summary = _validation_summary_data(report, exit_code)
         severities.update(summary["by_severity"])
@@ -2685,6 +2687,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--redact-manifest-path", action="store_true",
                    help="replace each echoed input path with \"<redacted>\" (requires --json)")
     p.add_argument("--strict", action="store_true", help="treat warnings as failures (exit 1)")
+    p.add_argument("--directory-artifacts", action="store_true",
+                   help="experimental read-only directory-artifact checking")
     p.set_defaults(func=cmd_validate_batch)
 
     p = sub.add_parser("inspect", help="summarize the manifest, then run every check (incl. untracked files)")

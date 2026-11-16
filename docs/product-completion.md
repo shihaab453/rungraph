@@ -86,7 +86,7 @@ committed examples and the scripted lifecycles in `tests/test_e2e_qualification.
 | B3 | Claim and evidence graph checks | COMPLETE | duplicate IDs, dangling edges, cycles, contradictions and claim-at-risk are reported | `checks/graph.py`, `tests/test_acceptance.py`, claim route tests |
 | B4 | Batch validation | COMPLETE | several manifests validate in order with per-manifest and aggregate counts | `validate-batch`; `tests/test_cli_batch_validation.py` |
 | B5 | Unreadable input handling | COMPLETE | unreadable adapter input is recorded, hashes retained, and never silently drops evidence | `tests/test_adapter_unreadable_integration.py` |
-| B6 | Directory artifacts | BOUNDED | a directory is recorded and re-verified as one artifact with a declared platform scope and guard rails; unsupported filesystems fail closed | read-only checking on Linux; guarded authoring on Linux/ext4; `--directory-artifacts` exists on `validate`/`inspect` but not on `validate-batch`; the declared platform bound is listed in `docs/qualification.md` |
+| B6 | Directory artifacts | BOUNDED | a directory is recorded and re-verified as one artifact with a declared platform scope and guard rails; unsupported filesystems fail closed | read-only checking on Linux; guarded authoring on Linux/ext4; `--directory-artifacts` exists on `validate`, `validate-batch` and `inspect`; the declared platform bound is listed in `docs/qualification.md` |
 
 ### 2.3 Analysis over one or two manifests
 

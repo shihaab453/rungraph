@@ -296,7 +296,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | Command | What it does |
 | --- | --- |
 | `runevidence validate PATH` | Run every check, print only problems. |
-| `runevidence validate-batch --json MANIFEST...` | Validate several manifests in order and print a counts-only summary for each, plus an aggregate (`--strict`, `--redact-manifest-path`). See [Batch summaries](#batch-summaries). |
+| `runevidence validate-batch --json MANIFEST...` | Validate several manifests in order and print a counts-only summary for each, plus an aggregate (`--strict`, `--redact-manifest-path`, `--directory-artifacts`). See [Batch summaries](#batch-summaries). |
 | `runevidence inspect PATH` | Summarize the manifest, then run every check, also listing files the manifest does not track. |
 | `runevidence comparability BASELINE TARGET --baseline-result ID --target-result ID [--json]` | Experimental read-only comparison of five mandatory recorded conditions across two manifests (no artifact checks; exit `0` comparable, `1` different, `2` unavailable). `--preflight` is a text-only read-only readiness listing/pair check (no JSON; exit `0` list/ready, `1` not ready, `2` load/unknown/invalid). See [Comparability (verdict CLI experimental)](#comparability-verdict-cli-experimental). |
 | `runevidence assess BASELINE TARGET --baseline-result ID --target-result ID [--json] [--directory-artifacts]` | Read-only combined verdict: recorded-condition comparability plus artifact/value integrity on both sides. Exit `0` permitted and clean, `1` not permitted or evidence errors, `2` load failure. |
@@ -387,8 +387,8 @@ untracked-file findings, which may list member relative paths exactly as they
 do without the flag, including after a failed directory scan; those are
 existing `untracked-file` findings, not directory diagnostics. Without the
 flag, a directory record is still reported as `not-a-file`. The flag is not
-accepted by `validate-batch` or any authoring route, and it does not add
-directory writing or a new command.
+accepted by any authoring route, and it does not add directory writing or a
+new command.
 
 `validate --json --summary-only` prints only counts, for CI logs that should
 not show finding details:
@@ -419,7 +419,8 @@ validate those values or sanitize arbitrary text within them.
 
 `validate-batch --json MANIFEST [MANIFEST ...]` checks each input in the
 order given, one at a time, and prints the same counts-only summary that
-`validate MANIFEST --json --summary-only` would print for it on its own:
+`validate MANIFEST --json --summary-only` would print for it on its own
+(`--directory-artifacts` applies the same opt-in to every input):
 
 ```json
 {

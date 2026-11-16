@@ -358,13 +358,13 @@ def test_flag_is_grammar_only_for_validate_and_inspect():
     sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
     for name, route in sub.choices.items():
         options = {option for action in route._actions for option in action.option_strings}
-        if name in ("validate", "inspect", "assess"):
+        if name in ("validate", "validate-batch", "inspect", "assess"):
             assert "--directory-artifacts" in options
         else:
             assert "--directory-artifacts" not in options
 
 
-@pytest.mark.parametrize("command", ["validate", "inspect"])
+@pytest.mark.parametrize("command", ["validate", "validate-batch", "inspect"])
 def test_help_describes_the_flag_as_experimental_read_only(command, capsys):
     assert main([command, "--help"]) == 0
     help_text = " ".join(capsys.readouterr().out.split())
@@ -532,3 +532,20 @@ def test_real_tmpfs_refusal_does_not_echo_the_absolute_scan_root(capsys):
         (root / "data").rmdir()
         (root / MANIFEST).unlink(missing_ok=True)
         root.rmdir()
+
+
+def test_validate_batch_accepts_the_directory_flag(tmp_path, capsys):
+    build_tree(tmp_path)
+    write_directory_manifest(tmp_path)
+    manifest = str(tmp_path / MANIFEST)
+
+    assert main(["validate-batch", "--json", manifest]) == 1
+    data = json.loads(capsys.readouterr().out)
+    codes = set(data["results"][0]["summary"]["by_code"])
+    assert "not-a-file" in codes
+
+    assert main(["validate-batch", "--json", "--directory-artifacts", manifest]) == 1
+    data = json.loads(capsys.readouterr().out)
+    codes = set(data["results"][0]["summary"]["by_code"])
+    assert "not-a-file" not in codes
+    assert any(code.startswith("directory-") for code in codes)
