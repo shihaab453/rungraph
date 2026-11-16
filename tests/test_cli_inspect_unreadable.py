@@ -95,7 +95,8 @@ def test_mlflow_cli_inspect_json_surfaces_skipped_metric(tmp_path, capsys):
     assert entries[0]["adapter"] == "mlflow"
     assert entries[0]["path"] == path
     assert isinstance(entries[0]["run"], str) and entries[0]["run"]
-    assert set(entries[0]) == {"run", "adapter", "path"}
+    assert set(entries[0]) == {"run", "adapter", "path", "reason"}
+    assert entries[0]["reason"] == "malformed"
     assert data["summary"]["results"] == 1
     assert data["exit_code"] == result
 

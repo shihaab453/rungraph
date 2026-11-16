@@ -29,13 +29,25 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Optional
 
-from ..models import Manifest
+from ..models import Manifest, Result
 
 
 class AdapterError(Exception):
     """The folder is not one this adapter can turn into a manifest."""
+
+
+@dataclass(frozen=True)
+class Summary:
+    """A metric summary read from bytes the caller already hashed.
+
+    The caller owns the bytes and their digest, so the returned triple is bound
+    to exactly the bytes that were read; an adapter never opens a path itself."""
+
+    value: float
+    step: int
+    timestamp: int
 
 
 @dataclass
@@ -63,3 +75,19 @@ class Adapter(ABC):
     @abstractmethod
     def extract(self, root: Path, discovery: Discovery, *, project_id: str, project_name: str) -> Manifest:
         """Build a manifest from a previous ``discover`` result."""
+
+    # --- optional verified-summary protocol -------------------------------
+    # An adapter whose results summarize a file it owns can verify and refresh
+    # those summaries. The defaults mean "not claimed": core then emits an
+    # unverified warning for a recognized summary shape, never a silent pass.
+
+    def claims_summary(self, manifest: Manifest, result: Result) -> bool:
+        """True when this adapter can re-read ``result`` from its source bytes."""
+        return False
+
+    def read_summary(self, data: bytes) -> Optional[Summary]:
+        """Parse one summary from ``data``.
+
+        Return None for any malformed, non-finite, blank-row, over-cap or
+        non-UTF-8 input. Never return a partial summary."""
+        return None

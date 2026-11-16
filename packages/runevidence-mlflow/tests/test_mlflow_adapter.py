@@ -500,10 +500,18 @@ def test_bad_metric_logs_are_omitted_and_diagnosed_without_partial_summaries(tmp
         for name in ("blank", "empty", "encoding", "inf", "nan", "partial", "shape")
     )
     assert run.metadata["mlflow"]["unreadable"] == expected_bad
+    assert run.metadata["mlflow"]["unreadable_reasons"] == {
+        path: "malformed" for path in expected_bad
+    }
     artifacts = {a.path: a for a in manifest.artifacts}
     for path in expected_bad:
         assert artifacts[path].sha256 == sha256_file(root / path)
-    assert_clean(root, manifest)
+
+    save_manifest(manifest, root / MANIFEST_FILENAME)
+    report = run_checks(load_manifest(root), include_untracked=True)
+    warnings = [f for f in report.findings if f.code.value == "result-unverified"]
+    assert sorted(f.path for f in warnings) == expected_bad
+    assert all("was not recorded as a result" in f.message for f in warnings)
 
 
 # --- metadata whitelist, external URIs and symlinks ------------------------

@@ -226,14 +226,18 @@ check now passes. Refresh requires the current digest to differ from the
 recorded digest (or no digest to have been kept while volatile). A wrong
 value next to an unchanged, hash-checked file stays an error.
 
-**RE-10: MLflow metric summaries can stay stale.** For MLflow text metric
-results, `rehash` accepts the current source bytes and digest, but the recorded
-summary **value, step and timestamp may stay old**. A later `validate --strict`
-can then exit 0 after that acceptance. Changed bytes do not always mean the
-summary is stale, and validation makes no scientific truth or general
-freshness claim. See [Refreshing MLflow results
-safely](https://github.com/shihaab453/rungraph/blob/main/docs/adapters.md#refreshing-mlflow-results-safely-re-10) and the
-[draft alpha release notes](https://github.com/shihaab453/rungraph/blob/main/docs/alpha-release-notes-draft.md).
+**RE-10: MLflow metric summaries are verified and refreshed.** For MLflow
+text metric results on schema 0.1/0.2, `validate` re-reads the summary through
+the installed `mlflow` adapter and compares value, step and timestamp exactly;
+a difference is `result-value-mismatch`. `rehash` refreshes a selected summary
+from the bytes it accepts, and repairs a summary that already disagrees with an
+unchanged file, so no `init --force` is needed. If no installed adapter claims
+the result, `validate` reports `result-unverified` instead of passing silently.
+A volatile metric file is not read: `validate` warns and `rehash` leaves the
+summary alone; `--no-volatile` records the digest and refreshes it. Schemas
+0.3–0.10 keep their existing `result-unverified` warning and are not refreshed
+this way. See [MLflow metric summaries](https://github.com/shihaab453/rungraph/blob/main/docs/adapters.md#mlflow-metric-summaries-re-10)
+and the [draft alpha release notes](https://github.com/shihaab453/rungraph/blob/main/docs/alpha-release-notes-draft.md).
 
 A **volatile** artifact (`"volatile": true`) is checked for existence only. No
 digest is kept for it, so `validate` never reports its bytes as changed.
@@ -1064,25 +1068,29 @@ Read these before relying on a green `validate` for anything important.
   The stale-write checks remain but are not compare-and-swap, so a
   nonparticipant can still change the file between the final check and the
   replacement.
-- **MLflow metric summaries can go stale (RE-10).** MLflow metric logs are
-  plain text, so their results have no JSON locator. `validate` detects a
-  changed metric file through its hash, but `rehash` accepts the new bytes
-  without re-reading the summary value, step or timestamp, so the recorded
-  result can keep old values. `validate --strict` can still exit 0 after that
-  acceptance. Changed bytes do not always mean the summary is stale.
-  `rehash` prints a `NOTE` for each such summary whose file it re-records,
-  or whose file is volatile; the NOTE says the summary was not re-read, not
-  that it is stale. To refresh, follow [Refreshing MLflow results
-  safely](https://github.com/shihaab453/rungraph/blob/main/docs/adapters.md#refreshing-mlflow-results-safely-re-10): run
-  `init PATH --adapter mlflow --force`, compare the backup with the
-  regenerated manifest, keep the newly extracted summaries, and manually
-  restore only reviewed claims, relationships, annotations, volatile flags and
-  project settings after verifying IDs. Do not copy old metric results back.
-  Version control and a separate backup are strongly recommended.
-- **MLflow metric files are read whole.** When the MLflow adapter builds a
-  manifest (`init --adapter mlflow`), it reads each metric history file
-  completely into memory, with no size cap, so a very large metric log can
-  use a lot of memory.
+- **MLflow metric summaries are verified on 0.1/0.2.** MLflow metric logs are
+  plain text, so their results have no JSON locator. On schema 0.1/0.2,
+  `validate` re-reads each summary through the installed `mlflow` adapter and
+  compares value, step and timestamp exactly; a difference is
+  `result-value-mismatch` and the claim-at-risk path follows. `rehash`
+  refreshes a selected summary from the bytes it accepts and repairs a summary
+  that already disagrees with an unchanged file. If no installed adapter claims
+  the result, `validate` reports `result-unverified`; it never passes silently.
+  A volatile metric file is not read: `validate` warns, `rehash` leaves the
+  summary alone, and `--no-volatile` records the digest and refreshes it. The
+  digest of the bytes parsed must equal the recorded or planned digest, so a
+  file that changes mid-check is reported instead of accepted. Schemas
+  0.3–0.10 keep their existing `result-unverified` warning for locator-less
+  results and are not refreshed this way.
+- **MLflow metric histories are bounded.** A history is read at most 50 MiB,
+  with at most 1,000,000 lines and at most 64 KiB per line. A history over any
+  limit, malformed, non-finite or not valid UTF-8 is not summarized: it is
+  recorded in `metadata.mlflow.unreadable` and `unreadable_reasons`, and
+  `validate` warns. `rehash` refuses the edit while a selected result's
+  summary cannot be read; a history that was already unreadable at `init` has
+  no result, so accepting its bytes only updates the digest and the warning
+  persists until `init --force`. `init` and `validate` use the same bounded
+  reader, which refuses symlinks and non-regular files.
 - **Very long integers.** Python limits how many digits it will turn into an
   integer (see `sys.set_int_max_str_digits`; the limit is configurable and
   can be disabled). A manifest containing a longer number is reported as
