@@ -1,0 +1,30 @@
+{
+  "format": "rungraph-workspace",
+  "version": "0.1",
+  "id": "study",
+  "name": "Baseline versus tuned",
+  "members": [
+    {
+      "id": "baseline",
+      "path": "baseline"
+    },
+    {
+      "id": "tuned",
+      "path": "tuned"
+    }
+  ],
+  "claims": [
+    {
+      "id": "tuned-higher",
+      "claim": "The tuned run reports higher test accuracy.",
+      "supports": [
+        {
+          "member": "tuned",
+          "id": "tuned-accuracy"
+        }
+      ],
+      "contradicts": [],
+      "source": "README.md"
+    }
+  ]
+}

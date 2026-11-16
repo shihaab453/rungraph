@@ -1,0 +1,44 @@
+{
+  "schema_version": "0.1",
+  "project": {
+    "id": "tuned",
+    "name": "tuned"
+  },
+  "runs": [
+    {
+      "id": "run-tuned",
+      "name": "tuned"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "tuned-metrics",
+      "path": "metrics.json",
+      "sha256": "32b441cb3e9c4cf1bf56e1b0a440ee9a4220d71b1073a3e7a450f8622aa55e24",
+      "size_bytes": 22,
+      "kind": "metrics",
+      "run_id": "run-tuned"
+    }
+  ],
+  "results": [
+    {
+      "id": "tuned-accuracy",
+      "run_id": "run-tuned",
+      "name": "test_accuracy",
+      "value": 0.9,
+      "artifact_id": "tuned-metrics",
+      "locator": "/accuracy"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "claim-tuned",
+      "claim": "tuned reports accuracy 0.9",
+      "supports": [
+        "tuned-accuracy"
+      ],
+      "contradicts": [],
+      "source": "README.md"
+    }
+  ]
+}

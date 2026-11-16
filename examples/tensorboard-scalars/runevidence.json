@@ -1,0 +1,218 @@
+{
+  "schema_version": "0.5",
+  "project": {
+    "id": "tensorboard-scalars",
+    "name": "TensorBoard scalars",
+    "description": null,
+    "tags": [],
+    "metadata": {}
+  },
+  "runs": [
+    {
+      "id": "tb-run-faabd62c51f7e2c4",
+      "name": "logs/baseline",
+      "started_at": null,
+      "params": {},
+      "metadata": {}
+    },
+    {
+      "id": "tb-run-f1380fa77ecbd833",
+      "name": "logs/tuned",
+      "started_at": null,
+      "params": {},
+      "metadata": {}
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "tb-art-8359a1b2be03ca24",
+      "path": "logs/baseline/events.out.tfevents.demo",
+      "sha256": "c2f0ba1b4c1ce78042603acf5feeff6453de63fd51ac6f257f7b8145b3d4ff86",
+      "size_bytes": 219,
+      "kind": null,
+      "run_id": "tb-run-faabd62c51f7e2c4",
+      "metadata": {}
+    },
+    {
+      "id": "tb-art-7abfb4af206d78bb",
+      "path": "logs/tuned/events.out.tfevents.demo",
+      "sha256": "1f025f89f3bb7567965695575dc49874c27b9174b0b5ef7e141e21c71eb28c07",
+      "size_bytes": 219,
+      "kind": null,
+      "run_id": "tb-run-f1380fa77ecbd833",
+      "metadata": {}
+    }
+  ],
+  "results": [
+    {
+      "id": "tb-res-b6517809db617bd1",
+      "run_id": "tb-run-faabd62c51f7e2c4",
+      "name": "loss @ 1",
+      "value": 1.0,
+      "artifact_id": "tb-art-8359a1b2be03ca24",
+      "locator": {
+        "kind": "tensorboard",
+        "tag": "loss",
+        "step": 1,
+        "occurrence": 0
+      },
+      "metadata": {}
+    },
+    {
+      "id": "tb-res-12bf9c10389165de",
+      "run_id": "tb-run-faabd62c51f7e2c4",
+      "name": "accuracy @ 1",
+      "value": 0.5,
+      "artifact_id": "tb-art-8359a1b2be03ca24",
+      "locator": {
+        "kind": "tensorboard",
+        "tag": "accuracy",
+        "step": 1,
+        "occurrence": 0
+      },
+      "metadata": {}
+    },
+    {
+      "id": "tb-res-9b58592fa90f36f3",
+      "run_id": "tb-run-faabd62c51f7e2c4",
+      "name": "loss @ 2",
+      "value": 0.800000011920929,
+      "artifact_id": "tb-art-8359a1b2be03ca24",
+      "locator": {
+        "kind": "tensorboard",
+        "tag": "loss",
+        "step": 2,
+        "occurrence": 0
+      },
+      "metadata": {}
+    },
+    {
+      "id": "tb-res-b64df0c2b5e6780d",
+      "run_id": "tb-run-faabd62c51f7e2c4",
+      "name": "accuracy @ 2",
+      "value": 0.6499999761581421,
+      "artifact_id": "tb-art-8359a1b2be03ca24",
+      "locator": {
+        "kind": "tensorboard",
+        "tag": "accuracy",
+        "step": 2,
+        "occurrence": 0
+      },
+      "metadata": {}
+    },
+    {
+      "id": "tb-res-d65477ffd89f75f2",
+      "run_id": "tb-run-faabd62c51f7e2c4",
+      "name": "loss @ 3",
+      "value": 0.6000000238418579,
+      "artifact_id": "tb-art-8359a1b2be03ca24",
+      "locator": {
+        "kind": "tensorboard",
+        "tag": "loss",
+        "step": 3,
+        "occurrence": 0
+      },
+      "metadata": {}
+    },
+    {
+      "id": "tb-res-704cb335665b3640",
+      "run_id": "tb-run-faabd62c51f7e2c4",
+      "name": "accuracy @ 3",
+      "value": 0.75,
+      "artifact_id": "tb-art-8359a1b2be03ca24",
+      "locator": {
+        "kind": "tensorboard",
+        "tag": "accuracy",
+        "step": 3,
+        "occurrence": 0
+      },
+      "metadata": {}
+    },
+    {
+      "id": "tb-res-cbe77177ffb2fb92",
+      "run_id": "tb-run-f1380fa77ecbd833",
+      "name": "loss @ 1",
+      "value": 0.8999999761581421,
+      "artifact_id": "tb-art-7abfb4af206d78bb",
+      "locator": {
+        "kind": "tensorboard",
+        "tag": "loss",
+        "step": 1,
+        "occurrence": 0
+      },
+      "metadata": {}
+    },
+    {
+      "id": "tb-res-e29d861a1cd353c7",
+      "run_id": "tb-run-f1380fa77ecbd833",
+      "name": "accuracy @ 1",
+      "value": 0.550000011920929,
+      "artifact_id": "tb-art-7abfb4af206d78bb",
+      "locator": {
+        "kind": "tensorboard",
+        "tag": "accuracy",
+        "step": 1,
+        "occurrence": 0
+      },
+      "metadata": {}
+    },
+    {
+      "id": "tb-res-53aa9cd053c1d95e",
+      "run_id": "tb-run-f1380fa77ecbd833",
+      "name": "loss @ 2",
+      "value": 0.5,
+      "artifact_id": "tb-art-7abfb4af206d78bb",
+      "locator": {
+        "kind": "tensorboard",
+        "tag": "loss",
+        "step": 2,
+        "occurrence": 0
+      },
+      "metadata": {}
+    },
+    {
+      "id": "tb-res-e324d8f73d7ecb31",
+      "run_id": "tb-run-f1380fa77ecbd833",
+      "name": "accuracy @ 2",
+      "value": 0.800000011920929,
+      "artifact_id": "tb-art-7abfb4af206d78bb",
+      "locator": {
+        "kind": "tensorboard",
+        "tag": "accuracy",
+        "step": 2,
+        "occurrence": 0
+      },
+      "metadata": {}
+    },
+    {
+      "id": "tb-res-0e44cd1bdc1e443f",
+      "run_id": "tb-run-f1380fa77ecbd833",
+      "name": "loss @ 3",
+      "value": 0.30000001192092896,
+      "artifact_id": "tb-art-7abfb4af206d78bb",
+      "locator": {
+        "kind": "tensorboard",
+        "tag": "loss",
+        "step": 3,
+        "occurrence": 0
+      },
+      "metadata": {}
+    },
+    {
+      "id": "tb-res-3c9cba006e1ae256",
+      "run_id": "tb-run-f1380fa77ecbd833",
+      "name": "accuracy @ 3",
+      "value": 0.8999999761581421,
+      "artifact_id": "tb-art-7abfb4af206d78bb",
+      "locator": {
+        "kind": "tensorboard",
+        "tag": "accuracy",
+        "step": 3,
+        "occurrence": 0
+      },
+      "metadata": {}
+    }
+  ],
+  "evidence": [],
+  "relationships": []
+}
