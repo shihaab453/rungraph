@@ -19,53 +19,40 @@ comparison.
   results.
 - **MLflow adapter:** reads a local MLflow file store only. It records
   experiments, runs, string params, hashed artifacts and one summary result per
-  readable metric history. It does not provide full metric freshness.
+  readable metric history. On schema 0.1/0.2 it verifies and refreshes those
+  summaries against the metric files.
 
-## Owner acceptance
+## Limited-alpha scope
 
-The owner accepts only the disclosed RE-10 limited-alpha limitation below.
-That acceptance does not authorize publication, a version or tag, a package
-index release, or any claim that metric freshness is fully verified.
-
-## RE-10: MLflow metric summaries can stay stale
-
-For MLflow text metric results, `rehash` accepts the current source bytes and
-digest, but the recorded summary **value, step and timestamp may stay old**. A
-later `validate --strict` can exit 0 after that acceptance. Changed bytes do
-not always mean the summary is stale.
-
-To refresh, run `init PATH --adapter mlflow --force` and follow the
-[central safe refresh procedure](adapters.md#refreshing-mlflow-results-safely-re-10).
-Forced regeneration keeps backup generations (`.bak`, `.bak.2`, `.bak.3`),
-but it does not merge hand-written claims, relationships, annotations, volatile
-flags, or project fields and settings. Compare the backup with the regenerated
-manifest, retain newly extracted summaries, and manually restore only reviewed
-annotations and settings after verifying IDs and claims. Do not copy stale
-metric results back. Version control and separate backups are recommended.
+This describes a limited alpha, not a general availability release. It does
+not claim scientific validity or a fair comparison. RE-10 and ML-1 are fixed
+in this draft; the remaining limitations are listed below.
 
 ## Fixed in this draft (unreleased)
 
+- **RE-10, MLflow summary freshness:** on schema 0.1/0.2, `validate` re-reads a
+  locator-less metric summary and compares value, step and timestamp exactly;
+  `rehash` refreshes it from the accepted bytes and repairs a summary that
+  already disagrees with an unchanged file. A missing adapter, a volatile
+  metric file, an unreadable history and an ambiguous owner are reported
+  instead of passing silently. Schemas 0.3–0.10 keep their existing
+  `result-unverified` warning.
+- **ML-1, MLflow metric memory:** metric histories are read under 50 MiB,
+  1,000,000 lines and 64 KiB per line. Over-limit or malformed histories are
+  recorded with a reason and produce a validation warning.
 - **R5-01:** comparing a recorded value with an integer too large to convert
   to a float no longer stops with an `OverflowError`; such integers are
   compared exactly. Other numbers keep the existing tolerance.
 - **Manifest parsing:** a manifest number longer than Python's integer digit
   limit is reported as `manifest-unreadable` (exit 2) instead of a traceback.
 - **CLI wording:** `rehash` prints a `NOTE` for each locator-less MLflow
-  summary whose file it re-records or whose file is volatile, and `--help` states
-  that a clean result shows consistency with the manifest, not truth, validity
-  or freshness.
+  summary it leaves unrefreshed, and `--help` states that a clean result shows
+  consistency with the manifest, not truth, validity or freshness.
 
 These are on the development branch only; nothing here is released.
 
 ## Known limitations
 
-- **RE-10:** locator-less MLflow metric summaries are not refreshed by
-  `rehash`, and strict validation does not check their freshness. The
-  `rehash` NOTE says a summary was not re-read; it does not show that the
-  summary is stale.
-- **ML-1, MLflow metric memory:** the MLflow adapter reads each metric history
-  file completely into memory, with no size cap, so a very large metric log
-  can use a lot of memory during `init`.
 - **Integer digit limit:** Python's configurable integer digit limit applies
   to JSON numbers. A longer number makes a manifest `manifest-unreadable`, and
   makes a locator-backed result `result-unverifiable` (a warning). Whether the
@@ -78,6 +65,9 @@ These are on the development branch only; nothing here is released.
 - **Deeply nested JSON:** a sufficiently deep JSON manifest or metrics file
   can still raise `RecursionError` instead of producing a controlled
   diagnostic.
+- **Migrated 0.3+ MLflow manifests:** a locator-less metric result keeps its
+  existing `result-unverified` warning and is not refreshed by `rehash`; use
+  `init --force` or the metric's source file to re-record it.
 - **Unverified environments:** Python 3.14 with pinned minimum dependencies,
   Python 3.11 to 3.13, and macOS have not been directly verified. They are not
   declared unsupported.

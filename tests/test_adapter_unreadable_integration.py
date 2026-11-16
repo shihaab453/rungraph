@@ -77,7 +77,7 @@ def test_mlflow_unreadable_metric_is_present_but_not_a_result(tmp_path):
     human = format_overview(manifest)
     assert f"{run.id} (mlflow): {bad}" in human
     entries = _inspect_json(manifest)["summary"]["adapter_unreadable"]
-    assert entries == [{"run": run.id, "adapter": "mlflow", "path": bad}]
+    assert entries == [{"run": run.id, "adapter": "mlflow", "path": bad, "reason": "malformed"}]
 
 
 def test_valid_hydra_inputs_leave_legacy_report_unchanged(tmp_path):

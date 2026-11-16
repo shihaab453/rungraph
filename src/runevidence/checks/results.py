@@ -9,6 +9,7 @@ file check, never from a second read.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -1322,6 +1323,7 @@ def check_results(
     *,
     enable_directory_artifacts: bool = False,
     skip_result_ids: set[str] | None = None,
+    trusted_paths: dict[str, Path] | None = None,
 ) -> tuple[list[Finding], set[str]]:
     """``readable_paths`` includes files whose hash changed: if a metrics
     file was edited, the most useful thing to say is whether the number a
@@ -1330,6 +1332,8 @@ def check_results(
     With the internal ``enable_directory_artifacts`` switch, a locator aimed
     at a directory artifact is an error and its result counts as mismatched,
     since there is no single JSON file to read the value from."""
+    from ..summaries import describe_state, read_bounded, summary_owner, summary_shape
+
     findings: list[Finding] = []
     mismatched: set[str] = set()
     artifact_ids = {a.id for a in manifest.artifacts}
@@ -1354,11 +1358,82 @@ def check_results(
             Finding(code=Code.result_unverifiable, severity=Severity.warning, subject=res_id, message=msg)
         )
 
+    artifacts_by_id = {a.id: a for a in manifest.artifacts}
     cache: dict[str, Any] = {}
+    trusted = trusted_paths if trusted_paths is not None else readable_paths
     for res in manifest.results:
         if res.id in skip:
             continue
         if res.locator is None:
+            if not has_locators and summary_shape(manifest, res):
+                artifact = artifacts_by_id.get(res.artifact_id) if res.artifact_id else None
+                path = readable_paths.get(res.artifact_id) if res.artifact_id else None
+                if artifact is None or path is None:
+                    continue  # already reported as a dangling reference or missing file
+                if artifact.volatile:
+                    unverifiable(
+                        res.id,
+                        f"Result {res.id!r} ({res.name}) is an MLflow metric summary on a volatile "
+                        "file; its value was not verified",
+                    )
+                    continue
+                if res.artifact_id not in trusted:
+                    continue  # the hash mismatch already fails the run
+                owner, reason = summary_owner(manifest, res)
+                if owner is None:
+                    if reason == "ambiguous":
+                        message = (
+                            f"Result {res.id!r} ({res.name}) is an MLflow metric summary claimed by "
+                            "more than one installed adapter"
+                        )
+                    else:
+                        message = (
+                            f"Result {res.id!r} ({res.name}) is an MLflow metric summary but no "
+                            "installed adapter can verify it"
+                        )
+                    unverifiable(res.id, message)
+                    continue
+                data, state = read_bounded(path)
+                if data is None:
+                    unverifiable(
+                        res.id,
+                        f"Result {res.id!r} ({res.name}): metric history could not be read "
+                        f"({describe_state(state)})",
+                    )
+                    continue
+                if hashlib.sha256(data).hexdigest() != artifact.sha256:
+                    unverifiable(
+                        res.id,
+                        f"Result {res.id!r} ({res.name}): metric history changed while it was "
+                        "being verified; run validate again",
+                    )
+                    continue
+                summary = owner.read_summary(data)
+                if summary is None:
+                    unverifiable(
+                        res.id,
+                        f"Result {res.id!r} ({res.name}): metric history could not be summarized "
+                        "(malformed or over a cap)",
+                    )
+                    continue
+                recorded = (res.value, res.metadata.get("step"), res.metadata.get("timestamp_ms"))
+                actual = (summary.value, summary.step, summary.timestamp)
+                if recorded != actual:
+                    mismatched.add(res.id)
+                    findings.append(
+                        Finding(
+                            code=Code.result_value_mismatch,
+                            severity=Severity.error,
+                            subject=res.id,
+                            path=artifact.path,
+                            message=(
+                                f"Result {res.id!r} ({res.name}) records {res.value!r} at step "
+                                f"{res.metadata.get('step')!r} but {artifact.path} contains "
+                                f"{summary.value!r} at step {summary.step}"
+                            ),
+                        )
+                    )
+                continue
             if has_locators:
                 findings.append(
                     Finding(
@@ -1437,4 +1512,30 @@ def check_results(
                     ),
                 )
             )
+    if not has_locators:
+        for run in manifest.runs:
+            details = run.metadata.get("mlflow") if isinstance(run.metadata, dict) else None
+            if not isinstance(details, dict):
+                continue
+            paths = details.get("unreadable")
+            if not isinstance(paths, list):
+                continue
+            reasons = details.get("unreadable_reasons")
+            reasons = reasons if isinstance(reasons, dict) else {}
+            for metric_path in paths:
+                if not isinstance(metric_path, str):
+                    continue
+                reason = reasons.get(metric_path)
+                reason = reason if isinstance(reason, str) else "unreadable"
+                findings.append(
+                    Finding(
+                        code=Code.result_unverified,
+                        severity=Severity.warning,
+                        path=metric_path,
+                        message=(
+                            f"MLflow metric history {metric_path!r} was not recorded as a result "
+                            f"({reason}); its value cannot be verified"
+                        ),
+                    )
+                )
     return findings, mismatched

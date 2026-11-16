@@ -312,6 +312,7 @@ def run_checks(
         files.readable_paths,
         enable_directory_artifacts=enable_directory_artifacts,
         skip_result_ids=targeted_result_ids,
+        trusted_paths=files.ok_paths,
     )
     graph_findings = check_graph(
         manifest,

@@ -469,9 +469,8 @@ def test_hash_mismatch_hint_names_the_rehash_command(experiment):
     assert "runevidence rehash <folder> tuned-" in hint
 
 
-# --- RE-10: MLflow metric summaries ------------------------------------------
+# --- RE-10: verified MLflow metric summaries --------------------------------
 
-RE10 = "MLflow metric summary (value, step, timestamp) was not re-read from"
 METRIC_LINE = b"1700000000000 0.5 3\n"
 
 
@@ -510,80 +509,153 @@ def log_another_step(root: Path, name: str = "acc") -> None:
         f.write(b"1700000001000 0.75 4\n")
 
 
-def re10_notes(capsys, root: Path, *args: str) -> list[str]:
-    assert main(["rehash", str(root), *args]) == 0
-    return [line.strip() for line in capsys.readouterr().out.splitlines() if RE10 in line]
+def rehash_out(capsys, root: Path, *args: str) -> tuple[int, str, bytes]:
+    before = (root / MANIFEST).read_bytes()
+    code = main(["rehash", str(root), *args])
+    return code, capsys.readouterr().out, before
 
 
-def test_rehash_notes_an_mlflow_summary_it_did_not_re_read(tmp_path, capsys):
+def test_rehash_refreshes_an_mlflow_summary_from_accepted_bytes(tmp_path, capsys):
     root = make_mlflow(tmp_path)
     log_another_step(root)
 
-    assert re10_notes(capsys, root, "metric-file-0") == [
-        f"NOTE metric-0: {RE10} mlruns/1/abc/metrics/acc; follow the RE-10 safe refresh procedure"
-    ]
+    code, out, _ = rehash_out(capsys, root, "metric-file-0")
+
+    assert code == 0
+    assert "result metric-0" in out and "0.5 -> 0.75" in out
+    after = read_doc(root)
+    assert after["results"][0]["value"] == 0.75
+    assert after["results"][0]["metadata"] == {"step": 4, "timestamp_ms": 1700000001000}
+    assert codes(root) == []
 
 
-def test_rehash_notes_an_mlflow_summary_whose_file_gets_its_first_digest(tmp_path, capsys):
+def test_rehash_refreshes_when_the_first_digest_is_recorded(tmp_path, capsys):
     root = make_mlflow(tmp_path)
     doc = read_doc(root)
     doc["artifacts"][0].update(sha256=None, size_bytes=None)
     write_doc(root, doc)
 
-    assert len(re10_notes(capsys, root, "metric-file-0")) == 1
+    code, _, _ = rehash_out(capsys, root, "metric-file-0")
+
+    assert code == 0
+    after = read_doc(root)
+    assert after["artifacts"][0]["sha256"] == hashlib.sha256(METRIC_LINE).hexdigest()
+    assert after["results"][0]["value"] == 0.5
 
 
-def test_rehash_notes_mlflow_summaries_for_volatile_files_even_without_new_bytes(tmp_path, capsys):
+def test_rehash_repairs_a_stale_summary_with_an_unchanged_digest(tmp_path, capsys):
+    root = make_mlflow(tmp_path)
+    doc = read_doc(root)
+    doc["results"][0].update(value=0.1, metadata={"step": 1, "timestamp_ms": 1})
+    write_doc(root, doc)
+
+    code, _, _ = rehash_out(capsys, root, "metric-file-0")
+
+    assert code == 0
+    after = read_doc(root)
+    assert after["results"][0]["value"] == 0.5
+    assert after["results"][0]["metadata"] == {"step": 3, "timestamp_ms": 1700000000000}
+    assert codes(root) == []
+
+
+def test_rehash_leaves_a_volatile_summary_and_notes_it(tmp_path, capsys):
     root = make_mlflow(tmp_path)
 
-    assert len(re10_notes(capsys, root, "metric-file-0", "--volatile")) == 1  # newly volatile
-    assert len(re10_notes(capsys, root, "metric-file-0")) == 1  # already volatile, nothing changed
-    assert len(re10_notes(capsys, root, "metric-file-0", "--no-volatile")) == 1  # volatile until now
+    code, out, _ = rehash_out(capsys, root, "metric-file-0", "--volatile")
+    assert code == 0 and "volatile" in out.lower()
+    assert read_doc(root)["results"][0]["value"] == 0.5
+
+    log_another_step(root)
+    code, out, _ = rehash_out(capsys, root, "metric-file-0")
+    assert code == 0 and "volatile" in out.lower()
+    assert read_doc(root)["results"][0]["value"] == 0.5
 
 
-def test_rehash_does_not_note_an_mlflow_summary_whose_file_did_not_change(tmp_path, capsys):
+def test_rehash_no_volatile_refreshes_and_records_the_digest(tmp_path, capsys):
     root = make_mlflow(tmp_path)
+    assert main(["rehash", str(root), "metric-file-0", "--volatile"]) == 0
+    capsys.readouterr()
+    log_another_step(root)
+    data = METRIC_LINE + b"1700000001000 0.75 4\n"
 
-    assert re10_notes(capsys, root, "metric-file-0") == []
-    assert re10_notes(capsys, root, "--all") == []
+    code, out, _ = rehash_out(capsys, root, "metric-file-0", "--no-volatile")
+
+    assert code == 0 and "0.5 -> 0.75" in out
+    after = read_doc(root)
+    assert after["artifacts"][0]["sha256"] == hashlib.sha256(data).hexdigest()
+    assert after["results"][0]["value"] == 0.75
 
 
-def test_rehash_note_is_the_same_in_dry_run_and_write_and_keeps_the_summary(tmp_path, capsys):
+def test_rehash_does_not_rewrite_an_unchanged_summary(tmp_path, capsys):
+    root = make_mlflow(tmp_path)
+    before = (root / MANIFEST).read_bytes()
+
+    code, out, _ = rehash_out(capsys, root, "metric-file-0")
+
+    assert code == 0
+    assert "0.5 -> 0.5" not in out
+    assert (root / MANIFEST).read_bytes() == before
+
+
+def test_rehash_dry_run_matches_the_write_and_changes_nothing(tmp_path, capsys):
     root = make_mlflow(tmp_path)
     log_another_step(root)
     before = (root / MANIFEST).read_bytes()
 
-    dry = re10_notes(capsys, root, "metric-file-0", "--dry-run")
+    code, dry, _ = rehash_out(capsys, root, "metric-file-0", "--dry-run")
+    assert code == 0
     assert (root / MANIFEST).read_bytes() == before
-    written = re10_notes(capsys, root, "metric-file-0")
+    assert "0.5 -> 0.75" in dry
 
-    assert dry == written and len(written) == 1
-    after = read_doc(root)
-    assert after["results"] == json.loads(before)["results"]  # value, step and timestamp untouched
-    assert after["artifacts"][0]["size_bytes"] == (root / "mlruns/1/abc/metrics/acc").stat().st_size
-    assert codes(root) == []
+    code, written, _ = rehash_out(capsys, root, "metric-file-0")
+    assert code == 0 and "0.5 -> 0.75" in written
 
 
-def test_rehash_notes_only_the_selected_mlflow_summaries(tmp_path, capsys):
+def test_rehash_refreshes_only_selected_summaries(tmp_path, capsys):
     root = make_mlflow(tmp_path, names=("acc", "loss"))
     log_another_step(root, "acc")
     log_another_step(root, "loss")
 
-    def noted(*args: str) -> list[str]:
-        return [line.split(":")[0] for line in re10_notes(capsys, root, *args, "--dry-run")]
+    code, _, _ = rehash_out(capsys, root, "metric-file-0")
 
-    assert noted("metric-file-0") == ["NOTE metric-0"]
-    assert noted("run-a") == ["NOTE metric-0", "NOTE metric-1"]
-    assert noted("--all") == ["NOTE metric-0", "NOTE metric-1"]
+    assert code == 0
+    after = read_doc(root)
+    assert after["results"][0]["value"] == 0.75
+    assert after["results"][1]["value"] == 0.5
 
 
-def test_rehash_notes_a_nested_mlflow_metric_name(tmp_path, capsys):
+def test_rehash_refreshes_a_nested_metric_name(tmp_path, capsys):
     root = make_mlflow(tmp_path, names=("a/b",))
     log_another_step(root, "a/b")
 
-    assert re10_notes(capsys, root, "metric-file-0") == [
-        f"NOTE metric-0: {RE10} mlruns/1/abc/metrics/a/b; follow the RE-10 safe refresh procedure"
-    ]
+    code, out, _ = rehash_out(capsys, root, "metric-file-0")
+
+    assert code == 0 and "0.5 -> 0.75" in out
+
+
+def test_rehash_refuses_an_unreadable_metric_history(tmp_path, capsys):
+    root = make_mlflow(tmp_path)
+    (root / "mlruns/1/abc/metrics/acc").write_bytes(b"not a metric row\n")
+    before = (root / MANIFEST).read_bytes()
+
+    code = main(["rehash", str(root), "metric-file-0"])
+    out = capsys.readouterr().out
+
+    assert code == 2
+    assert "Nothing was written" in out
+    assert (root / MANIFEST).read_bytes() == before
+
+
+def test_rehash_notes_when_no_adapter_can_refresh(tmp_path, capsys, monkeypatch):
+    root = make_mlflow(tmp_path)
+    log_another_step(root)
+    monkeypatch.setattr("runevidence.summaries.summary_claimants", lambda *a, **k: [])
+
+    code, out, _ = rehash_out(capsys, root, "metric-file-0")
+
+    assert code == 0
+    assert "validate will report it as unverified" in out
+    assert read_doc(root)["results"][0]["value"] == 0.5
 
 
 def _no_mlflow_run(doc: dict) -> None:
@@ -636,22 +708,25 @@ def _has_a_locator(doc: dict) -> None:
         _has_a_locator,
     ],
 )
-def test_rehash_does_not_note_a_summary_without_full_mlflow_provenance(tmp_path, capsys, weaken):
+def test_rehash_does_not_touch_a_summary_without_full_mlflow_provenance(tmp_path, capsys, weaken):
     root = make_mlflow(tmp_path, names=("a/b",) if weaken is _name_is_only_the_nested_tail else ("acc",))
     doc = read_doc(root)
     weaken(doc)
     write_doc(root, doc)
     log_another_step(root, doc["artifacts"][0]["path"].split("/metrics/")[1])
 
-    assert re10_notes(capsys, root, "metric-file-0", "--dry-run") == []
+    code, _, _ = rehash_out(capsys, root, "metric-file-0", "--dry-run")
+
+    assert code == 0
+    assert read_doc(root)["results"][0]["value"] == 0.5
 
 
-def test_volatile_locator_note_is_kept_alongside_the_mlflow_note(experiment, capsys):
+def test_volatile_locator_note_is_kept_alongside_summary_handling(experiment, capsys):
     assert main(["rehash", str(experiment), "tuned-metrics", "--volatile"]) == 0
     out = capsys.readouterr().out
 
     assert "NOTE tuned-accuracy: source is volatile, so its value was left as is" in out
-    assert RE10 not in out  # the example records no MLflow provenance
+    assert "MLflow" not in out
 
 
 # --- add ---------------------------------------------------------------------

@@ -1,0 +1,163 @@
+"""RE-10: validate verifies a locator-less MLflow metric summary against its file."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+from runevidence.cli import main
+from runevidence.models import MANIFEST_FILENAME
+
+METRIC = b"1700000000000 0.5 3\n"
+
+
+def make_manifest(
+    root: Path,
+    *,
+    value: float = 0.5,
+    step: int = 3,
+    timestamp: int = 1700000000000,
+    volatile: bool = False,
+    claim: bool = False,
+    run_metadata: dict | None = None,
+) -> Path:
+    rel = "mlruns/1/abc/metrics/acc"
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / rel).write_bytes(METRIC)
+    artifact: dict = {
+        "id": "f",
+        "path": rel,
+        "sha256": hashlib.sha256(METRIC).hexdigest(),
+        "size_bytes": len(METRIC),
+        "kind": "metrics",
+        "run_id": "r",
+    }
+    if volatile:
+        artifact.update(volatile=True, sha256=None, size_bytes=None)
+    doc: dict = {
+        "schema_version": "0.1",
+        "project": {"id": "p", "name": "p"},
+        "runs": [{"id": "r", "metadata": run_metadata or {"mlflow": {}}}],
+        "artifacts": [artifact],
+        "results": [
+            {
+                "id": "m",
+                "run_id": "r",
+                "name": "acc",
+                "value": value,
+                "artifact_id": "f",
+                "metadata": {"step": step, "timestamp_ms": timestamp},
+            }
+        ],
+    }
+    if claim:
+        doc["evidence"] = [
+            {
+                "id": "claim-acc",
+                "claim": "accuracy is 0.5",
+                "supports": ["m"],
+                "contradicts": [],
+                "source": "README.md",
+                "metadata": {},
+            }
+        ]
+    (root / MANIFEST_FILENAME).write_text(json.dumps(doc), encoding="utf-8")
+    return root
+
+
+def test_matching_summary_is_clean(tmp_path, capsys):
+    root = make_manifest(tmp_path)
+    assert main(["validate", str(root), "--strict"]) == 0
+    assert "0 errors, 0 warnings" in capsys.readouterr().out
+
+
+def test_value_mismatch_is_an_error_and_puts_the_claim_at_risk(tmp_path, capsys):
+    root = make_manifest(tmp_path, value=0.1, claim=True)
+    assert main(["validate", str(root), "--strict"]) == 1
+    out = capsys.readouterr().out
+    assert "result-value-mismatch [m]" in out
+    assert "records 0.1 at step 3" in out and "contains 0.5 at step 3" in out
+    assert "claim-at-risk [claim-acc]" in out
+
+
+def test_step_only_mismatch_is_an_error(tmp_path, capsys):
+    root = make_manifest(tmp_path, step=2)
+    assert main(["validate", str(root), "--strict"]) == 1
+    assert "result-value-mismatch [m]" in capsys.readouterr().out
+
+
+def test_timestamp_only_mismatch_is_an_error(tmp_path, capsys):
+    root = make_manifest(tmp_path, timestamp=1)
+    assert main(["validate", str(root), "--strict"]) == 1
+    assert "result-value-mismatch [m]" in capsys.readouterr().out
+
+
+def test_volatile_summary_warns_and_strict_fails(tmp_path, capsys):
+    root = make_manifest(tmp_path, volatile=True)
+    assert main(["validate", str(root)]) == 0
+    assert "volatile" in capsys.readouterr().out
+    assert main(["validate", str(root), "--strict"]) == 1
+
+
+def test_adapter_absent_warns_instead_of_passing_silently(tmp_path, capsys, monkeypatch):
+    root = make_manifest(tmp_path, value=0.1)
+    monkeypatch.setattr("runevidence.summaries.summary_claimants", lambda *a, **k: [])
+    assert main(["validate", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "no installed adapter can verify it" in out
+    assert main(["validate", str(root), "--strict"]) == 1
+
+
+def test_two_claimants_warn(tmp_path, capsys, monkeypatch):
+    root = make_manifest(tmp_path, value=0.1)
+
+    class First:
+        pass
+
+    class Second:
+        pass
+
+    monkeypatch.setattr(
+        "runevidence.summaries.summary_claimants", lambda *a, **k: [First(), Second()]
+    )
+    assert main(["validate", str(root)]) == 0
+    assert "more than one installed adapter" in capsys.readouterr().out
+
+
+def test_unreadable_history_warns(tmp_path, capsys):
+    root = make_manifest(
+        tmp_path,
+        run_metadata={
+            "mlflow": {
+                "unreadable": ["mlruns/1/abc/metrics/loss"],
+                "unreadable_reasons": {"mlruns/1/abc/metrics/loss": "over-cap"},
+            }
+        },
+    )
+    assert main(["validate", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "was not recorded as a result (over-cap)" in out
+    assert main(["validate", str(root), "--strict"]) == 1
+
+
+def test_digest_race_is_unverifiable(tmp_path, capsys, monkeypatch):
+    root = make_manifest(tmp_path, value=0.1)
+    monkeypatch.setattr(
+        "runevidence.summaries.read_bounded",
+        lambda *a, **k: (b"1 0.5 3\n", "ok"),
+    )
+    assert main(["validate", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "changed while it was being verified" in out
+    assert main(["validate", str(root), "--strict"]) == 1
+
+
+def test_changed_file_reports_the_hash_before_the_summary(tmp_path, capsys):
+    root = make_manifest(tmp_path, value=0.1)
+    with (root / "mlruns/1/abc/metrics/acc").open("ab") as handle:
+        handle.write(b"1700000001000 0.75 4\n")
+    assert main(["validate", str(root), "--strict"]) == 1
+    out = capsys.readouterr().out
+    assert "hash-mismatch [f]" in out
+    assert "result-value-mismatch" not in out

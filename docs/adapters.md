@@ -249,48 +249,40 @@ Limits and edge cases:
   A single experiment folder or run folder is not a supported root.
 - Invalid or unsafe metadata YAML is refused with an adapter error. Nothing
   is executed. Empty, malformed, non-finite or unsupported metric histories
-  produce no result; their paths are listed in `metadata.mlflow.unreadable`.
-  A bad row invalidates the whole summary. The file bytes are still hashed.
-- Metric logs are plain text. Core value locators support JSON only, so
-  these results have no locator. `validate` detects a changed metric file
-  through its hash, but does not re-read its scalar value. `rehash` accepts
-  the new bytes without refreshing these results, so a recorded summary
-  **value, step or timestamp can stay old** after you accept a changed metric file.
-  `validate --strict` can still exit 0 after that acceptance. Changed bytes do
-  not always mean the summary is stale, and validation makes no scientific
-  truth or general freshness claim. To refresh, follow [Refreshing MLflow
-  results safely](#refreshing-mlflow-results-safely-re-10).
+  produce no result; their paths are listed in `metadata.mlflow.unreadable`
+  with a reason in `metadata.mlflow.unreadable_reasons`. A bad row invalidates
+  the whole summary. The file bytes are still hashed.
+- Metric logs are plain text. Core value locators support JSON only, so these
+  results have no locator. On schema 0.1/0.2, `validate` verifies each summary
+  through the adapter and `rehash` refreshes it; on 0.3–0.10 the existing
+  `result-unverified` warning still applies.
 
-#### Refreshing MLflow results safely (RE-10)
+#### MLflow metric summaries (RE-10)
 
-Use forced regeneration to re-extract MLflow metric summaries from the
-current files. Save your work before running it, and use one writer at a time.
+On schema 0.1/0.2, a locator-less metric result is verified against its file:
 
-`init --force` writes the manifest it is about to replace to the next backup
-generation: `runevidence.json.bak`, then `runevidence.json.bak.2`,
-`runevidence.json.bak.3`, and so on. Existing backups are never overwritten or
-deleted. The regenerated manifest is a fresh scan, so it does not merge
-hand-written claims, relationships, annotations, volatile flags, or project
-fields and settings. The warning printed by `init --force` counts every old
-result as missing even when the adapter regenerates it, so do not copy result
-entries back wholesale.
+- `validate` re-reads the summary and compares value, step and timestamp
+  exactly. A difference is `result-value-mismatch`, and claims resting on the
+  result are reported at risk. The digest of the parsed bytes must match the
+  recorded digest, so a file that changes mid-check is reported, not accepted.
+- `rehash` refreshes a selected summary from the bytes it accepts. It also
+  repairs a summary that already disagrees with an unchanged file, so a
+  manifest made stale by an older RunEvidence is fixed by selecting the metric
+  (or `--all`); `init --force` is not required.
+- A volatile metric file is not read. `validate` warns that the summary is not
+  verified; `rehash` leaves it and prints a NOTE; `--no-volatile` records the
+  digest and refreshes it.
+- If no installed adapter claims the result, `validate` reports
+  `result-unverified` and `rehash` accepts the bytes with a NOTE. It is never
+  silently clean.
+- A migrated 0.3–0.10 manifest keeps its existing `result-unverified` warning
+  for the locator-less result and is not refreshed this way.
 
-1. Commit the manifest and relevant files to version control or make a separate
-   backup before starting.
-2. Regenerate with `runevidence init path/to/mlruns --adapter mlflow --force`.
-3. Compare the backup with the regenerated `runevidence.json`. Keep the newly
-   extracted metric results, including their value, step and
-   timestamp.
-4. Manually restore only reviewed claims, relationships, annotations, volatile
-   flags and project settings. Verify IDs and claim links against the
-   regenerated entries.
-5. Do not copy old metric results back. They may be the stale summaries this
-   refresh is meant to replace.
-6. Run `runevidence validate path/to/mlruns --strict` and treat the result as
-   consistency evidence, not scientific proof.
-
-Version control plus a separate backup is strongly recommended. The automatic
-backup generations protect the manifest bytes but are not a merge tool.
+Metric histories are read under a declared bound: 50 MiB, 1,000,000 lines and
+64 KiB per line. A history over a bound, or one that is malformed, non-finite
+or not valid UTF-8, produces no result at `init`, is listed in
+`metadata.mlflow.unreadable` with a reason, makes `validate` warn, and makes
+`rehash` refuse that edit. The reader refuses symlinks and non-regular files.
 
 Example: [examples/mlflow-file-store](../examples/mlflow-file-store) is a
 small synthetic store with two runs. Copy it before running `init` if you

@@ -13,6 +13,7 @@ requested change can be made.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -27,6 +28,7 @@ from .findings import Code
 from .hashing import sha256_file
 from .manifest import LoadedManifest, artifact_to_dict, validate_manifest
 from .models import Artifact, Manifest, is_own_file
+from .summaries import describe_state, read_bounded, summary_owner, summary_shape
 
 GLOB_CHARS = set("*?[")
 
@@ -260,30 +262,71 @@ def plan_rehash(
                 f"{res.id}: source is volatile, so its value was left as is; "
                 "use --no-volatile to record its current digest and result value"
             )
-    # An MLflow metric summary has no locator, so nothing below re-reads it
-    # (RE-10). Re-recording its file must not look like re-vouching for it.
+    # A locator-less metric summary is re-read from the bytes the edit is
+    # accepting (RE-10). A summary that already disagrees with an unchanged
+    # file is repaired when the user selects it, so a manifest made stale by
+    # the old behaviour does not require init --force.
     selected = {f.id: f for f in plan.files}
     artifacts = {a.id: a for a in manifest.artifacts}
-    runs = {r.id: r for r in manifest.runs}
-    noted: set[str] = set()
     for res in manifest.results:
-        if res.locator is not None or res.artifact_id not in selected or res.id in noted:
+        if res.locator is not None or res.artifact_id not in selected:
             continue
-        fc, art, run = selected[res.artifact_id], artifacts[res.artifact_id], runs.get(res.run_id)
-        if (
-            run is not None
-            and isinstance(run.metadata.get("mlflow"), dict)
-            and "step" in res.metadata
-            and "timestamp_ms" in res.metadata
-            and art.kind == "metrics"
-            and art.run_id == res.run_id
-            and _norm(art.path).endswith("/metrics/" + res.name)
-            and (fc.id in new_bytes or fc.was_volatile or fc.volatile)
-        ):
-            noted.add(res.id)
+        if not summary_shape(manifest, res):
+            continue
+        fc, art = selected[res.artifact_id], artifacts.get(res.artifact_id)
+        if art is None:
+            continue
+        if fc.volatile:
             plan.notes.append(
-                f"{res.id}: MLflow metric summary (value, step, timestamp) was not re-read from {art.path}; "
-                "follow the RE-10 safe refresh procedure"
+                f"{res.id}: the metric history is volatile, so its summary was left as is; "
+                "use --no-volatile to record its digest and refresh the summary"
+            )
+            continue
+        owner, reason = summary_owner(manifest, res)
+        if owner is None:
+            if reason == "ambiguous":
+                raise EditError(
+                    f"Cannot refresh metric summary {res.id!r}: more than one installed "
+                    "adapter claims it. Nothing was written."
+                )
+            plan.notes.append(
+                f"{res.id}: no installed adapter can refresh this metric summary; its "
+                "recorded value was accepted as is and validate will report it as unverified"
+            )
+            continue
+        path = _on_disk(loaded.root, art)
+        data, state = read_bounded(path)
+        if data is None:
+            raise EditError(
+                f"Cannot refresh metric summary {res.id!r}: {art.path} could not be read "
+                f"({describe_state(state)}). Nothing was written."
+            )
+        expected = fc.new_sha256 if fc.new_sha256 is not None else art.sha256
+        if expected is not None and hashlib.sha256(data).hexdigest() != expected:
+            raise EditError(
+                f"Cannot refresh metric summary {res.id!r}: {art.path} changed while the "
+                "manifest was being updated. Retry. Nothing was written."
+            )
+        summary = owner.read_summary(data)
+        if summary is None:
+            raise EditError(
+                f"Cannot refresh metric summary {res.id!r}: {art.path} is malformed or over "
+                "a cap. Pick other targets, or mark it volatile with --volatile. "
+                "Nothing was written."
+            )
+        old = (res.value, res.metadata.get("step"), res.metadata.get("timestamp_ms"))
+        new = (summary.value, summary.step, summary.timestamp)
+        if old == new:
+            continue
+        j = _entry_index(raw["results"], res.id, "result")
+        raw["results"][j]["value"] = summary.value
+        metadata = raw["results"][j].setdefault("metadata", {})
+        metadata["step"] = summary.step
+        metadata["timestamp_ms"] = summary.timestamp
+        plan.values.append(ValueChange(res.id, res.name, res.value, summary.value))
+        if old[1] != new[1] or old[2] != new[2]:
+            plan.notes.append(
+                f"{res.id}: step {old[1]!r} -> {new[1]!r}, timestamp_ms {old[2]!r} -> {new[2]!r}"
             )
     _reread_values(loaded, raw, new_bytes, plan)
     accepted = {f.id for f in plan.changed_files} | {v.result_id for v in plan.values}

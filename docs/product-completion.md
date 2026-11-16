@@ -118,8 +118,8 @@ with the qualification record). Two qualifiers are defined as follows:
 | E4 | Declared platform behaviour | PARTIAL | every platform-specific guarantee and its exclusion is stated; Windows CI stays green | POSIX locks; Linux/ext4 directory artifacts |
 | E5 | Machine-readable output | PARTIAL | every analysis route that offers JSON documents the envelope and keeps it stable; the sole text-only analysis mode, `comparability --preflight`, stays text-only by its frozen contract and must not gain JSON; write and diagnostic commands state whether they have a machine-readable form | analysis routes have `--json`, but envelope naming and versioning are not uniform; `init`, `rehash`, `add`, `schema` and `adapters` are text-only |
 | E6 | End-to-end acceptance harness | PARTIAL | a scripted, reproducible scenario exercises record → verify → analyse → compare → change → propagate → accept → revalidate → fresh install, with recorded commands, exit codes and expected versus observed results, plus negative paths | `test_acceptance.py` and the dogfood regression tests cover parts; no single workspace-level lifecycle run and no fresh-install run |
-| F1 | MLflow summary freshness (RE-10) | IN_PROGRESS | accepting changed MLflow bytes must not leave a recorded summary silently stale: `validate` verifies the summary against the file, and `rehash` refreshes it. The current NOTE reports that no re-read happened; it does not establish freshness. P0-1 requires this to reach `COMPLETE` | reproduced as a `validate --strict` exit 0 with a stale value |
-| F2 | MLflow metric memory (ML-1) | IN_PROGRESS | metric histories are read under a declared byte and row cap and an oversized history has a defined outcome. P0-2 requires this to reach `COMPLETE` | the adapter reads the whole file today |
+| F1 | MLflow summary freshness (RE-10) | COMPLETE | accepting changed MLflow bytes must not leave a recorded summary silently stale: on schema 0.1/0.2, `validate` verifies the summary against the file and `rehash` refreshes it, including repairing a stale summary with an unchanged digest; absent/ambiguous adapters, volatile files and unreadable histories warn instead of passing | `tests/test_mlflow_summary_verification.py`, `tests/test_mlflow_end_to_end.py`, full suite |
+| F2 | MLflow metric memory (ML-1) | COMPLETE | metric histories are read under declared byte, row and line caps, and an oversized history has a defined, visible outcome | `packages/runevidence-mlflow/tests/test_metric_reader.py`, `tests/test_summaries.py` |
 | F3 | Writer concurrency | BOUNDED | cooperative serialization where supported, and the exclusion is explicit everywhere else | documented limitation |
 | F4 | Resource and depth limits | VERIFIED | every scanner except the MLflow metric reader (F2) has a declared cap, and removing the cap makes a named test fail | `tests/test_tensorboard_tensors.py::test_one_million_elements_is_the_boundary`, `::test_sixteen_mib_summary_of_millions_of_empty_tensor_spans_stays_bounded`, `tests/test_csv_profile.py::test_columns_at_cap_and_one_over`, `::test_rows_at_cap_and_one_over` (the 16 MiB memory test is skipped on non-Linux hosts) |
 
@@ -133,14 +133,14 @@ capability depends on it.
 
 ### P0 — core correctness and evidence integrity
 
-1. **RE-10**: make the accepted-change path honest. `validate` must verify a recorded MLflow
-   summary against the metric file, and `rehash` must refresh it, through the owning adapter.
-   Accepting bytes while keeping a summary that was not re-read is not sufficient: refusing
-   acceptance would only force `init --force`, which drops hand-written claims. Refusal is
-   correct only when the metric file itself is unreadable or over its cap. RE-10 and ML-1 are
-   P0 and must reach `COMPLETE`; they may not be closed as `BOUNDED`.
-2. **ML-1**: bound MLflow metric-history reads (declared byte and row caps) and define the
-   oversized outcome.
+1. **RE-10** (delivered): make the accepted-change path honest. `validate` verifies a
+   recorded MLflow summary against the metric file, and `rehash` refreshes it, through the
+   owning adapter. Accepting bytes while keeping a summary that was not re-read is not
+   sufficient: refusing acceptance would only force `init --force`, which drops hand-written
+   claims. Refusal is correct only when the metric file itself is unreadable or over its cap.
+   See F1 for the evidence.
+2. **ML-1** (delivered): bound MLflow metric-history reads (declared byte, row and line caps)
+   and define the oversized outcome. See F2 for the evidence.
 3. **False-clean probe**: for each command, exercise its documented success path with a
    condition that should have failed; add a regression test for every defect found. Stop when
    every documented success path has been probed once per capability class.

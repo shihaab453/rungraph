@@ -49,15 +49,17 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import stat
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Optional
 
 import yaml
-from runevidence.adapters import Adapter, AdapterError, Discovery
+from runevidence.adapters import Adapter, AdapterError, Discovery, Summary
 from runevidence.adapters.generic import slug
 from runevidence.checks.files import IGNORED_DIRS
+from runevidence.summaries import read_bounded, summary_shape
 from runevidence.hashing import sha256_file
 from runevidence.models import Artifact, Manifest, Project, Result, Run, is_own_file
 
@@ -141,6 +143,7 @@ class MlflowAdapter(Adapter):
 
         results: list[Result] = []
         unreadable: dict[str, list[str]] = {run_dir: [] for run_dir in run_ids}
+        unreadable_reasons: dict[str, dict[str, str]] = {run_dir: {} for run_dir in run_ids}
         for rel in discovery.files:
             run_dir = _owner_run(rel, run_ids)
             if run_dir is None:
@@ -148,9 +151,11 @@ class MlflowAdapter(Adapter):
             name = _metric_name(rel, run_dir)
             if name is None:
                 continue
-            summary = _read_metric(root / rel)
+            summary, reason = _read_metric(root / rel)
             if summary is None:
                 unreadable[run_dir].append(rel)
+                if reason is not None:
+                    unreadable_reasons[run_dir][rel] = reason
                 continue
             res_id = _unique(f"metric-{slug(run_dir)}-{slug(name)}", used)
             results.append(
@@ -181,6 +186,8 @@ class MlflowAdapter(Adapter):
                     mlflow["status"] = info["status"]
                 if unreadable[run_dir]:
                     mlflow["unreadable"] = unreadable[run_dir]
+                if unreadable_reasons[run_dir]:
+                    mlflow["unreadable_reasons"] = unreadable_reasons[run_dir]
                 runs.append(
                     Run(
                         id=run_ids[run_dir],
@@ -203,6 +210,17 @@ class MlflowAdapter(Adapter):
             artifacts=artifacts,
             results=results,
         )
+
+    def claims_summary(self, manifest, result) -> bool:
+        """A result with the delivered MLflow summary shape is ours to re-read."""
+        return summary_shape(manifest, result)
+
+    def read_summary(self, data: bytes) -> Optional[Summary]:
+        parsed = _parse_summary(data)
+        if parsed is None:
+            return None
+        value, step, timestamp = parsed
+        return Summary(value=value, step=step, timestamp=timestamp)
 
 
 class _Summary:
@@ -520,41 +538,101 @@ def _read_params(root: Path, run_dir: str, files: list[str]) -> dict[str, str]:
     return params
 
 
-def _read_metric(path: Path) -> Optional[_Summary]:
-    """The best row in an MLflow metric history, or None if the log is bad."""
+MAX_METRIC_BYTES = 50 * 1024 * 1024
+MAX_METRIC_ROWS = 1_000_000
+MAX_METRIC_LINE_BYTES = 64 * 1024
+
+# Exactly the boundaries str.splitlines() recognizes, in UTF-8 bytes.
+_LINE_BREAK = re.compile(
+    rb"\r\n|\r|\n|\x0b|\x0c|\x1c|\x1d|\x1e|\xc2\x85|\xe2\x80\xa8|\xe2\x80\xa9"
+)
+
+
+def _parse_row(raw: bytes) -> tuple[tuple[int, int, float], tuple[float, int, int]] | None:
+    """One metric row as ``(key, (value, step, timestamp))``, or None if bad."""
     try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+        line = raw.decode("utf-8")
+    except UnicodeDecodeError:
         return None
-    best: Optional[tuple[tuple[int, int, float], _Summary]] = None
-    for line in text.splitlines():
-        if not line.strip():
-            # A blank line is not a metric row; refuse the whole history
-            # rather than silently dropping a corrupt row.
+    if not line.strip():
+        # A blank line is not a metric row; refuse the whole history rather
+        # than silently dropping a corrupt row.
+        return None
+    parts = line.split()
+    if len(parts) == 3:
+        timestamp_text, value_text, step_text = parts
+    elif len(parts) == 2:
+        # Legacy MLflow histories have no step column.
+        timestamp_text, value_text = parts
+        step_text = "0"
+    else:
+        return None
+    try:
+        timestamp = int(timestamp_text)
+        step = int(step_text)
+        value = float(value_text)
+    except (ValueError, OverflowError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return (step, timestamp, value), (value, step, timestamp)
+
+
+def _parse_summary(data: bytes) -> Optional[tuple[float, int, int]]:
+    """The best row in a history, or None if it is malformed or over a cap.
+
+    Iterates the same line boundaries as ``str.splitlines()`` without building
+    a list, so a file of millions of empty lines stays at the byte cap instead
+    of multiplying it."""
+    if len(data) > MAX_METRIC_BYTES:
+        return None
+    best: Optional[tuple[tuple[int, int, float], tuple[float, int, int]]] = None
+    rows = 0
+    start = 0
+    for match in _LINE_BREAK.finditer(data):
+        end = match.start()
+        if end - start > MAX_METRIC_LINE_BYTES:
             return None
-        parts = line.split()
-        if len(parts) == 3:
-            timestamp_text, value_text, step_text = parts
-        elif len(parts) == 2:
-            # Legacy MLflow histories have no step column.
-            timestamp_text, value_text = parts
-            step_text = "0"
-        else:
+        rows += 1
+        if rows > MAX_METRIC_ROWS:
             return None
-        try:
-            timestamp = int(timestamp_text)
-            step = int(step_text)
-            value = float(value_text)
-        except ValueError:
+        parsed = _parse_row(data[start:end])
+        if parsed is None:
             return None
-        if not math.isfinite(value):
+        if best is None or parsed[0] > best[0]:
+            best = parsed
+        start = match.end()
+    if start < len(data):
+        if len(data) - start > MAX_METRIC_LINE_BYTES:
             return None
-        key = (step, timestamp, value)
-        if best is None or key > best[0]:
-            best = (key, _Summary(value=value, step=step, timestamp=timestamp))
+        rows += 1
+        if rows > MAX_METRIC_ROWS:
+            return None
+        parsed = _parse_row(data[start:])
+        if parsed is None:
+            return None
+        if best is None or parsed[0] > best[0]:
+            best = parsed
     if best is None:
         return None
     return best[1]
+
+
+def _read_metric(path: Path) -> tuple[Optional[_Summary], Optional[str]]:
+    """The best row in an MLflow metric history and its refusal reason.
+
+    Returns ``(summary, None)`` or ``(None, reason)`` where reason is
+    ``over-cap``, ``not-regular``, ``missing``, ``unreadable`` or ``malformed``.
+    The bounded read refuses symlinks and non-regular files, so ``init`` and
+    ``validate`` enforce the same limits."""
+    data, state = read_bounded(path, MAX_METRIC_BYTES)
+    if data is None:
+        return None, state
+    parsed = _parse_summary(data)
+    if parsed is None:
+        return None, "malformed"
+    value, step, timestamp = parsed
+    return _Summary(value=value, step=step, timestamp=timestamp), None
 
 
 def _owner_run(rel: str, run_ids: dict[str, str]) -> Optional[str]:
