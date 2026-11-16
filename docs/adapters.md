@@ -358,5 +358,7 @@ How it reads the folder:
 
 Without a media or tensor flag the adapter emits `Manifest05`; the flags select
 0.6 (strings), 0.7 (histograms), 0.8 (media) or 0.9 (tensors), and
-`runevidence validate` verifies the resulting locators. See
+`runevidence validate` verifies the resulting locators. See the
+[complete TensorBoard guide](tensorboard-guide.md) for the flag table, caps and
+per-kind behavior. See
 [Schema 0.5 TensorBoard scalar locators](../README.md#schema-05-tensorboard-scalar-locators-slice-d).

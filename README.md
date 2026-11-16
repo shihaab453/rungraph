@@ -713,16 +713,23 @@ Schema 0.7 adds opt-in legacy TensorBoard **histograms**
 comparison, per-artifact occurrence and a 1,024-bucket cap. See
 [docs/schema-0.7-tensorboard-histograms.md](docs/schema-0.7-tensorboard-histograms.md).
 
-Schema 0.9 adds opt-in **numeric tensor digests** (`init --include-tensors`):
-canonical `TensorValue` results for float32/float64/int32/int64 arrays, with exact
-re-verification and compact display. See
-[docs/schema-0.9-tensorboard-tensors.md](docs/schema-0.9-tensorboard-tensors.md).
-
 Schema 0.8 adds opt-in legacy TensorBoard **media references**
 (`init --include-images`, `init --include-audio`): digest-only `ImageValue` and
 `AudioValue` results for PNG images and RIFF/WAVE audio, with exact
 re-verification against the event file and compact display. See
 [docs/schema-0.8-tensorboard-media.md](docs/schema-0.8-tensorboard-media.md).
+
+
+Schema 0.9 adds opt-in **numeric tensor digests** (`init --include-tensors`):
+canonical `TensorValue` results for float32/float64/int32/int64 arrays, with exact
+re-verification and compact display. See
+[docs/schema-0.9-tensorboard-tensors.md](docs/schema-0.9-tensorboard-tensors.md).
+
+### TensorBoard: the complete surface
+
+One page covers every TensorBoard slice, the flags that select each schema, what
+is recorded, verification, caps and deliberate limits:
+[docs/tensorboard-guide.md](docs/tensorboard-guide.md).
 
 ### Migrating a manifest to 0.2
 
