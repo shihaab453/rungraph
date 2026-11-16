@@ -1,31 +1,36 @@
-# TensorBoard numeric tensor digests — design RFC (v0.6)
+# TensorBoard numeric tensor digests — design RFC (v0.7)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.9 admission decision are required before any code.
 Schema 0.1–0.8, their readers/checkers and every delivered behavior stay frozen, except the
 additive dispatch, model, migration and text edits this document names explicitly.
 
-## 0. Changes in v0.6
+## 0. Changes in v0.7
 
-Round 5 confirmed every normative wire and damage rule against the frozen parser and rejected
-v0.5 on three cross-section slips. v0.6 fixes them:
+Round 6 confirmed the frozen boundary and rejected v0.6 on one wire-0 slip plus two scope
+sentences. v0.7 fixes them:
 
-- **§9 now matches §3.2.** A truncated or overlong unpacked varint, or a short wire-1/5 integer
-  body, refuses the file; an overlong packed varint fails only a selected entry and is ignored
-  when the list is discarded.
+- **Wire 0 contributes.** The string-path sentence now skips only wire 1/5; a wire-0 integer is
+  an element, so a foreign wire-0 `int_val` still makes that list non-empty.
+- **"Discarded" means discarded by the content branch.** A packed varint list is ignored only
+  when non-empty `tensor_content` wins; in the typed branch a foreign list fails the entry, so a
+  damaged packed span there is not "discarded".
 - **Lineage needs no own branch.** Every node already flows through `run_claim._display_row` to
   `value_display`, so the edits are `value_to_json`, `value_display` and the claim whitelist.
-- **The two-outcome example is exact.** Only a rank-1 `[1]` float32 with exactly 4 content
-  bytes (or float64 with 8) plus one typed value produces the stated pair; rank 0 fails the
-  profile and `[1,1]` gives the scalar locator `selects an unsupported value`.
-- **Scope wording.** "Every field" becomes "every field the frozen walk visits"; the string-path
-  byte-count sentence is scoped to packed spans; the element count is described as bounded by
-  the 16 MiB Summary cap rather than unbounded.
+- **The two-outcome example is exact.** A rank-1 `[1]` float32 with 4 content bytes (or float64
+  with 8) plus one `float_val`/`double_val` produces the pair, and so does a rank-1 `[1]`
+  int32/int64 with content, because the scalar classifier rejects every non-float dtype. A
+  rank-0 float32 with content is a recorded scalar (tensor locator: unsupported value); a rank-0
+  int32 fails the profile (tensor locator: unsupported tensor encoding); `[1,1]` gives the
+  scalar locator `selects an unsupported value`.
+- **Budget table completed.** `tensors + media + histograms` selects `BUDGET_MESSAGE_07_HIST`,
+  and the full eight-row table is pinned.
 
-Earlier revisions folded rounds 1 to 4: the frozen-strictness boundary and encoding-based damage
-split, varint and int32 rules, raw-wire float hashing, the separate O(1) accumulator, post-selection
-overflow, payload precedence, the exact per-field wire table, the stage-1 ladder row, the step-0
-gate, six mappings, and every admission, text and display obligation.
+Earlier revisions folded rounds 1 to 6: the frozen-strictness boundary and encoding-based damage
+split, varint and int32 rules, raw-wire float hashing, the separate O(1) accumulator,
+post-selection overflow, payload precedence, the exact per-field wire table, walk-visited scope,
+the stage-1 ladder row, the step-0 gate, six mappings, the lineage call path, and every
+admission, text and display obligation.
 
 ## 1. Problem and scope
 
@@ -88,7 +93,8 @@ a `TensorboardLocator` subclass, and `_locator_kind` checks it before the scalar
 A `Summary.Value` whose winning oneof member is `tensor` (8) is a tensor candidate. The legacy
 classifier runs first with exactly the frozen semantics:
 
-1. if the frozen scalar classifier records the entry (rank-0 or rank-1 `[1]` float/double) or
+1. if the frozen scalar classifier records the entry (a valid scalar encoding at rank 0 or rank
+   1 `[1]` float/double — note that content plus typed values is *not* a valid scalar encoding) or
    the frozen string classifier records it (rank-0 or `[1]` `DT_STRING`), the entry is that
    scalar/string and is **not** a tensor; a tensor locator for it receives
    `selects an unsupported value` and the entry consumes no tensor occurrence;
@@ -171,8 +177,9 @@ refuses the file where the frozen grammar would.
 1. the last `tensor_content` range is non-empty: its length must be exactly
    `element_count * width`, else fail; it is the payload and is hashed fresh. In this branch
    **every** typed list is ignored for value and validity: foreign dtype, overflow, zero-length
-   packed span, packed-varint damage. Unpacked damage and packed float/double length damage have
-   already refused the file in §3.2;
+   packed span, packed-varint damage. Unpacked damage, a wrong wire on `float_val`/`double_val`
+   and a short fixed body have already refused the file in §3.2, so nothing in this branch can
+   rescue them;
 2. otherwise (content absent or empty) the payload is the list matching `dtype`:
    - it must be present and its element count must equal `element_count`, else fail; a selected
      count above 1,000,000 fails;
@@ -183,8 +190,8 @@ refuses the file where the frozen grammar would.
      property: a packed span of at least one byte is non-empty even if it decodes to zero
      elements, an unpacked occurrence of that dtype is non-empty, and a zero-length packed span
      is not. For packed spans the frozen string path counts bytes the same way; its habit of
-     counting wire-0/1/5 integer occurrences as other-typed values is not the 0.9 rule, which
-     skips them. The three other supported lists saturate their counters; a foreign list never
+     counting wire-0/1/5 integer occurrences as other-typed values is not the 0.9 rule: wire 0
+     contributes an element, and only wire 1/5 occurrences are skipped. The three other supported lists saturate their counters; a foreign list never
      reaches this test in the content branch.
 
 An empty `tensor_content` range is defined as absent for step 1. TF's broadcast form (fewer typed
@@ -209,8 +216,9 @@ The digest is over a canonical encoding so different writer forms of the same ar
 - varints are bounded to 10 bytes and the frozen `_read_varint` semantics; non-minimal
   encodings are accepted. Damage follows §3.2: truncated or overlong **unpacked** varints and
   packed float/double length damage refuse the file; damage inside the selected packed varint
-  span fails the entry; a discarded **packed varint** list is still decoded eagerly, its damage
-  is latched, and it is ignored after selection;
+  span fails the entry; a packed varint list discarded **because `tensor_content` won** is still
+  decoded eagerly, its damage is latched, and it is ignored; in the typed branch a foreign list
+  fails the entry, so its damage is never "discarded";
 - if both a non-empty `tensor_content` and typed values are present, `tensor_content` wins and
   the typed values are ignored.
 
@@ -231,8 +239,8 @@ list" contract stays frozen. It holds:
 
 Typed values are fed to their dtype's hasher as they are read and are never retained. A count
 above 1,000,000 marks overflow and fails the entry **only when that list is selected**. The
-16 MiB Summary cap bounds the raw bytes (about 16.7 million one-byte varints), but not the
-element count, which is why the saturating counter exists. Packed float/double payloads are hashed as contiguous byte spans; varint integers are
+16 MiB Summary cap bounds a packed span to roughly 16.7 million one-byte varints, which is above
+the 1,000,000-element profile limit; the saturating counter enforces that stricter limit. Packed float/double payloads are hashed as contiguous byte spans; varint integers are
 decoded and re-encoded one element at a time with O(1) state.
 
 The frozen 16 MiB merged-`Summary` cap still outranks everything: an oversized Summary refuses
@@ -333,11 +341,21 @@ display gain the kind; the graph conflicting-evidence text uses the display.
   ("summary tag").
 - Capability errors print in the delivered order, with tensors appended last: strings,
   histograms, images, audio, tensors.
-- Budgets: tensors add no limit. `_budget_message` gains an explicit tensors branch in the
-  first test (alongside media), so tensors-only and tensors+media runs use
-  `BUDGET_MESSAGE_08`, tensors+strings uses `BUDGET_MESSAGE_06`, tensors+histograms uses
-  `BUDGET_MESSAGE_07_HIST`, and tensors+strings+histograms uses `BUDGET_MESSAGE_07`. This is a
-  named edit site, not an inference from the 0.8 code. A digest value is at most
+- Budgets: tensors add no limit. `_budget_message` gains an explicit tensors branch in the first
+  test (alongside media), which yields this table:
+
+| Flags besides tensors | Text |
+| --- | --- |
+| none | `BUDGET_MESSAGE_08` |
+| strings | `BUDGET_MESSAGE_06` |
+| histograms | `BUDGET_MESSAGE_07_HIST` |
+| strings + histograms | `BUDGET_MESSAGE_07` |
+| media | `BUDGET_MESSAGE_08` |
+| media + strings | `BUDGET_MESSAGE_06` |
+| media + histograms | `BUDGET_MESSAGE_07_HIST` |
+| media + strings + histograms | `BUDGET_MESSAGE_07` |
+
+  This is a named edit site, not an inference from the 0.8 code. A digest value is at most
   167 bytes of compact JSON (dimensions are capped by the element product), far under the tag
   budget.
 - Unusable tags: a scalar tag refuses `init` without `--tags` and is skipped with it; tensor
@@ -379,7 +397,8 @@ help lists 0.9. The 0.9 cap text is the delivered `TENSORBOARD_CAP_MESSAGE_06`.
 | `checks/graph.py` | version gates, capped hint, compact display |
 | `histogram_display.py` | `value_to_json`, `tensor_display`, and `value_display` wiring |
 | `locator_profiles.py`, `run_claim.py` | display, whitelist, value branch |
-| `run_compare.py` | `_structured_flag` and `_side_flag`; `run_matrix.py`, `run_details.py`, `run_lineage.py`, `run_leaderboard.py`, `report.py` | display and JSON |
+| `run_compare.py` | `_structured_flag` and `_side_flag`; `run_matrix.py`, `run_details.py`, `run_leaderboard.py`, `report.py` | display and JSON |
+| `run_lineage.py` | no code change; its nodes reach `value_display` through `run_claim`, so it is a verification surface only |
 | `migrate.py`, `run_comparability.py`, `cli.py`, `adapter.py` | targets, downgrade tuples, flags, texts, precedence, generator |
 
 ## 9. Verification plan
@@ -387,10 +406,10 @@ help lists 0.9. The 0.9 cap text is the delivered `TENSORBOARD_CAP_MESSAGE_06`.
 - Reader: canonical equality across `tensor_content` and typed forms for all four dtypes; packed
   and unpacked values; int32 `-1` vs `0xFFFFFFFF`; non-minimal varints; a truncated or overlong
   unpacked varint and a short wire-1/5 integer body refusing the file; an overlong packed varint
-  failing a selected entry and being ignored when the list is discarded; a wrong wire on
+  failing a selected entry and being ignored only when `tensor_content` wins; a wrong wire on
   `float_val`/`double_val` and a packed float/double span with a bad length refusing the file;
   damage inside a selected packed varint span failing the entry; stray wire-1/5 integer
-  occurrences not making a list non-empty;
+  occurrences not making a list non-empty while a wire-0 occurrence does;
   a one-byte packed span counting as a non-empty foreign list and a zero-length one not;
   conflicting typed lists; content plus typed; overflow beside content; shape merge; dimension
   0, negative and ninth dimension; unknown rank last-wins; unsupported dtypes and `_REF`; NaN
@@ -402,11 +421,13 @@ help lists 0.9. The 0.9 cap text is the delivered `TENSORBOARD_CAP_MESSAGE_06`.
   the frozen grammar refuses.
 - Identity: per-kind occurrence, a scalar entry not consuming a tensor occurrence, tag filter,
   multifile names, occurrence 2,000,000,000; the two-outcome asymmetry, named precisely: a
-  rank-2 tensor gives a scalar locator `selects an unsupported value`, a rank-1 `[1]` float32
-  with exactly 4 content bytes (or float64 with 8) plus one typed value gives it `selects an
-  unsupported scalar encoding` and a tensor locator a value, rank 0 fails the tensor profile
-  with `selects an unsupported tensor encoding`, and a `[1,1]` float gives the scalar locator
-  `selects an unsupported value`.
+  rank-2 tensor gives a scalar locator `selects an unsupported value`; a rank-1 `[1]` float32
+  with 4 content bytes (or float64 with 8) plus one `float_val`/`double_val`, and a rank-1 `[1]`
+  int32/int64 with content, give the scalar locator `selects an unsupported scalar encoding` and
+  a tensor locator a value; a rank-0 float32 with content is a recorded scalar whose tensor
+  locator gets `selects an unsupported value`; a rank-0 int32 fails the profile with `selects an
+  unsupported tensor encoding`; a `[1,1]` float gives the scalar locator `selects an unsupported
+  value`.
 - Checker: every ladder row and byte-exact texts; six-kind caps; csv cap on 0.9; 128 MiB
   eligibility; digest, shape, dtype and count mismatches.
 - Adapter/CLI: flag matrix with 0.9 precedence; budget texts; tag texts; capability errors and
