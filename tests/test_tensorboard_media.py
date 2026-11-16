@@ -119,6 +119,18 @@ def test_invalid_images_are_skipped(payload):
     assert list(iter_supported_summaries_08(file_with(image_value(b"samples", payload)))) == []
 
 
+def test_png_signature_is_checked():
+    payload = bytearray(png())
+    payload[1] ^= 0xFF
+    assert list(iter_supported_summaries_08(file_with(image_value(b"s", bytes(payload))))) == []
+
+
+def test_wav_riff_size_is_checked():
+    payload = bytearray(wav())
+    payload[4] ^= 0x01
+    assert list(iter_supported_summaries_08(file_with(audio_value(b"a", bytes(payload))))) == []
+
+
 def test_png_ihdr_crc_is_checked():
     payload = bytearray(png())
     payload[29] ^= 0xFF

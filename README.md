@@ -293,7 +293,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence inspect PATH` | Summarize the manifest, then run every check, also listing files the manifest does not track. |
 | `runevidence comparability BASELINE TARGET --baseline-result ID --target-result ID [--json]` | Experimental read-only comparison of five mandatory recorded conditions across two manifests (no artifact checks; exit `0` comparable, `1` different, `2` unavailable). `--preflight` is a text-only read-only readiness listing/pair check (no JSON; exit `0` list/ready, `1` not ready, `2` load/unknown/invalid). See [Comparability (verdict CLI experimental)](#comparability-verdict-cli-experimental). |
 | `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`, `--tags PATTERN`, `--include-strings`, `--include-histograms`, `--volatile GLOB`). With `--force`, the old manifest is kept as a backup, because a fresh scan does not carry over hand-written results and claims. See [Backups from `init --force`](#backups-from-init---force). |
-| `runevidence migrate PATH --to 0.2\|0.3\|0.4\|0.5\|0.6\|0.7 [--dry-run] [--json]` | Declare an existing valid manifest as the chosen schema without changing any recorded value. Exits `0` on success, no-op or dry run; `2` on refusal or failure. There is no inference and no downgrade. See [Migrating a manifest to 0.2](#migrating-a-manifest-to-02), [Schema 0.4 CSV cell locators](#schema-04-csv-cell-locators-slice-c) and [Schema 0.5 TensorBoard scalar locators](#schema-05-tensorboard-scalar-locators-slice-d). |
+| `runevidence migrate PATH --to 0.2\|0.3\|0.4\|0.5\|0.6\|0.7\|0.8 [--dry-run] [--json]` | Declare an existing valid manifest as the chosen schema without changing any recorded value. Exits `0` on success, no-op or dry run; `2` on refusal or failure. There is no inference and no downgrade. See [Migrating a manifest to 0.2](#migrating-a-manifest-to-02), [Schema 0.4 CSV cell locators](#schema-04-csv-cell-locators-slice-c) and [Schema 0.5 TensorBoard scalar locators](#schema-05-tensorboard-scalar-locators-slice-d). |
 | `runevidence conditions PATH --run RUN_ID [--patch FILE\|-] [--clear FIELD]... [--dry-run] [--json]` | Set or clear recorded run conditions on a 0.2 manifest from a local JSON patch; no condition values on the command line. Exits `0` on success, no-op or dry run; `2` on refusal or failure. See [Authoring run conditions](#authoring-run-conditions). |
 | `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read values only for supported, resolvable scalar JSON-located results in changed files (`--volatile`, `--no-volatile`, `--dry-run`). `--directory` re-records one exact directory artifact ID. |
 | `runevidence add PATH FILE...` | Track new files or folders without re-running `init` (`--id`, `--kind`, `--run`, `--no-run`, `--volatile`, `--dry-run`). `add PATH DIR --directory --id ID` records one folder as a directory artifact. |
@@ -712,6 +712,12 @@ Schema 0.7 adds opt-in legacy TensorBoard **histograms**
 (`init --include-histograms`): structured `HistogramValue` results with exact
 comparison, per-artifact occurrence and a 1,024-bucket cap. See
 [docs/schema-0.7-tensorboard-histograms.md](docs/schema-0.7-tensorboard-histograms.md).
+
+Schema 0.8 adds opt-in legacy TensorBoard **media references**
+(`init --include-images`, `init --include-audio`): digest-only `ImageValue` and
+`AudioValue` results for PNG images and RIFF/WAVE audio, with exact
+re-verification against the event file and compact display. See
+[docs/schema-0.8-tensorboard-media.md](docs/schema-0.8-tensorboard-media.md).
 
 ### Migrating a manifest to 0.2
 

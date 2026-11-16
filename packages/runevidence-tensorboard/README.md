@@ -70,6 +70,16 @@ outputs are unchanged.
 
 ## Histograms (schema 0.7)
 
+`init --include-images` also records legacy `Summary.Value.image`
+(`Summary.Image`) summaries as schema 0.8 `tensorboard-image` results. Only PNG
+payloads are recorded, as digest-only references with verified IHDR dimensions;
+the bytes stay inside the event file. `--tags` matches image tags too.
+
+`init --include-audio` records legacy `Summary.Value.audio`
+(`Summary.Audio`) summaries as schema 0.8 `tensorboard-audio` results. Only
+RIFF/WAVE payloads are recorded, as digest-only references with the RIFF chunk
+walk verified. Without either media flag, 0.5/0.6/0.7 output is unchanged.
+
 `init --include-histograms` also records legacy `Summary.Value.histo`
 (`HistogramProto`) summaries as structured `tensorboard-histogram` results and
 writes schema 0.7. Values carry finite per-bucket counts with at most 1,024
