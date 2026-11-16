@@ -56,6 +56,7 @@ def report_data(
     checks: dict[str, Any],
     *,
     directory_artifacts: bool = False,
+    baseline_root=None,
 ) -> dict[str, Any]:
     members = []
     for member_id, item in loaded.members.items():
@@ -122,7 +123,7 @@ def report_data(
         "format": "rungraph-report",
         "version": "0.1",
         "check_policy": {"directory_artifacts": directory_artifacts},
-        "baseline": None,
+        "baseline": baseline_diff(loaded, baseline_root) if baseline_root is not None else None,
         "members": members,
         "claims": claims,
         "impact": impact,
@@ -266,4 +267,95 @@ def leaderboard_data(loaded: LoadedWorkspace, metric: str, direction: str, top: 
         "excluded": {"missing": sum(1 for row in rows if row["value"] is None), "non_numeric": sum(1 for row in rows if row["value"] is not None and not row["numeric"])},
         "conditions": "unavailable",
         "exit_code": 0,
+    }
+
+
+def _projection(manifest: Manifest) -> list[dict[str, Any]]:
+    items = [("project", manifest.project)]
+    items += [("run", item) for item in manifest.runs]
+    items += [("artifact", item) for item in manifest.artifacts]
+    items += [("result", item) for item in manifest.results]
+    items += [("evidence", item) for item in manifest.evidence]
+    return [
+        {"kind": kind, "id": obj.id, "data": obj.model_dump(mode="json")}
+        for kind, obj in sorted(items, key=lambda item: (item[0], item[1].id))
+    ]
+
+
+def _by_key(items: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+    return {(item["kind"], item["id"]): item["data"] for item in items}
+
+
+def baseline_diff(loaded: LoadedWorkspace, baseline_root) -> dict[str, Any]:
+    from pathlib import Path
+
+    from .manifest import ManifestLoadError, load_manifest
+    from .workspace import WORKSPACE_FILENAME, WorkspaceError, load_workspace
+
+    baseline_root = Path(baseline_root)
+    base_doc = None
+    try:
+        if (baseline_root / WORKSPACE_FILENAME).exists():
+            base_doc = load_workspace(baseline_root).document
+    except WorkspaceError:
+        base_doc = None
+    base_by_id = {member.id: member for member in (base_doc.members if base_doc else [])}
+    base_by_path = {member.path: member for member in (base_doc.members if base_doc else [])}
+    members = []
+    for member_id, item in loaded.members.items():
+        baseline_member = base_by_id.get(member_id) or base_by_path.get(item.member.path)
+        if baseline_member is None:
+            members.append({"id": member_id, "status": "added"})
+            continue
+        status = "unchanged"
+        if baseline_member.id != member_id:
+            status = "re-keyed"
+        elif baseline_member.path != item.member.path:
+            status = "re-pathed"
+        current = _projection(item.manifest) if item.manifest else []
+        try:
+            previous_manifest = load_manifest(baseline_root / baseline_member.path)
+        except (ManifestLoadError, OSError, ValueError):
+            members.append({"id": member_id, "status": "baseline-missing"})
+            continue
+        previous = _projection(previous_manifest.manifest)
+        before = _by_key(previous)
+        after = _by_key(current)
+        members.append(
+            {
+                "id": member_id,
+                "status": status,
+                "schema_changed": previous_manifest.manifest.schema_version
+                != (item.manifest.schema_version if item.manifest else None),
+                "added": [key for key in after if key not in before],
+                "removed": [key for key in before if key not in after],
+                "changed": [
+                    key for key in after if key in before and before[key] != after[key]
+                ],
+            }
+        )
+    removed = [
+        member.id for member in (base_doc.members if base_doc else []) if member.id not in loaded.members
+    ]
+    claims_before = {claim.id: claim.model_dump(mode="json") for claim in (base_doc.claims if base_doc else [])}
+    claims_after = {claim.id: claim.model_dump(mode="json") for claim in loaded.document.claims}
+    relationships_before = {
+        item.id: item.model_dump(mode="json") for item in (base_doc.relationships if base_doc else [])
+    }
+    relationships_after = {
+        item.id: item.model_dump(mode="json") for item in loaded.document.relationships
+    }
+    return {
+        "members": members,
+        "removed_members": removed,
+        "claims": {
+            "added": sorted(set(claims_after) - set(claims_before)),
+            "removed": sorted(set(claims_before) - set(claims_after)),
+            "changed": sorted(key for key in claims_after if key in claims_before and claims_after[key] != claims_before[key]),
+        },
+        "relationships": {
+            "added": sorted(set(relationships_after) - set(relationships_before)),
+            "removed": sorted(set(relationships_before) - set(relationships_after)),
+            "changed": sorted(key for key in relationships_after if key in relationships_before and relationships_after[key] != relationships_before[key]),
+        },
     }
