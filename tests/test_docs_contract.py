@@ -114,3 +114,14 @@ def test_readme_names_every_public_cli_route():
     sub = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
     for route in sub.choices:
         assert f"runevidence {route}" in README, f"runevidence {route} is missing from the README"
+
+
+def test_readme_names_every_workspace_route():
+    import argparse
+
+    from runevidence.rungraph_cli import build_parser
+
+    parser = build_parser()
+    sub = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+    for route in sub.choices:
+        assert f"rungraph {route}" in README, f"rungraph {route} is missing from the README"

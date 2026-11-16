@@ -5,7 +5,7 @@ one project-level view: `rungraph.json` at a folder root names the members and c
 cross-member claims and relationships. Everything stays offline and file-based.
 
 It never rewrites a member manifest. The workspace document itself is authored through
-\`rungraph patch\`, \`rungraph member\`, \`rungraph claim\` and \`rungraph relationship\`.
+`rungraph patch`, `rungraph member`, `rungraph claim` and `rungraph relationship`.
 
 ## Quick start
 
@@ -113,40 +113,42 @@ cycles are reported per strongly connected component with a bounded example list
 
 ## JSON and exit codes
 
-`discover`, `init`, `validate`, `graph`, `report`, `impact`, `compare`, `matrix` and
-`leaderboard` accept `--json` and emit a `rungraph-<command>` envelope with `version: "0.1"`
-and `exit_code`. Errors use `{"format": "rungraph-error", "command": ...}`.
+`discover`, `init`, `validate`, `report`, `compare`, `matrix` and `leaderboard` accept
+`--json` and emit a `rungraph-<command>` envelope with `version: "0.1"` and `exit_code`.
+`graph` selects JSON or DOT with `--format`; `impact` always emits JSON. Errors use
+`{"format": "rungraph-error", "command": ...}`.
 
 | Command | 0 | 1 | 2 |
 | --- | --- | --- | --- |
 | `discover` | listed | `--check` found errors | empty, duplicate/nested, limits, unreadable |
 | `init` | written or dry-run | — | refusal |
-| `validate` | no errors | evidence errors | workspace/member load, usage |
+| `validate` | no errors | evidence errors or strict warnings | workspace/member load, usage |
 | `graph` | built | `--fail-on-unresolved` and unresolved | load/usage |
-| `report` | no errors | evidence errors | workspace/member load, usage |
+| `report` | no errors | evidence errors or strict warnings | workspace/member load, usage |
 | `impact` | object resolves | — | object/workspace load failure |
 | `compare`/`matrix`/`leaderboard` | rendered | — | load/usage |
+| `patch`/`member`/`claim`/`relationship` | written or dry-run | — | refusal, stale SHA, unreadable file |
 
 ## Authoring
 
-\`\`\`bash
+```bash
 rungraph member add path/to/project --id exp-c --path experiments/c \
   --expected-sha256 "$(sha256sum path/to/project/rungraph.json | cut -d" " -f1)"
 rungraph claim add path/to/project --file claim.json --expected-sha256 ...
 rungraph patch path/to/project --file patch.json --expected-sha256 ...
-\`\`\`
+```
 
-Every authoring command requires \`--expected-sha256\` once the document exists (the flag wins
+Every authoring command requires `--expected-sha256` once the document exists (the flag wins
 over the patch file's field), takes a cooperative POSIX folder lock, validates all references
 before writing, and stages/fsyncs/replaces the document atomically. A refusal writes nothing.
-\`--dry-run\` prints the plan and writes nothing. \`member rename\` updates every qualified
-reference in the same transaction; \`set-workspace\` is available only through \`patch\`.
+`--dry-run` prints the plan and writes nothing. `member rename` updates every qualified
+reference in the same transaction; `set-workspace` is available only through `patch`.
 
 ## Baseline
 
-\`rungraph report path/to/project --baseline prior-copy/\` compares each member's recorded
+`rungraph report path/to/project --baseline prior-copy/` compares each member's recorded
 assertions with a prior copy of the workspace root. The projection covers every manifest
-schema, reports added/removed/changed objects by \`(kind, id)\`, and reports added, removed,
+schema, reports added/removed/changed objects by `(kind, id)`, and reports added, removed,
 re-pathed and re-keyed members plus workspace claim/relationship changes. It is a recorded
 assertion diff, not a claim that files on disk changed.
 

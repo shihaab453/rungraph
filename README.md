@@ -20,12 +20,13 @@ weights: files are hashed as raw bytes. Core checks metric values in JSON;
 optional adapters also read plain configuration and metric logs. It works
 with any ML stack because it only looks at files.
 
-RunEvidence is V1 of the **RunGraph** project. Schema 0.2, migration and
-conditions authoring are stable; recorded-condition comparability has an
-experimental verdict CLI with a read-only readiness preflight. Single-manifest
-lineage, impact, coverage, review gates and fingerprints are delivered;
-composing several experiments is the remaining RunGraph work. See the
-[product completion contract](docs/product-completion.md) and [Roadmap](#roadmap).
+RunEvidence is V1 of the **RunGraph** project. Versioned schemas with frozen
+reading rules, single-manifest lineage, impact, coverage, review gates and
+fingerprints are delivered, and `rungraph.json` composes several experiments
+into one workspace with cross-member claims. Recorded-condition comparability
+has an experimental verdict CLI with a read-only readiness preflight. See the
+[product completion contract](docs/product-completion.md), the
+[qualification record](docs/qualification.md) and [Roadmap](#roadmap).
 
 ---
 
@@ -334,6 +335,29 @@ below accepts `--json` unless noted, and exits `2` on a load or usage failure.
 | `runevidence review-diff A B` | Unify recorded claim impact and structural flag changes for review. |
 | `runevidence impact-diff A B` | Compare recorded snapshots and list the claims that need review. |
 | `runevidence review-gate A B` | CI policy gate over recorded review changes; exit `1` when policy is violated. |
+
+### Workspace commands
+
+`rungraph` reads a workspace root containing a `rungraph.json` and one or more experiment
+folders. The workspace layer is version 0.1 and part of the alpha surface; the
+[workspace guide](https://github.com/shihaab453/rungraph/blob/main/docs/rungraph-workspace.md)
+documents the document format, claim states and exit codes.
+
+| Command | What it does |
+| --- | --- |
+| `rungraph discover ROOT` | List every manifest under a root with stable or provisional member IDs (`--check`, `--directory-artifacts`, `--json`). Exit `2` on empty discovery, duplicates, nested members, unreadable manifests or limits. |
+| `rungraph init ROOT` | Write `rungraph.json` from discovery (`--id`, `--name`, `--force`, `--dry-run`, `--json`). Refuses an empty discovery; `--force` keeps a backup. |
+| `rungraph validate ROOT` | Validate every member and the workspace layer (`--strict`, `--directory-artifacts`, `--json`). Exit `1` on evidence errors or strict warnings, `2` on load or usage failure. |
+| `rungraph graph ROOT` | Print the graph as JSON or DOT (`--format json\|dot`) and fail on unresolved references with `--fail-on-unresolved`. |
+| `rungraph report ROOT` | Consolidated evidence, claim states and impact (`--baseline`, `--strict`, `--directory-artifacts`, `--json`). |
+| `rungraph impact ROOT --from NODE` | Claims affected by one node, with the dependency path; JSON output. Exit `2` for an unknown node. |
+| `rungraph compare ROOT --metric NAME` | Recorded values for one metric across members with each pair's condition status (`--run`, `--json`). |
+| `rungraph matrix ROOT` | Member-by-metric matrix of recorded values (`--json`). |
+| `rungraph leaderboard ROOT --metric NAME --direction max\|min` | Rank finite numeric values with ties sharing a rank (`--top`, `--json`). |
+| `rungraph patch ROOT --file PATCH` | Apply an all-or-nothing `rungraph-patch` 0.1 document (`--expected-sha256`, `--dry-run`, `--json`). |
+| `rungraph member add\|remove\|move\|rename ROOT ...` | Edit membership without regenerating the document (`--id`, `--path`, `--expected-sha256`, `--dry-run`, `--json`). |
+| `rungraph claim add\|edit\|remove ROOT ...` | Edit workspace claims (`--file`, `--id`, `--expected-sha256`, `--dry-run`, `--json`). |
+| `rungraph relationship add\|remove ROOT ...` | Edit workspace relationships (`--file`, `--id`, `--expected-sha256`, `--dry-run`, `--json`). |
 
 
 `PATH` can be the experiment folder or the manifest file. `validate` and
@@ -1330,9 +1354,10 @@ Two envelope families are stable:
 - `runevidence-*`: `validate`/`inspect` reports, the comparability result and error
   documents, the `assess` document, fingerprints and the review/diff routes. `--json` is
   available on every analysis route; `comparability --preflight` is deliberately text-only.
-- `rungraph-*`: `discover`, `init`, `validate`, `graph`, `report`, `impact`, `compare`,
-  `matrix`, `leaderboard`, `member`, `claim`, `relationship` and `patch`, plus the shared
-  `rungraph-error` document.
+- `rungraph-*`: `discover`, `init`, `validate`, `report`, `compare`, `matrix`, `leaderboard`,
+  `member`, `claim`, `relationship` and `patch` accept `--json`; `graph` selects JSON or DOT
+  with `--format`; `impact` always emits JSON. Errors use the shared `rungraph-error`
+  document.
 
 Write and diagnostic commands (`init`, `rehash`, `add`, `schema`, `adapters`, `capture` unless
 `--json`) print text only and say so in their help.
@@ -1348,22 +1373,23 @@ RunEvidence is the first layer of **RunGraph**. The primary-product scope,
 capability status and completion criteria are recorded in
 [docs/product-completion.md](docs/product-completion.md).
 
-Delivered: versioned schemas 0.1–0.9 with frozen reading rules and migration;
+Delivered: versioned schemas 0.1–0.10 with frozen reading rules and migration;
 generic, Hydra, MLflow file-store and TensorBoard adapters; file, value and
 claim verification; batch validation; single-manifest analysis (run and claim
 detail, lineage, impact, coverage, review gates, fingerprints, comparison,
-metric matrix and leaderboard); guarded artifact authoring and condition
-authoring; directory artifacts; and a stable comparability preflight with an
+metric matrix and leaderboard); guarded artifact, result, evidence,
+relationship and condition authoring; code and environment capture; directory
+artifacts; evidence-aware comparison; a workspace layer (`rungraph.json` and
+the `rungraph` CLI) for cross-member graphs, claims, reports, impact, compare,
+matrix and leaderboard; and a stable comparability preflight with an
 experimental comparison verdict.
 
-Remaining primary-product work: composing several experiments (cross-manifest
-provenance, claims, impact and one consolidated report); safe authoring for
-results, claims, evidence and relationships; code and environment capture;
-evidence-aware comparison; and the documentation, examples and end-to-end
-qualification that make the whole surface discoverable. Two known MLflow
-limitations (summary freshness after an accepted metric-file change, and
-unbounded metric-history memory) are tracked in the completion contract.
-YAML manifests remain deferred: JSON is the authority, and the
+Every capability in the completion contract is complete except the declared
+platform bound (writer concurrency without a POSIX directory lock, and
+directory artifacts on non-Linux filesystems). The
+[qualification record](docs/qualification.md) holds the evidence. No tag, version
+bump or package-index publication is part of this contract. YAML manifests
+remain deferred: JSON is the authority, and the
 [decision memo](https://github.com/shihaab453/rungraph/blob/main/docs/manifest-format-yaml-decision-memo.md)
 records why.
 

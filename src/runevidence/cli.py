@@ -881,60 +881,119 @@ def _accepts_tag_filter(adapter) -> bool:
     return _accepts_keyword(adapter, "tag_filter")
 
 
+def _authoring_lock_failure(args: argparse.Namespace, code: str, message: str) -> int:
+    if args.json:
+        print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "code": code, "error": message, "exit_code": EXIT_INVALID}))
+    else:
+        print(message)
+    return EXIT_INVALID
+
+
 def _author_manifest(args: argparse.Namespace, mutate, summary: str) -> int:
-    loaded = _load_or_report(args.path, args.json)
-    if loaded is None:
-        return EXIT_INVALID
-    raw = load_raw(loaded)
     try:
-        mutate(raw)
+        with _writer_lock(args.path, enabled=not args.dry_run) as manifest_path:
+            loaded = _load_or_report(manifest_path, args.json)
+            if loaded is None:
+                return EXIT_INVALID
+            raw = load_raw(loaded)
+            try:
+                mutate(raw)
+            except authoring.AuthoringError as exc:
+                if args.json:
+                    print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": str(exc), "exit_code": EXIT_INVALID}))
+                else:
+                    print(f"ERROR: {exc}\nNothing was written.")
+                return EXIT_INVALID
+            except (KeyError, TypeError, AttributeError) as exc:
+                message = f"invalid authoring payload: {exc}"
+                if args.json:
+                    print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": message, "exit_code": EXIT_INVALID}))
+                else:
+                    print(f"ERROR: {message}\nNothing was written.")
+                return EXIT_INVALID
+            if args.dry_run:
+                if args.json:
+                    print(json.dumps({"format": "runevidence-authoring-v1", "ok": True, "changed": summary, "dry_run": True, "written": False, "exit_code": EXIT_OK}))
+                else:
+                    print(f"Would {summary}.")
+                return EXIT_OK
+            try:
+                save_raw(raw, loaded.path, expected_bytes=loaded.source_bytes)
+            except OSError as exc:
+                if args.json:
+                    print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": str(exc), "exit_code": EXIT_INVALID}))
+                else:
+                    print(f"ERROR: {exc}\nNothing was written.")
+                return EXIT_INVALID
+            if args.json:
+                print(json.dumps({"format": "runevidence-authoring-v1", "ok": True, "changed": summary, "dry_run": False, "written": True, "exit_code": EXIT_OK}))
+            else:
+                print(f"Wrote {loaded.path}\nNext: runevidence validate {args.path}")
+            return EXIT_OK
+    except _WriterBusy:
+        return _authoring_lock_failure(args, "BUSY", BUSY_TEXT)
+    except _WriterLockUnavailable:
+        return _authoring_lock_failure(args, "LOCK_UNAVAILABLE", LOCK_UNAVAILABLE_TEXT)
+
+
+def _read_authoring_entry(args: argparse.Namespace) -> dict | None:
+    """Read a --file payload, reporting a bad file like any other authoring refusal."""
+    try:
+        return authoring.read_json_file(Path(args.file))
     except authoring.AuthoringError as exc:
         if args.json:
             print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": str(exc), "exit_code": EXIT_INVALID}))
         else:
             print(f"ERROR: {exc}\nNothing was written.")
-        return EXIT_INVALID
-    if args.dry_run:
-        if args.json:
-            print(json.dumps({"format": "runevidence-authoring-v1", "ok": True, "changed": summary, "dry_run": True, "written": False, "exit_code": EXIT_OK}))
-        else:
-            print(f"Would {summary}.")
-        return EXIT_OK
-    try:
-        save_raw(raw, loaded.path, expected_bytes=loaded.source_bytes)
-    except OSError as exc:
-        print(f"ERROR: {exc}\nNothing was written.")
-        return EXIT_INVALID
+        return None
+
+
+def _authoring_entry_id(args: argparse.Namespace, entry: dict) -> str | None:
+    entry_id = entry.get("id")
+    if isinstance(entry_id, str) and entry_id:
+        return entry_id
+    message = "the file needs a non-empty 'id' for this action"
     if args.json:
-        print(json.dumps({"format": "runevidence-authoring-v1", "ok": True, "changed": summary, "dry_run": False, "written": True, "exit_code": EXIT_OK}))
+        print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": message, "exit_code": EXIT_INVALID}))
     else:
-        print(f"Wrote {loaded.path}\nNext: runevidence validate {args.path}")
-    return EXIT_OK
+        print(f"ERROR: {message}\nNothing was written.")
+    return None
 
 
 def cmd_result(args: argparse.Namespace) -> int:
     if args.action == "remove":
         return _author_manifest(args, lambda raw: authoring.remove_result(raw, args.id), f"remove result {args.id}")
-    path = Path(args.file)
-    entry = authoring.read_json_file(path)
+    entry = _read_authoring_entry(args)
+    if entry is None:
+        return EXIT_INVALID
     if args.action == "add":
         return _author_manifest(args, lambda raw: authoring.add_result(raw, entry), f"add result {entry.get('id')}")
-    return _author_manifest(args, lambda raw: authoring.edit_result(raw, entry["id"], entry), f"edit result {entry.get('id')}")
+    entry_id = _authoring_entry_id(args, entry)
+    if entry_id is None:
+        return EXIT_INVALID
+    return _author_manifest(args, lambda raw: authoring.edit_result(raw, entry_id, entry), f"edit result {entry.get('id')}")
 
 
 def cmd_evidence(args: argparse.Namespace) -> int:
     if args.action == "remove":
         return _author_manifest(args, lambda raw: authoring.remove_evidence(raw, args.id), f"remove claim {args.id}")
-    entry = authoring.read_json_file(Path(args.file))
+    entry = _read_authoring_entry(args)
+    if entry is None:
+        return EXIT_INVALID
     if args.action == "add":
         return _author_manifest(args, lambda raw: authoring.add_evidence(raw, entry), f"add claim {entry.get('id')}")
-    return _author_manifest(args, lambda raw: authoring.edit_evidence(raw, entry["id"], entry), f"edit claim {entry.get('id')}")
+    entry_id = _authoring_entry_id(args, entry)
+    if entry_id is None:
+        return EXIT_INVALID
+    return _author_manifest(args, lambda raw: authoring.edit_evidence(raw, entry_id, entry), f"edit claim {entry.get('id')}")
 
 
 def cmd_relationship(args: argparse.Namespace) -> int:
     if args.action == "remove":
         return _author_manifest(args, lambda raw: authoring.remove_relationship(raw, args.index), f"remove relationship {args.index}")
-    entry = authoring.read_json_file(Path(args.file))
+    entry = _read_authoring_entry(args)
+    if entry is None:
+        return EXIT_INVALID
     return _author_manifest(args, lambda raw: authoring.add_relationship(raw, entry), "add relationship")
 
 

@@ -170,6 +170,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
         directory_artifacts=args.directory_artifacts,
     )
     data["format"] = "rungraph-validate"
+    if args.strict and data["exit_code"] == 0:
+        warnings = sum(member["counts"]["warning"] for member in data["members"])
+        if warnings:
+            data["exit_code"] = EXIT_EVIDENCE
     if args.json:
         _print_json(data)
     else:
@@ -180,10 +184,6 @@ def cmd_validate(args: argparse.Namespace) -> int:
         for claim in data["claims"]:
             print(f"claim {claim['id']}: {', '.join(claim['labels'])}")
         print(f"{'FAIL' if data['exit_code'] else 'OK'}: exit {data['exit_code']}")
-    if args.strict and data["exit_code"] == 0:
-        warnings = sum(member["counts"]["warning"] for member in data["members"])
-        if warnings:
-            return EXIT_EVIDENCE
     return data["exit_code"]
 
 
@@ -197,7 +197,7 @@ def cmd_graph(args: argparse.Namespace) -> int:
         for edge in graph.edges:
             print(f'  "{edge.source}" -> "{edge.target}" [label="{edge.relation}"];')
         print("}")
-        return EXIT_OK
+        return EXIT_EVIDENCE if args.fail_on_unresolved and graph.unresolved else EXIT_OK
     data = {
         "format": "rungraph-graph",
         "version": "0.1",
@@ -228,6 +228,10 @@ def cmd_report(args: argparse.Namespace) -> int:
         directory_artifacts=args.directory_artifacts,
         baseline_root=args.baseline,
     )
+    if args.strict and data["exit_code"] == 0:
+        warnings = sum(member["counts"]["warning"] for member in data["members"])
+        if warnings:
+            data["exit_code"] = EXIT_EVIDENCE
     if args.json:
         _print_json(data)
     else:
@@ -315,11 +319,25 @@ def _author(args: argparse.Namespace, operations: list[dict], command: str) -> i
     return EXIT_OK
 
 
-def cmd_patch(args: argparse.Namespace) -> int:
+def _read_workspace_entry(
+    args: argparse.Namespace, command: str, *, code: str = "file"
+) -> tuple[dict | None, int | None]:
+    """Read a --file payload, returning (entry, failure)."""
     try:
-        patch = json.loads(Path(args.file).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return _error("patch", "patch", str(exc))
+        data = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, _error(command, code, str(exc))
+    if not isinstance(data, dict):
+        return None, _error(command, code, "the file must contain one JSON object")
+    return data, None
+
+
+def cmd_patch(args: argparse.Namespace) -> int:
+    patch, failure = _read_workspace_entry(args, "patch", code="patch")
+    if failure is not None:
+        return failure
+    if patch.get("format") != "rungraph-patch" or patch.get("version") != "0.1":
+        return _error("patch", "patch", "patch must be a rungraph-patch 0.1 document")
     if args.expected_sha256 is None:
         args.expected_sha256 = patch.get("expected_sha256")
     return _author(args, patch.get("operations", []), "patch")
@@ -346,9 +364,14 @@ def cmd_claim(args: argparse.Namespace) -> int:
     if args.action == "remove":
         operations = [{"op": "remove-claim", "id": args.id}]
     else:
-        claim = json.loads(Path(args.file).read_text(encoding="utf-8"))
+        claim, failure = _read_workspace_entry(args, "claim")
+        if failure is not None:
+            return failure
+        claim_id = claim.get("id")
+        if not isinstance(claim_id, str) or not claim_id:
+            return _error("claim", "file", "the file needs a non-empty 'id'")
         operations = [
-            {"op": "add-claim" if args.action == "add" else "edit-claim", "id": claim["id"], "claim": claim}
+            {"op": "add-claim" if args.action == "add" else "edit-claim", "id": claim_id, "claim": claim}
         ]
     return _author(args, operations, "claim")
 
@@ -357,7 +380,9 @@ def cmd_relationship(args: argparse.Namespace) -> int:
     if args.action == "remove":
         operations = [{"op": "remove-relationship", "id": args.id}]
     else:
-        relationship = json.loads(Path(args.file).read_text(encoding="utf-8"))
+        relationship, failure = _read_workspace_entry(args, "relationship")
+        if failure is not None:
+            return failure
         operations = [{"op": "add-relationship", "relationship": relationship}]
     return _author(args, operations, "relationship")
 

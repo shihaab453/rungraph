@@ -1532,3 +1532,28 @@ def test_directory_authoring_flag_is_only_on_add_and_rehash():
             for option in action.option_strings
         }
         assert ("--directory" in options) is (route in ("add", "rehash"))
+
+
+def test_manifest_authoring_takes_the_folder_lock(tmp_path):
+    exp = make_exp(tmp_path)
+    payload = tmp_path / "result.json"
+    payload.write_text(
+        json.dumps(
+            {
+                "id": "acc",
+                "run_id": "run-1",
+                "name": "accuracy",
+                "value": 0.9,
+                "artifact_id": "notes",
+                "locator": "/accuracy",
+            }
+        ),
+        encoding="utf-8",
+    )
+    before = snapshot(exp)
+    argv = ["result", "add", str(exp), "--file", str(payload)]
+    with hold(exp):
+        assert run_cli(argv) == (2, BUSY_TEXT + "\n")
+        assert snapshot(exp) == before
+    code, out = run_cli(argv)
+    assert code == 0, out

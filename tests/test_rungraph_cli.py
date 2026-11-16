@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -92,3 +93,57 @@ def test_discover_check_runs_member_checks(tmp_path: Path, capsys):
     data = json.loads(capsys.readouterr().out)
     assert all(member["check"]["errors"] == 2 for member in data["members"])
     assert data["exit_code"] == 1
+
+
+def test_a_strict_warning_fails_and_sets_the_json_exit_code(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    data_bytes = b"x"
+    digest = hashlib.sha256(data_bytes).hexdigest()
+    for name in ("a", "b"):
+        folder = root / name
+        (folder / "data.csv").write_bytes(data_bytes)
+        manifest_path = folder / "runevidence.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["artifacts"][0]["sha256"] = digest
+        manifest["artifacts"][0]["size_bytes"] = len(data_bytes)
+        if name == "a":
+            manifest["evidence"].append(
+                {"id": "uncited", "claim": "no support", "supports": [], "contradicts": []}
+            )
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    capsys.readouterr()
+
+    assert main(["validate", str(root), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["exit_code"] == 0
+
+    assert main(["validate", str(root), "--strict", "--json"]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["exit_code"] == 1
+
+    assert main(["report", str(root), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["exit_code"] == 0
+
+    assert main(["report", str(root), "--strict", "--json"]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["exit_code"] == 1
+
+
+def test_graph_dot_fails_on_unresolved_when_asked(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    document = json.loads((root / "rungraph.json").read_text(encoding="utf-8"))
+    document["claims"] = [
+        {
+            "id": "w1",
+            "claim": "missing member",
+            "supports": [{"member": "absent", "id": "x"}],
+            "contradicts": [],
+        }
+    ]
+    (root / "rungraph.json").write_text(json.dumps(document), encoding="utf-8")
+    capsys.readouterr()
+    assert main(["graph", str(root), "--format", "dot", "--fail-on-unresolved"]) == 1
+    assert "digraph rungraph" in capsys.readouterr().out
