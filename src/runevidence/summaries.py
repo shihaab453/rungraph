@@ -166,7 +166,8 @@ def _read_direct(root: Path, parts: tuple[str, ...], cap: int) -> tuple[Optional
     reparse point in any component, which is the best available on these
     hosts."""
     current = root
-    for part in parts:
+    last = len(parts) - 1
+    for index, part in enumerate(parts):
         current = current / part
         try:
             info = os.lstat(os.fspath(current))
@@ -176,7 +177,7 @@ def _read_direct(root: Path, parts: tuple[str, ...], cap: int) -> tuple[Optional
             return None, "missing"
         if _is_link_or_reparse(info):
             return None, "not-regular"
-        if part != parts[-1]:
+        if index < last:
             if not stat.S_ISDIR(info.st_mode):
                 return None, "not-regular"
         elif not stat.S_ISREG(info.st_mode):

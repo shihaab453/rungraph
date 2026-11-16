@@ -147,3 +147,13 @@ def test_fallback_also_refuses_a_symlinked_parent(tmp_path: Path, monkeypatch):
     assert summaries.read_bounded(tmp_path, "real/metrics/acc") == (b"1 0.5 1\n", "ok")
     (tmp_path / "sub").mkdir()
     assert summaries.read_bounded(tmp_path, "sub") == (None, "not-regular")
+
+
+def test_fallback_handles_a_parent_named_like_the_leaf(tmp_path: Path, monkeypatch):
+    import runevidence.summaries as summaries
+
+    (tmp_path / "metrics").mkdir()
+    (tmp_path / "metrics" / "metrics").write_bytes(b"1 0.5 1\n")
+    monkeypatch.setattr(summaries, "_DIR_FD", False)
+
+    assert summaries.read_bounded(tmp_path, "metrics/metrics") == (b"1 0.5 1\n", "ok")
