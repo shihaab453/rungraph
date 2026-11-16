@@ -8,13 +8,18 @@ Nothing here writes, and nothing here parses a tool-specific format.
 from __future__ import annotations
 
 import errno
+import math
 import os
 import stat
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from .adapters import Adapter, summary_claimants
 from .models import Manifest, Result
+
+#: Schemas with no locator concept, where a locator-less result is otherwise
+#: skipped silently. Later schemas keep their frozen unverified warning.
+SUMMARY_SCHEMAS = ("0.1", "0.2")
 
 #: A metric history is read whole into memory, so it gets the same ceiling as
 #: the locator snapshot path. One byte over is refused.
@@ -56,18 +61,38 @@ def summary_shape(manifest: Manifest, result: Result) -> bool:
 
 
 def summary_owner(manifest: Manifest, result: Result) -> tuple[Optional[Adapter], str]:
-    """One claiming adapter, or a fixed reason: ``absent`` or ``ambiguous``."""
-    claimants = summary_claimants(manifest, result)
-    if len(claimants) == 1:
+    """One claiming adapter, or a fixed reason: ``absent``, ``broken`` or
+    ``ambiguous``."""
+    claimants, reason = summary_claimants(manifest, result)
+    if reason == "ok" and len(claimants) == 1:
         return claimants[0], "ok"
-    if not claimants:
-        return None, "absent"
-    return None, "ambiguous"
+    return None, reason
+
+
+def valid_summary(summary: object) -> bool:
+    """True when an adapter returned a finite numeric triple.
+
+    A third-party plugin can return anything; a malformed value must become a
+    warning or a refusal, never a written manifest."""
+    value = getattr(summary, "value", None)
+    step = getattr(summary, "step", None)
+    timestamp = getattr(summary, "timestamp", None)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if not math.isfinite(value):
+        return False
+    if isinstance(step, bool) or not isinstance(step, int):
+        return False
+    if isinstance(timestamp, bool) or not isinstance(timestamp, int):
+        return False
+    return True
 
 
 def _state(exc: OSError) -> str:
-    if exc.errno in (errno.ENOENT, errno.ENOTDIR):
+    if exc.errno == errno.ENOENT:
         return "missing"
+    if exc.errno == errno.ENOTDIR:
+        return "not-regular"
     if exc.errno in (errno.ELOOP, getattr(errno, "EMLINK", errno.ELOOP)):
         # O_NOFOLLOW reports a symlink as ELOOP on Linux.
         return "not-regular"
@@ -83,44 +108,101 @@ def describe_state(state: str) -> str:
     return state
 
 
-def read_bounded(path: Path, cap: int = MAX_METRIC_BYTES) -> tuple[Optional[bytes], str]:
-    """Read at most ``cap`` bytes from a regular file, without following links.
+_LEAF_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_NOCTTY", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_BINARY", 0)
+)
+_DIR_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+)
+_DIR_FD = bool(getattr(os, "O_DIRECTORY", 0)) and os.open in getattr(os, "supports_dir_fd", set())
 
-    Returns ``(bytes, "ok")`` or ``(None, state)`` where state is ``missing``,
-    ``not-regular``, ``over-cap`` or ``unreadable``. A FIFO cannot block the
-    open and is refused as non-regular; a symlink is refused rather than
-    followed."""
-    flags = (
-        os.O_RDONLY
-        | getattr(os, "O_NOFOLLOW", 0)
-        | getattr(os, "O_NONBLOCK", 0)
-        | getattr(os, "O_NOCTTY", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_BINARY", 0)
-    )
+
+def _consume(fd: int, cap: int) -> tuple[Optional[bytes], str]:
     try:
-        fd = os.open(os.fspath(path), flags)
+        info = os.fstat(fd)
     except OSError as exc:
         return None, _state(exc)
-    except (ValueError, UnicodeError):
-        return None, "missing"
+    if not stat.S_ISREG(info.st_mode):
+        return None, "not-regular"
+    buffer = bytearray()
     try:
-        try:
-            info = os.fstat(fd)
-        except OSError as exc:
-            return None, _state(exc)
-        if not stat.S_ISREG(info.st_mode):
-            return None, "not-regular"
-        buffer = bytearray()
         while len(buffer) <= cap:
             chunk = os.read(fd, min(_READ_CHUNK, cap + 1 - len(buffer)))
             if not chunk:
                 break
             buffer.extend(chunk)
-        if len(buffer) > cap:
-            return None, "over-cap"
-        return bytes(buffer), "ok"
     except OSError as exc:
         return None, _state(exc)
+    if len(buffer) > cap:
+        return None, "over-cap"
+    return bytes(buffer), "ok"
+
+
+def _read_direct(path: Path, cap: int) -> tuple[Optional[bytes], str]:
+    """Platforms without dir_fd: the leaf is no-follow, parents are not walked."""
+    try:
+        info = os.stat(os.fspath(path))
+    except OSError as exc:
+        return None, _state(exc)
+    except (ValueError, UnicodeError):
+        return None, "missing"
+    if not stat.S_ISREG(info.st_mode):
+        # Windows cannot open a directory O_RDONLY, so classify it before the
+        # open rather than reporting the permission error as unreadable.
+        return None, "not-regular"
+    try:
+        fd = os.open(os.fspath(path), _LEAF_FLAGS)
+    except OSError as exc:
+        return None, _state(exc)
+    except (ValueError, UnicodeError):
+        return None, "missing"
+    try:
+        return _consume(fd, cap)
     finally:
         os.close(fd)
+
+
+def read_bounded(root: Path, rel_path: str, cap: int = MAX_METRIC_BYTES) -> tuple[Optional[bytes], str]:
+    """Read at most ``cap`` bytes from ``root/rel_path`` without following links.
+
+    Every parent component is opened relative to its verified parent with
+    ``O_NOFOLLOW|O_DIRECTORY``, so an in-root symlinked parent cannot redirect
+    the read. The leaf is opened with ``O_NOFOLLOW|O_NONBLOCK``, so a symlink is
+    refused and a FIFO cannot block. Returns ``(bytes, "ok")`` or
+    ``(None, state)`` where state is ``missing``, ``not-regular``, ``over-cap``
+    or ``unreadable``."""
+    normalized = rel_path.replace("\\", "/")
+    path = PurePosixPath(normalized)
+    parts = path.parts
+    if path.is_absolute() or not parts or any(part in ("", ".", "..") for part in parts):
+        return None, "not-regular"
+    if not _DIR_FD:
+        return _read_direct(root.joinpath(*parts), cap)
+    fds: list[int] = []
+    leaf = -1
+    try:
+        fd = os.open(os.fspath(root), _DIR_FLAGS)
+        fds.append(fd)
+        for part in parts[:-1]:
+            fd = os.open(part, _DIR_FLAGS, dir_fd=fd)
+            fds.append(fd)
+        leaf = os.open(parts[-1], _LEAF_FLAGS, dir_fd=fd)
+    except OSError as exc:
+        return None, _state(exc)
+    except (ValueError, UnicodeError):
+        return None, "missing"
+    finally:
+        for opened in fds:
+            os.close(opened)
+    try:
+        return _consume(leaf, cap)
+    finally:
+        os.close(leaf)

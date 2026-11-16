@@ -106,6 +106,20 @@ def test_millions_of_empty_lines_do_not_allocate_a_line_list():
     assert peak < 1024 * 1024
 
 
+def test_many_rows_iterate_without_a_line_list():
+    import tracemalloc
+
+    data = b"1 0.5 1\n" * 200_000
+    tracemalloc.start()
+    try:
+        assert _parse_summary(data) == (0.5, 1, 1)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    # 200k line objects alone would exceed this; the iterator allocates one at a time.
+    assert peak < 6 * 1024 * 1024
+
+
 def test_blank_row_refuses_the_whole_history():
     assert _parse_summary(b"1 0.5 1\n\n2 0.6 2\n") is None
 

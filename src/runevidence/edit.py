@@ -28,7 +28,14 @@ from .findings import Code
 from .hashing import sha256_file
 from .manifest import LoadedManifest, artifact_to_dict, validate_manifest
 from .models import Artifact, Manifest, is_own_file
-from .summaries import describe_state, read_bounded, summary_owner, summary_shape
+from .summaries import (
+    SUMMARY_SCHEMAS,
+    describe_state,
+    read_bounded,
+    summary_owner,
+    summary_shape,
+    valid_summary,
+)
 
 GLOB_CHARS = set("*?[")
 
@@ -268,10 +275,11 @@ def plan_rehash(
     # the old behaviour does not require init --force.
     selected = {f.id: f for f in plan.files}
     artifacts = {a.id: a for a in manifest.artifacts}
+    refresh_summaries = manifest.schema_version in SUMMARY_SCHEMAS
     for res in manifest.results:
         if res.locator is not None or res.artifact_id not in selected:
             continue
-        if not summary_shape(manifest, res):
+        if not refresh_summaries or not summary_shape(manifest, res):
             continue
         fc, art = selected[res.artifact_id], artifacts.get(res.artifact_id)
         if art is None:
@@ -289,13 +297,17 @@ def plan_rehash(
                     f"Cannot refresh metric summary {res.id!r}: more than one installed "
                     "adapter claims it. Nothing was written."
                 )
+            if reason == "broken":
+                raise EditError(
+                    f"Cannot refresh metric summary {res.id!r}: an installed adapter failed "
+                    "while claiming it. Nothing was written."
+                )
             plan.notes.append(
                 f"{res.id}: no installed adapter can refresh this metric summary; its "
                 "recorded value was accepted as is and validate will report it as unverified"
             )
             continue
-        path = _on_disk(loaded.root, art)
-        data, state = read_bounded(path)
+        data, state = read_bounded(loaded.root, art.path)
         if data is None:
             raise EditError(
                 f"Cannot refresh metric summary {res.id!r}: {art.path} could not be read "
@@ -307,12 +319,18 @@ def plan_rehash(
                 f"Cannot refresh metric summary {res.id!r}: {art.path} changed while the "
                 "manifest was being updated. Retry. Nothing was written."
             )
-        summary = owner.read_summary(data)
-        if summary is None:
+        try:
+            summary = owner.read_summary(data)
+        except Exception as exc:
             raise EditError(
-                f"Cannot refresh metric summary {res.id!r}: {art.path} is malformed or over "
-                "a cap. Pick other targets, or mark it volatile with --volatile. "
-                "Nothing was written."
+                f"Cannot refresh metric summary {res.id!r}: the adapter failed "
+                f"({type(exc).__name__}). Nothing was written."
+            ) from None
+        if summary is None or not valid_summary(summary):
+            raise EditError(
+                f"Cannot refresh metric summary {res.id!r}: the adapter did not return a usable "
+                "summary (malformed or over a cap). Pick other targets, or mark it volatile "
+                "with --volatile. Nothing was written."
             )
         old = (res.value, res.metadata.get("step"), res.metadata.get("timestamp_ms"))
         new = (summary.value, summary.step, summary.timestamp)

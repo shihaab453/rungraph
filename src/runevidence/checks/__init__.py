@@ -313,6 +313,7 @@ def run_checks(
         enable_directory_artifacts=enable_directory_artifacts,
         skip_result_ids=targeted_result_ids,
         trusted_paths=files.ok_paths,
+        manifest_root=loaded.root,
     )
     graph_findings = check_graph(
         manifest,

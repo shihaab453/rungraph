@@ -45,19 +45,36 @@ def get_adapter(name: str) -> Adapter:
     return adapters[name]()
 
 
-def summary_claimants(manifest: Manifest, result: Result) -> list[Adapter]:
-    """Every installed adapter that claims ``result`` as a re-readable summary.
+def summary_claimants(manifest: Manifest, result: Result) -> tuple[list[Adapter], str]:
+    """Adapters eligible by provenance that claim ``result``, plus a reason.
 
-    A plugin that fails to construct or raises from ``claims_summary`` is
-    skipped, exactly as ``available_adapters`` skips a broken entry point. An
-    empty or plural result is not silence: callers emit an unverified warning;
-    ownership is never guessed."""
-    found: list[Adapter] = []
-    for cls in available_adapters().values():
-        try:
-            adapter = cls()
-            if adapter.claims_summary(manifest, result):
-                found.append(adapter)
-        except Exception:
+    Only installed adapter names present in the result's run metadata or the
+    project metadata are asked, so an unrelated plugin cannot suppress the
+    absent-verifier warning or create false ambiguity. A candidate that raises
+    from ``claims_summary`` reports ``broken``; it is never silently treated as
+    absent. Returns ``([], "absent")`` when no eligible adapter claims it."""
+    installed = available_adapters()
+    run = next((item for item in manifest.runs if item.id == result.run_id), None)
+    names: list[str] = []
+    for metadata in (manifest.project.metadata, run.metadata if run is not None else {}):
+        if not isinstance(metadata, dict):
             continue
-    return found
+        for key in metadata:
+            if isinstance(key, str) and key in installed and key not in names:
+                names.append(key)
+    if not names:
+        return [], "absent"
+    found: list[Adapter] = []
+    for name in names:
+        try:
+            adapter = installed[name]()
+            claimed = adapter.claims_summary(manifest, result)
+        except Exception:
+            return [], "broken"
+        if claimed:
+            found.append(adapter)
+    if not found:
+        return [], "absent"
+    if len(found) > 1:
+        return found, "ambiguous"
+    return found, "ok"

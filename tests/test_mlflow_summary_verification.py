@@ -6,6 +6,9 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
+from runevidence.adapters import Summary
 from runevidence.cli import main
 from runevidence.models import MANIFEST_FILENAME
 
@@ -96,16 +99,51 @@ def test_timestamp_only_mismatch_is_an_error(tmp_path, capsys):
 def test_volatile_summary_warns_and_strict_fails(tmp_path, capsys):
     root = make_manifest(tmp_path, volatile=True)
     assert main(["validate", str(root)]) == 0
-    assert "volatile" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "result-unverified [m]" in out
+    assert "volatile" in out
     assert main(["validate", str(root), "--strict"]) == 1
 
 
 def test_adapter_absent_warns_instead_of_passing_silently(tmp_path, capsys, monkeypatch):
     root = make_manifest(tmp_path, value=0.1)
-    monkeypatch.setattr("runevidence.summaries.summary_claimants", lambda *a, **k: [])
+    monkeypatch.setattr("runevidence.summaries.summary_claimants", lambda *a, **k: ([], "absent"))
     assert main(["validate", str(root)]) == 0
     out = capsys.readouterr().out
+    assert "result-unverified [m]" in out
     assert "no installed adapter can verify it" in out
+    assert main(["validate", str(root), "--strict"]) == 1
+
+
+class _RaisingOwner:
+    def read_summary(self, data):
+        raise ZeroDivisionError
+
+
+class _MalformedOwner:
+    def __init__(self, summary):
+        self.summary = summary
+
+    def read_summary(self, data):
+        return self.summary
+
+
+@pytest.mark.parametrize(
+    "owner",
+    [
+        _RaisingOwner(),
+        _MalformedOwner(Summary("0.9", 3, 1)),
+        _MalformedOwner(Summary(float("nan"), 3, 1)),
+        _MalformedOwner(Summary(0.9, True, 1)),
+        _MalformedOwner({"value": 0.9, "step": 3, "timestamp": 1}),
+    ],
+    ids=["raises", "string-value", "nan", "bool-step", "dict"],
+)
+def test_a_broken_adapter_warns_instead_of_crashing(tmp_path, capsys, monkeypatch, owner):
+    root = make_manifest(tmp_path, value=0.1)
+    monkeypatch.setattr("runevidence.summaries.summary_claimants", lambda *a, **k: ([owner], "ok"))
+    assert main(["validate", str(root)]) == 0
+    assert "result-unverified [m]" in capsys.readouterr().out
     assert main(["validate", str(root), "--strict"]) == 1
 
 
@@ -119,7 +157,7 @@ def test_two_claimants_warn(tmp_path, capsys, monkeypatch):
         pass
 
     monkeypatch.setattr(
-        "runevidence.summaries.summary_claimants", lambda *a, **k: [First(), Second()]
+        "runevidence.summaries.summary_claimants", lambda *a, **k: ([First(), Second()], "ambiguous")
     )
     assert main(["validate", str(root)]) == 0
     assert "more than one installed adapter" in capsys.readouterr().out
@@ -150,6 +188,24 @@ def test_digest_race_is_unverifiable(tmp_path, capsys, monkeypatch):
     assert main(["validate", str(root)]) == 0
     out = capsys.readouterr().out
     assert "changed while it was being verified" in out
+    assert main(["validate", str(root), "--strict"]) == 1
+
+
+def test_project_level_unreadable_history_warns(tmp_path, capsys):
+    root = make_manifest(tmp_path)
+    doc = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    doc["project"]["metadata"] = {
+        "mlflow": {
+            "unreadable": ["mlruns/1/abc/metrics/loss"],
+            "unreadable_reasons": {"mlruns/1/abc/metrics/loss": "over-cap"},
+        }
+    }
+    (root / MANIFEST_FILENAME).write_text(json.dumps(doc), encoding="utf-8")
+
+    assert main(["validate", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "result-unverified" in out
+    assert "was not recorded as a result (over-cap)" in out
     assert main(["validate", str(root), "--strict"]) == 1
 
 

@@ -1085,9 +1085,12 @@ Read these before relying on a green `validate` for anything important.
 - **MLflow metric histories are bounded.** A history is read at most 50 MiB,
   with at most 1,000,000 lines and at most 64 KiB per line. A history over any
   limit, malformed, non-finite or not valid UTF-8 is not summarized: it is
-  recorded in `metadata.mlflow.unreadable` and `unreadable_reasons`, `validate`
-  warns, and `rehash` refuses the edit. `init` and `validate` use the same
-  bounded reader, which refuses symlinks and non-regular files.
+  recorded in `metadata.mlflow.unreadable` and `unreadable_reasons`, and
+  `validate` warns. `rehash` refuses the edit while a selected result's
+  summary cannot be read; a history that was already unreadable at `init` has
+  no result, so accepting its bytes only updates the digest and the warning
+  persists until `init --force`. `init` and `validate` use the same bounded
+  reader, which refuses symlinks and non-regular files.
 - **Very long integers.** Python limits how many digits it will turn into an
   integer (see `sys.set_int_max_str_digits`; the limit is configurable and
   can be disabled). A manifest containing a longer number is reported as

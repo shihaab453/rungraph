@@ -151,7 +151,7 @@ class MlflowAdapter(Adapter):
             name = _metric_name(rel, run_dir)
             if name is None:
                 continue
-            summary, reason = _read_metric(root / rel)
+            summary, reason = _read_metric(root, rel)
             if summary is None:
                 unreadable[run_dir].append(rel)
                 if reason is not None:
@@ -578,59 +578,64 @@ def _parse_row(raw: bytes) -> tuple[tuple[int, int, float], tuple[float, int, in
     return (step, timestamp, value), (value, step, timestamp)
 
 
-def _parse_summary(data: bytes) -> Optional[tuple[float, int, int]]:
-    """The best row in a history, or None if it is malformed or over a cap.
-
-    Iterates the same line boundaries as ``str.splitlines()`` without building
-    a list, so a file of millions of empty lines stays at the byte cap instead
-    of multiplying it."""
+def _parse_summary_checked(data: bytes) -> tuple[Optional[tuple[float, int, int]], Optional[str]]:
+    """The best row plus a refusal reason (``over-cap`` or ``malformed``)."""
     if len(data) > MAX_METRIC_BYTES:
-        return None
+        return None, "over-cap"
     best: Optional[tuple[tuple[int, int, float], tuple[float, int, int]]] = None
     rows = 0
     start = 0
     for match in _LINE_BREAK.finditer(data):
         end = match.start()
         if end - start > MAX_METRIC_LINE_BYTES:
-            return None
+            return None, "over-cap"
         rows += 1
         if rows > MAX_METRIC_ROWS:
-            return None
+            return None, "over-cap"
         parsed = _parse_row(data[start:end])
         if parsed is None:
-            return None
+            return None, "malformed"
         if best is None or parsed[0] > best[0]:
             best = parsed
         start = match.end()
     if start < len(data):
         if len(data) - start > MAX_METRIC_LINE_BYTES:
-            return None
+            return None, "over-cap"
         rows += 1
         if rows > MAX_METRIC_ROWS:
-            return None
+            return None, "over-cap"
         parsed = _parse_row(data[start:])
         if parsed is None:
-            return None
+            return None, "malformed"
         if best is None or parsed[0] > best[0]:
             best = parsed
     if best is None:
-        return None
-    return best[1]
+        return None, "malformed"
+    return best[1], None
 
 
-def _read_metric(path: Path) -> tuple[Optional[_Summary], Optional[str]]:
+def _parse_summary(data: bytes) -> Optional[tuple[float, int, int]]:
+    """The best row in a history, or None if it is malformed or over a cap.
+
+    Iterates the same line boundaries as ``str.splitlines()`` without building
+    a list, so a file of millions of empty lines stays at the byte cap instead
+    of multiplying it."""
+    return _parse_summary_checked(data)[0]
+
+
+def _read_metric(root: Path, rel: str) -> tuple[Optional[_Summary], Optional[str]]:
     """The best row in an MLflow metric history and its refusal reason.
 
     Returns ``(summary, None)`` or ``(None, reason)`` where reason is
     ``over-cap``, ``not-regular``, ``missing``, ``unreadable`` or ``malformed``.
     The bounded read refuses symlinks and non-regular files, so ``init`` and
     ``validate`` enforce the same limits."""
-    data, state = read_bounded(path, MAX_METRIC_BYTES)
+    data, state = read_bounded(root, rel, MAX_METRIC_BYTES)
     if data is None:
         return None, state
-    parsed = _parse_summary(data)
+    parsed, reason = _parse_summary_checked(data)
     if parsed is None:
-        return None, "malformed"
+        return None, reason
     value, step, timestamp = parsed
     return _Summary(value=value, step=step, timestamp=timestamp), None
 

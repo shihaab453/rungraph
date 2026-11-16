@@ -281,8 +281,11 @@ On schema 0.1/0.2, a locator-less metric result is verified against its file:
 Metric histories are read under a declared bound: 50 MiB, 1,000,000 lines and
 64 KiB per line. A history over a bound, or one that is malformed, non-finite
 or not valid UTF-8, produces no result at `init`, is listed in
-`metadata.mlflow.unreadable` with a reason, makes `validate` warn, and makes
-`rehash` refuse that edit. The reader refuses symlinks and non-regular files.
+`metadata.mlflow.unreadable` with a reason, and makes `validate` warn.
+`rehash` refuses the edit while a selected result's summary cannot be read; a
+history that was already unreadable at `init` has no result, so accepting its
+bytes only updates the digest and the warning persists until `init --force`.
+The reader refuses symlinks and non-regular files.
 
 Example: [examples/mlflow-file-store](../examples/mlflow-file-store) is a
 small synthetic store with two runs. Copy it before running `init` if you

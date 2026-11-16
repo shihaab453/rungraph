@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from conftest import DEEP_JSON_PARSES
+from runevidence.adapters import Summary
 from runevidence.checks import run_checks
 from runevidence.cli import main
 from runevidence.edit import EditError, plan_add
@@ -649,13 +650,127 @@ def test_rehash_refuses_an_unreadable_metric_history(tmp_path, capsys):
 def test_rehash_notes_when_no_adapter_can_refresh(tmp_path, capsys, monkeypatch):
     root = make_mlflow(tmp_path)
     log_another_step(root)
-    monkeypatch.setattr("runevidence.summaries.summary_claimants", lambda *a, **k: [])
+    monkeypatch.setattr("runevidence.summaries.summary_claimants", lambda *a, **k: ([], "absent"))
 
     code, out, _ = rehash_out(capsys, root, "metric-file-0")
 
     assert code == 0
     assert "validate will report it as unverified" in out
     assert read_doc(root)["results"][0]["value"] == 0.5
+
+
+def test_rehash_refreshes_a_0_2_summary(tmp_path, capsys):
+    root = make_mlflow(tmp_path)
+    doc = read_doc(root)
+    doc["schema_version"] = "0.2"
+    write_doc(root, doc)
+    log_another_step(root)
+
+    code, out, _ = rehash_out(capsys, root, "metric-file-0")
+
+    assert code == 0
+    assert "0.5 -> 0.75" in out
+    assert read_doc(root)["results"][0]["value"] == 0.75
+
+
+def test_rehash_does_not_refresh_a_0_3_summary(tmp_path, capsys):
+    root = make_mlflow(tmp_path)
+    doc = read_doc(root)
+    doc["schema_version"] = "0.3"
+    write_doc(root, doc)
+    log_another_step(root)
+
+    code, out, _ = rehash_out(capsys, root, "metric-file-0")
+
+    assert code == 0
+    assert "0.5 ->" not in out
+    assert read_doc(root)["results"][0]["value"] == 0.5
+
+
+class _RaisingOwner:
+    def read_summary(self, data):
+        raise ZeroDivisionError
+
+
+class _MalformedOwner:
+    def __init__(self, summary):
+        self.summary = summary
+
+    def read_summary(self, data):
+        return self.summary
+
+
+@pytest.mark.parametrize(
+    "owner",
+    [
+        _RaisingOwner(),
+        _MalformedOwner(Summary("0.9", 3, 1)),
+        _MalformedOwner(Summary(float("nan"), 3, 1)),
+        _MalformedOwner(Summary(0.9, True, 1)),
+        _MalformedOwner({"value": 0.9, "step": 3, "timestamp": 1}),
+    ],
+    ids=["raises", "string-value", "nan", "bool-step", "dict"],
+)
+def test_rehash_refuses_a_broken_adapter_and_writes_nothing(tmp_path, capsys, monkeypatch, owner):
+    root = make_mlflow(tmp_path)
+    log_another_step(root)
+    monkeypatch.setattr("runevidence.summaries.summary_claimants", lambda *a, **k: ([owner], "ok"))
+    before = (root / MANIFEST).read_bytes()
+
+    code = main(["rehash", str(root), "metric-file-0"])
+    out = capsys.readouterr().out
+
+    assert code == 2
+    assert "Nothing was written" in out
+    assert (root / MANIFEST).read_bytes() == before
+
+
+def test_rehash_refuses_an_ambiguous_owner(tmp_path, capsys, monkeypatch):
+    root = make_mlflow(tmp_path)
+    log_another_step(root)
+    monkeypatch.setattr(
+        "runevidence.summaries.summary_claimants",
+        lambda *a, **k: ([object(), object()], "ambiguous"),
+    )
+    before = (root / MANIFEST).read_bytes()
+
+    code = main(["rehash", str(root), "metric-file-0"])
+    out = capsys.readouterr().out
+
+    assert code == 2
+    assert "more than one installed adapter" in out
+    assert (root / MANIFEST).read_bytes() == before
+
+
+def test_rehash_refuses_a_broken_claim_hook(tmp_path, capsys, monkeypatch):
+    root = make_mlflow(tmp_path)
+    log_another_step(root)
+    monkeypatch.setattr("runevidence.summaries.summary_claimants", lambda *a, **k: ([], "broken"))
+    before = (root / MANIFEST).read_bytes()
+
+    code = main(["rehash", str(root), "metric-file-0"])
+    out = capsys.readouterr().out
+
+    assert code == 2
+    assert "Nothing was written" in out
+    assert (root / MANIFEST).read_bytes() == before
+
+
+def test_rehash_refuses_a_digest_race(tmp_path, capsys, monkeypatch):
+    root = make_mlflow(tmp_path)
+    log_another_step(root)
+    monkeypatch.setattr(
+        "runevidence.edit.read_bounded",
+        lambda *a, **k: (b"1 0.5 3\n", "ok"),
+    )
+    before = (root / MANIFEST).read_bytes()
+
+    code = main(["rehash", str(root), "metric-file-0"])
+    out = capsys.readouterr().out
+
+    assert code == 2
+    assert "changed while the manifest was being updated" in out
+    assert (root / MANIFEST).read_bytes() == before
 
 
 def _no_mlflow_run(doc: dict) -> None:
