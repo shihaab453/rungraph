@@ -1,23 +1,24 @@
-# TF2 media summaries — design RFC (v0.3)
+# TF2 media summaries — design RFC (v0.4)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.10 admission decision are required before any code.
 Schema 0.1–0.9, their readers/checkers and every delivered behavior stay frozen, except the
 additive dispatch, model, migration and text edits this document names explicitly.
 
-## 0. Changes in v0.3
+## 0. Changes in v0.4
 
-Round 2 confirmed the v0.2 redesign and rejected it on four text-level contracts. v0.3 fixes
-them:
+Round 3 confirmed the v0.3 design and rejected it on missed table rows, stale lines and an
+incomplete inventory. v0.4 fixes them:
 
-- **Ladder rewritten to match `_media_results`.** Precedence is value, exhausted occurrence
-  (`missing`), string-tensor encoding failure, other member (`unsupported_value`), absent
-  (`missing`). Recognition is structural (member 8 + `DT_STRING`), and validation is per
-  requested kind, so `k=0`, `k=65`, `[k,3]`, `tensor_content`, rank-0 text and the opposite TF2
+- **Ladder completed.** Precedence is value, exhausted occurrence (`missing`), element beyond
+  the entry's payload count (`missing`), string-tensor encoding failure, anything outside
+  structural recognition (`unsupported_value`), absent (`missing`). Recognition is structural
+  (member 8 + `DT_STRING`), so dtype 0/20/21 tensors fall to the exhaustive fallback; validation
+  is per requested kind, so `k=0`, `k=65`, `[k,3]`, `tensor_content`, rank-0 text and the opposite
   kind all have rows.
-- **One merge rule.** Repeated field-8 fragments merge by protobuf rules; the merged state is
-  then validated against the requested layout. The contradictory "merge fails" sentence is
-  gone.
+- **One merge rule, everywhere.** Repeated field-8 fragments merge by protobuf rules and the
+  merged state is validated; the stale "merge fails" test line and the stale compare-flag row
+  are removed.
 - **Derivable ids and a pinned counting unit.** The adapter kind tokens are `tf2-image` and
   `tf2-audio`; ids append them and `e<element>` always. Occurrence advances once per conforming
   **entry**, and element records share it.
@@ -25,8 +26,9 @@ them:
   `baseline_image`/`baseline_audio`.
 - Corrections folded: payload range `2..k+1`, `uint32_val`/`uint64_val` and wrong-wire
   `string_val`, 128-offset retention until the rank is known, seven downgrade edits (0.2 generic,
-  0.3–0.9 explicit), the explicit `--to 0.10` branch, docs-contract updates, and the multifile
-  name replacing the occurrence suffix.
+  0.3–0.9 explicit), the explicit `--to 0.10` branch, a bounded width/height parse, the
+  docs-contract and guide updates, the legacy media help strings, the capability-error texts,
+  and the multifile name replacing the occurrence suffix.
 
 ## 1. Problem and scope
 
@@ -86,22 +88,26 @@ A `Summary.Value` whose winning member is `tensor` (8) is a TF2 media candidate 
 - audio: rank 2, dimensions `[k, 2]` with `1 <= k <= 64`;
 - the number of `string_val` values equals the shape product exactly (no broadcasting, no
   excess, none missing);
-- no `tensor_content` and no other typed value field is present (a non-empty `tensor_content`,
+- no non-empty `tensor_content` and no other typed value field is present (an empty
+  `tensor_content` is absent, as in the delivered readers; a non-empty `tensor_content`,
   `float_val`, `double_val`, `int_val`, `int64_val`, `half_val`, `bool_val`, `uint32_val`,
   `uint64_val`, complex, variant, resource or `float8_val` field fails the entry, and a
   `string_val` sent on a non-length wire fails the entry);
 - every `string_val` is at most 16 MiB and non-empty where a payload is required.
 
-Rank 0 and rank-1 `[1]` string tensors are **not** TF2 media; they keep the delivered 0.6
-behavior. `tf.make_tensor_proto` of a single encoded image produces that shape, and it is
-explicitly out of scope (§11).
+Rank 0 and rank-1 `[1]` string tensors are **not** TF2 media. For string requests they keep the
+delivered 0.6 behavior; a TF2 media request on such an entry reports `unsupported_encoding`
+(it is a string tensor that conforms as neither TF2 layout). `tf.make_tensor_proto` of a single
+encoded image produces that shape, and it is explicitly out of scope (§11).
 
 ### 3.2 Image layout
 
 For a rank-1 `[2 + k]` entry:
 
-- element 0 is the width and element 1 the height, ASCII decimal digits only, values
-  `1..65535`; leading zeros are accepted, an empty string, sign, whitespace or non-digit fails;
+- element 0 is the width and element 1 the height: ASCII decimal digits only, at most 32 bytes
+  each, at most five significant digits after stripping leading zeros, values `1..65535`; an
+  empty string, sign, whitespace, non-digit, longer field or longer significant run fails the
+  entry, so the conversion is always bounded;
 - the decoded dimensions must equal the PNG IHDR width/height of **every** payload; a mismatch
   fails the entry;
 - elements 2..k+1 are PNG payloads, validated exactly as in 0.8;
@@ -144,19 +150,21 @@ fails the entry through the ordinary layout checks.
 
 The 0.10 state is separate from `_TensorState` and retains at most **128** element offsets, which
 covers the largest valid layout (audio `[64, 2]` = 128 values) and the image form (2 + 64 = 66).
-A 129th retained string fails the entry while reading. Nothing else is retained. `_TensorState`
-and every 0.5–0.9 reader stay byte-identical.
+A 129th retained string fails the entry while reading. Besides those offsets it retains only the
+dimension count and the first two dimension values (the layouts are rank 1 or rank 2); nothing
+else. `_TensorState` and every 0.5–0.9 reader stay byte-identical.
 
 ## 4. Identity, ordering, names
 
-- Occurrence counts conforming **entries** per `(tag, step)` and kind; `element` indexes the
-  payload inside the entry. Two results selecting different elements of one entry therefore
-  share `(tag, step, occurrence)` and differ only by `element`, so checker requests are
-  four-tuples.
+- Occurrence counts conforming **entries** per artifact, `(tag, step)` and kind, as the delivered
+  locators already say ("in this artifact"); the adapter's per-file counters and the checker's
+  per-artifact snapshot agree. `element` indexes the payload inside the entry. Two results
+  selecting different elements of one entry therefore share `(tag, step, occurrence)` and differ
+  only by `element`, so checker requests are four-tuples.
 - Result ids append `NUL + kind` with the adapter-internal tokens `tf2-image` and `tf2-audio`,
-  then `NUL + "e" + str(element)` **always**, including element 0, so the id is derivable from
-  the locator alone. Scalar ids keep the delivered formula with no kind suffix; the other kinds
-  keep their delivered tokens. Occurrence advances once per conforming **entry**, and every
+  then `NUL + "e" + str(element)` **always**, including element 0. Only the two TF2 kinds append
+  the element suffix, so the id is derivable from those locators alone; every legacy kind keeps
+  its delivered token and bytes (the string token is `text`, not the locator kind). Occurrence advances once per conforming **entry**, and every
   element record of that entry carries the same occurrence.
 - Names: `tag @ step (tf2 image) element N` / `(tf2 audio) element N`, then ` #n` when the entry
   occurrence is above zero. A multifile group **replaces** that occurrence suffix with
@@ -184,23 +192,29 @@ Stage 1, first matching row wins, mirroring the delivered `_media_results` prece
 | --- | --- |
 | conforming entry at that occurrence, element `< k` | `value` (stage 2) |
 | conforming entries exist and the occurrence is exhausted | `missing` |
-| entries exist that are string-tensor entries but do not conform for the requested kind | `unsupported_encoding` |
-| entries exist at the tag/step with another member (scalar, histogram, legacy image/audio, numeric tensor) or no winning member | `unsupported_value` |
+| conforming entry at that occurrence, element `>= k` | `missing` |
+| entries exist that are string-tensor entries, conform as the **other** TF2 kind, and never as the requested kind | `unsupported_value` |
+| entries exist that are string-tensor entries but conform as neither TF2 kind | `unsupported_encoding` |
+| any other entry at the tag/step: another member, a tensor outside structural recognition (including dtype 0/20/21), or no winning member | `unsupported_value` |
 | no entry at the tag/step | `missing` |
 
 "Conforming" means §3.1–§3.4 pass for the requested kind; it includes `k >= 1`, the 64 cap,
 the exact string count, the layout, the width/height agreement, the typed-field exclusion and
-each payload's validation. Row 2 is checked before row 3, exactly as every delivered kind checks
-an exhausted occurrence before an unsupported reason. An element `>= k` on an otherwise
-conforming entry is `missing`: the identity is `(tag, step, occurrence, element)` and the checker
-never searches later entries for a different element.
+each payload's validation. Rows 2 and 3 are checked before the unsupported rows, exactly as every delivered kind checks
+identity exhaustion before an unsupported reason. An element `>= k` on an otherwise conforming
+entry is `missing`: the identity is `(tag, step, occurrence, element)` and the checker never
+searches later entries for a different element. The fallback row is deliberately exhaustive:
+anything that is not a conforming string-tensor entry and not a string-tensor encoding failure
+is `selects an unsupported value`, which covers dtype 0, `DT_RESOURCE`, `DT_VARIANT` and every
+other tensor form.
 
 Stage 2: recorded value not an `ImageValue`/`AudioValue` → `locator-unsupported-value`,
 `selects an unsupported value`; differs → `result-value-mismatch`, `does not match the recorded
-value`; matches → none. `unsupported_encoding` renders `selects an unsupported tf2 image
-encoding` / `selects an unsupported tf2 audio encoding`; the text names the requested kind, and a
-text table that happens to have the right shape is reported the same way (it is a string tensor
-that does not validate as media, which is accurate).
+value`; matches → none. The delivered helper uses one `kind` for both the value model and the
+message; 0.10 adds a separate display label so `unsupported_encoding` renders `selects an
+unsupported tf2 image encoding` / `selects an unsupported tf2 audio encoding` while the value
+check still uses `image`/`audio`. A text table that happens to have the right shape is reported
+the same way (it is a string tensor that does not validate as media, which is accurate).
 
 `display_locator` renders `tensorboard-tf2-image:step=<n>,occurrence=<k>,element=<e>` (and the
 audio analogue). Human surfaces keep the compact `image(64x64 png, N bytes)` / `audio(wav, N
@@ -251,30 +265,39 @@ a scalar tag cannot be represented in schema 0.10; nothing was written
 
 `--include-tf2-media` help: `also record TensorFlow 2 image and audio string summaries as
 schema 0.10 results (opt-in; implies schema 0.10)`. The histogram and tensor help texts gain
-"or a TF2 media flag selects 0.10". `--to` and migrate parser help list 0.10. The 0.10 cap text
+"or a TF2 media flag selects 0.10", and the `--include-images`/`--include-audio` help becomes
+"implies schema 0.8 unless a tensor or TF2 media flag selects a later schema". Capability errors
+for the new flag are pinned as `ERROR: adapter {name!r} does not support --include-tf2-media.
+Nothing was written.` and the matching "cannot apply" line. `--to` and migrate parser help list 0.10. The 0.10 cap text
 is `TENSORBOARD_CAP_MESSAGE_06`.
 
 ## 8. Admission checklist (per module)
 
 | Module | Change |
 | --- | --- |
-| `models.py` | `TensorboardTf2ImageLocator`, `TensorboardTf2AudioLocator` (required `element`), `Result10`, `Manifest10` version shape with ten kinds, dispatch/adapters, `model_dump` 0.10, value↔locator matrix, schema file and pin |
+| `models.py` | `TensorboardTf2ImageLocator`, `TensorboardTf2AudioLocator` (required `element`), `Result10`, `Manifest10`, the `Manifest._version_specific_shape` 0.10 branch with ten kinds, dispatch/adapters, `model_dump` 0.10, value↔locator matrix, schema file and pin |
 | `manifest.py` | dispatch, `_root_model_for`, `artifact_to_dict`, `_LOCATOR_TAGS`, value-union tuple |
 | `tensorboard_events.py` | TF2 layout extraction with its own bounded state, `scan_tensorboard_10`, `iter_supported_summaries_10` (all lower kinds plus TF2), four-tuple selection |
 | `checks/__init__.py`, `checks/results.py` | 0.10 admission, eight-kind caps, element requests and ladder |
 | `checks/graph.py` | both version gates |
 | `locator_profiles.py`, `run_claim.py` | element-aware locator display and whitelist |
-| `run_compare.py` | per-kind flags and `_side_flag` |
-| `migrate.py`, `run_comparability.py`, `cli.py`, `adapter.py` | six downgrade arms, comparability, flag, texts, call sites, id/name plumbing |
-| `tests/tensorboard_builder.py` | `string_val` support |
-| `tests/test_docs_contract.py` | page map, flag lists and migrate-target assertions gain 0.10 |
+| `run_compare.py` | no change; flags derive from the value kind, so TF2 results already set the image/audio flags |
+| `migrate.py` | seven target edits: explicit lists in 0.3-0.8, a new 0.9 arm, and the 0.10 target branch (0.2 already refuses generically) |
+| `run_comparability.py`, `cli.py`, `adapter.py` | comparability, flag, capability/keyword checks, texts, call sites, id/name plumbing |
+| `tests/tensorboard_builder.py` | `string_val` support (single and repeated fragments) |
+| `tests/test_cli_migrate.py`, `tests/test_migrate_0_4.py`, `tests/test_migrate_0_5.py`, `tests/test_manifest_0_2.py` | the 0.10-as-unsupported expectations move to 0.11 |
+| `tests/test_cli_conditions.py` | a 0.10 manifest now loads and reaches the 0.10 `UNSUPPORTED_VERSION` text |
+| `tests/test_docs_contract.py` | page map, flag lists, migrate-target and locator-kind assertions gain 0.10 |
+| `docs/tensorboard-guide.md` | deliberate-limits section now says TF2 media IS read under 0.10 |
 | `docs/`, `schema/`, `README.md` | 0.10 page, schema file, flag documentation |
 
 ## 9. Verification plan
 
-- Layouts: single and batched images/audio; width/height parsing and IHDR mismatch; labels;
-  `k = 0`; 64 and 65 payloads; shape/count mismatch; excess `string_val`; rank-0 and `[1]`
-  stay text/unsupported; `tensor_content` and typed fields fail; repeated-message merge fails.
+- Layouts: single and batched images/audio; bounded width/height parsing (including a 5,000-digit
+  decoy) and IHDR mismatch; labels; `k = 0`; 64 and 65 payloads; shape/count mismatch; excess
+  `string_val`; rank-0 and `[1]`
+  stay text/unsupported; `tensor_content` and typed fields fail; a split fragment merge that
+  forms a valid layout is recorded, and one that does not fails the entry.
 - Payloads: per-element truncation, bad CRC, unpadded WAV, empty payload.
 - Identity: occurrence per entry unaffected by elements; element ids always present and
   derivable; names and multifile suffixes unique across batches; tag filter.
