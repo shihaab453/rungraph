@@ -39,7 +39,7 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,186 passed, 138 skipped on Python 3.12; 6,183 passed, 141 skipped on
+- **Full suite**: 6,191 passed, 138 skipped on Python 3.12; 6,188 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
@@ -47,8 +47,9 @@ platform bounds, F3 and B6, listed under Limitations.
   `runevidence init/validate` and `rungraph discover/init/validate`.
 - **Targeted proof**: RE-10/ML-1 have 12 mutation probes that each kill a named test, plus an
   end-to-end MLflow lifecycle; the workspace layer has document, discovery, graph, claim,
-  report, impact, compare, authoring and baseline tests; the examples are kept clean by
-  `tests/test_examples.py`.
+  report, impact, compare, authoring and baseline tests, including explicit tests for impact
+  through a run input, multiple producers, whitespace-only authoring text and ambiguous
+  member endpoints; the examples are kept clean by `tests/test_examples.py`.
 - **Realistic experiments**: `examples/dogfood-sklearn` (a real scikit-learn training run with
   two models) and `examples/dogfood-mlp-sweep` (a real preprocessing stage plus a three-job
   learning-rate sweep) are committed with their reports; `examples/tensorboard-scalars` holds
