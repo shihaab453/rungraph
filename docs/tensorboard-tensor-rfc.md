@@ -1,15 +1,14 @@
-# TensorBoard numeric tensor digests — design RFC (v0.3)
+# TensorBoard numeric tensor digests — design RFC (v0.4)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.9 admission decision are required before any code.
 Schema 0.1–0.8, their readers/checkers and every delivered behavior stay frozen, except the
 additive dispatch, model, migration and text edits this document names explicitly.
 
-## 0. Changes in v0.3
+## 0. Changes in v0.4
 
-Round 2 rejected v0.2 on four places where the line between "this entry is bad" and "the whole
-file is refused" was drawn wrong, and where the finalization rules contradicted each other. v0.3
-folds all three seats:
+Round 3 confirmed the frozen split, digest and admission rules and rejected v0.3 on three
+remaining text contradictions. v0.4 folds them:
 
 - **Frozen boundary, measured.** Unpacked varint damage in fields 3 and 7-18 is already a
   whole-file refusal in 0.5-0.8, because the frozen walk reads those wire-0 bodies strictly.
@@ -29,10 +28,21 @@ folds all three seats:
   `BUDGET_MESSAGE_08` line as media-only), and the admission list counts eight structured
   locator kinds (jsonl, csv-cell and the six TensorBoard kinds) so the 0.9 version-shape branch
   cannot inherit the 0.8 off-by-one.
-- Also folded: §3.2 is phrased as "every raise in the reused frozen parsers", the routing
-  fallback and the new request list/dispatch are named, the `model_dump` edit site is exact, the
-  images/audio help is updated, the display variants and pluralization are pinned, and the
-  two-outcome asymmetry is a test.
+- **Overflow is decided after selection.** Counts saturate during the walk; only the selected
+  list can fail on size, so a 1,000,001-value list beside valid content is ignored exactly as
+  step 2 says.
+- **Damage is classified by encoding, not by "packed".** Unpacked wire-0 and unpacked
+  fixed-width damage refuses the file, and so does a packed `float_val`/`double_val` span whose
+  length is not divisible by 4/8, because the frozen walk checks all three. Only damage inside a
+  packed **varint** span (fields 7/10), which the frozen walk treats as an opaque blob, is
+  entry-local. §3.2, §3.4 and §9 say so.
+- **Stray wires on integer lists are tolerated.** Wire 0/2 forms contribute elements; wire 1/5
+  occurrences are skipped and ignored; other wire types refuse the file. "Non-empty" is defined
+  by stored span bytes, so a one-byte packed span counts and a zero-length one does not.
+- **Finalization starts with a step 0** (dtype, `unknown_rank`, rank, dimensions, product), the
+  empty-content sentence is a definition rather than a step, and the document states that an
+  entry failure never stops the frozen walk early.
+- **Field 18** is `float8_val`, a bytes field (nominal wire 2), not a varint.
 
 ## 1. Problem and scope
 
@@ -68,7 +78,8 @@ Schema 0.9 = 0.8 plus tensors. `Result09.value` is
 Rules:
 
 - strict (`extra="forbid"`), all five keys required, `kind` const;
-- `dtype` is const: `float32`, `float64`, `int32` or `int64`. Every other dtype (`bfloat16`,
+- `dtype` is const: `float32` (`DT_FLOAT=1`), `float64` (`DT_DOUBLE=2`), `int32` (`DT_INT32=3`)
+  or `int64` (`DT_INT64=9`), compared as raw varint codes. Every other dtype (`bfloat16`,
   `float16`, `uint32`, `complex64`, `string`, `bool`, variants, resources, `_REF` codes) is
   excluded by the tensor profile and handled by §3.1;
 - `shape` is 1–8 `StrictInt` values, each `1..2**31-1`; `element_count` is a `StrictInt` in
@@ -98,34 +109,37 @@ classifier runs first with exactly the frozen semantics:
    `selects an unsupported value` and the entry consumes no tensor occurrence;
 2. otherwise, if the dtype is float32/float64/int32/int64, the shape has 1–8 dimensions with
    `unknown_rank` false and each dimension `1..2**31-1`, the element count is `1..1_000_000`
-   and the payload resolves per §3.3, the entry is a tensor;
+   and the payload resolves per §3.3a, the entry is a tensor;
 3. every other candidate — unsupported dtype, rank 0 that the scalar classifier did not record
    (for example `int32`), unknown rank, bad dimension, cap overflow, payload mismatch — is a
    **failure** and receives `selects an unsupported tensor encoding`. It consumes no occurrence
    and does not affect siblings.
 
-"Failure" is the only word used for case 3; "skipped" is not used anywhere.
+Case 3 is always called a **failure**; "skipped" is reserved for ignored fields and unusable
+tags, never for a tensor candidate.
 
 ### 3.2 Frozen strictness boundary
 
 The 0.9 scanner reuses the frozen Event, `Summary.Value`, shape and tensor walks, so **every
-raise in those frozen parsers is a whole-file refusal in 0.9 too**: bad keys, field number 0 or
-above `2**29-1`, wire types 3/4/6/7, truncated lengths, wrong wire type for `dtype` (0),
-`tensor_shape` (2), `tensor_content` (2), `float_val` (2/5) or `double_val` (2/1), a packed
-`float_val` length not divisible by 4, a packed `double_val` length not divisible by 8, malformed
-`Dim.size`/`Dim.name`/`unknown_rank`, the outer `Summary.Value` and Event wire checks, and the
-16 MiB merged-summary cap.
+raise in those frozen parsers is a whole-file refusal in 0.9 too**. That includes, beyond the
+obvious wire and length checks:
 
-That includes the fields the digest reads. The frozen walk decodes **unpacked** wire-0 bodies in
-fields 3 and 7-18 with the strict `_read_varint` and refuses the file on a truncated or overlong
-varint. v0.3 keeps that: an unpacked `int_val`/`int64_val` with damaged bytes is a file refusal
-before any classification. Only damage **inside a packed span** — which the frozen walk treats as
-an opaque length-delimited blob — is entry-local.
+- unpacked wire-0 bodies in fields 3, 7-10 and 13/16/17/18, and unpacked fixed32/fixed64 values in
+  fields 5/6, which the frozen walk decodes strictly: a truncated or overlong varint, or a
+  short fixed value, refuses the file;
+- a packed `float_val` span whose length is not divisible by 4, and a packed `double_val` span
+  whose length is not divisible by 8, which the frozen walk length-checks before it classifies
+  the entry;
+- the outer `Summary.Value` and Event wire checks and the 16 MiB merged-summary cap.
 
-Everything that is new in 0.9 fails entry-locally and only for candidates the frozen classifiers
-did not record: unsupported dtype, rank/dimension caps, element-count and canonical-length
-mismatches, foreign typed lists, overflow of the selected list, and packed-span decoding. A
-recorded scalar or string is never re-examined as a tensor.
+Only damage **inside a packed varint span** (`int_val` field 7, `int64_val` field 10) is
+entry-local, because the frozen walk treats that span as an opaque length-delimited blob. A
+packed span in an ignored field is never decoded at all.
+
+Everything else that is new in 0.9 fails entry-locally and only for candidates the frozen
+classifiers did not record: unsupported dtype, rank/dimension caps, element-count and
+canonical-length mismatches, foreign typed lists, overflow of the selected list, and packed
+varint decoding. A recorded scalar or string is never re-examined as a tensor.
 
 ### 3.3 Merge rules
 
@@ -139,10 +153,14 @@ merge:
 - `tensor_content` (4, wire 2): singular bytes, last wins; only the last range is retained;
 - `float_val` (5, fixed32), `double_val` (6, fixed64), `int_val` (7, varint), `int64_val`
   (10, varint): repeated, appended, in packed (wire 2) or unpacked form;
-- `version_number` (3, varint), `string_val` (8), `scomplex_val` (9, fixed32),
+- `version_number` (3, varint), `string_val` (8, bytes), `scomplex_val` (9, fixed32),
   `bool_val` (11, varint), `dcomplex_val` (12, fixed64), `half_val` (13, varint),
-  `resource_handle_val` (14), `variant_val` (15), `uint32_val` (16, varint),
-  `uint64_val` (17, varint) and `float8_val` (18, varint) are ignored.
+  `resource_handle_val` (14, bytes), `variant_val` (15, bytes), `uint32_val` (16, varint),
+  `uint64_val` (17, varint) and `float8_val` (18, bytes) are ignored.
+- For the four payload lists, only wire 0 and wire 2 forms contribute elements. A wire 1 or 5
+  occurrence of `int_val`/`int64_val` is skipped and contributes nothing, exactly as the frozen
+  walk skips it; a wire 1/5 `float_val`/`double_val` is the unpacked form and does contribute.
+  Wire 3/4/6/7 refuses the file.
 
 Ignored fields are **wire-tolerated**, exactly as the frozen walk tolerates them: wire 0/1/2/5 is
 skipped without regard to the field's nominal type, and any other wire type refuses the file. A
@@ -151,26 +169,31 @@ entry — the frozen reader does the same.
 
 ### 3.3a Finalization order
 
-Once the merge ends, these steps run in order; any failure fails the entry (never the file):
+Once the merge ends, these steps run in order. A failure at any step fails the entry (never the
+file), and never stops the frozen walk early: every remaining byte is still walked and still
+refuses the file where the frozen grammar would.
 
-1. compute the shape product over 1-8 dimensions and require `1..1_000_000` elements;
-2. if the last `tensor_content` range is non-empty:
-   - its length must be exactly `element_count * width`, else fail;
-   - it is the payload; typed lists are ignored for both value and validity, including
-     foreign-dtype lists and lists over the element cap. (This is a deliberate divergence from
-     the frozen scalar classifier, which treats content plus a typed list as an unsupported
-     scalar; an entry that the scalar classifier records never reaches this step, so no frozen
-     outcome moves.);
-3. otherwise the payload is the list matching `dtype`:
-   - it must be present and its count must equal `element_count`, else fail;
-   - a non-empty list for any other dtype fails the entry (new check; the frozen classifier
-     treats that entry as an unsupported scalar, so it was never a recorded value);
-   - a count above 1,000,000 fails; ignored lists saturate their counters and never fail;
-4. a damaged packed span in the **selected** list fails; damage in an ignored list is set aside
-   with that list;
-5. an empty `tensor_content` counts as absent.
+0. the dtype is one of `DT_FLOAT=1`, `DT_DOUBLE=2`, `DT_INT32=3`, `DT_INT64=9` (compared as raw
+   varints; `_REF` codes 101 and above are rejected), `unknown_rank` is false, there are 1-8
+   dimensions, each dimension decoded as a signed int64 is `1..2**31-1`, and the product is
+   `1..1_000_000` (`width` follows the dtype);
+1. the last `tensor_content` range is non-empty: its length must be exactly
+   `element_count * width`, else fail; it is the payload and is hashed fresh. In this branch
+   **every** typed list is ignored for value and validity: foreign dtype, overflow, zero-length
+   packed span, everything. Unpacked damage has already refused the file in §3.2;
+2. otherwise (content absent or empty) the payload is the list matching `dtype`:
+   - it must be present and its element count must equal `element_count`, else fail; a selected
+     count above 1,000,000 fails;
+   - damage inside its packed varint span fails; a wire-1/5 `int_val`/`int64_val` occurrence is
+     skipped, contributes no element and does not make the list non-empty;
+   - any **non-empty** list for another dtype fails the entry. Non-empty is a stored-span
+     property: a packed span of at least one byte is non-empty even if it decodes to zero
+     elements, an unpacked occurrence of that dtype is non-empty, and a zero-length packed span
+     is not. The frozen string path counts bytes the same way. The three other supported lists
+     saturate their counters; a foreign list never reaches this test in the content branch.
 
-TF's broadcast form (fewer typed values than elements) is not supported and fails the entry.
+An empty `tensor_content` range is defined as absent for step 1. TF's broadcast form (fewer typed
+values than elements) is not supported and fails the entry.
 
 ### 3.4 Canonical encoding
 
@@ -189,7 +212,9 @@ The digest is over a canonical encoding so different writer forms of the same ar
   little-endian bytes, so `-1` (a 10-byte varint) and `0xFFFFFFFF` agree;
 - typed `int64_val`: the full 64-bit two's complement value, 8 little-endian bytes;
 - varints are bounded to 10 bytes and the frozen `_read_varint` semantics; non-minimal
-  encodings are accepted, a truncated varint fails the entry;
+  encodings are accepted. Damage follows §3.2: unpacked or overlong damage and packed
+  float/double length damage refuse the file; damage inside the selected packed varint span
+  fails the entry; damage inside a discarded packed span is never decoded;
 - if both a non-empty `tensor_content` and typed values are present, `tensor_content` wins and
   the typed values are ignored.
 
@@ -203,12 +228,14 @@ list" contract stays frozen. It holds:
 - the last `tensor_content` range (two integers);
 - at most eight dimension integers; a ninth `dim` fails the entry as it is read;
 - four streaming SHA-256 hashers that receive typed values only (one per supported dtype), four
-  saturating counts, and one damaged flag per typed list;
+  saturating counts (overflow is recorded, not acted on, until finalization decides whether that
+  list is selected), and one damaged flag per packed varint span;
 - the last `unknown_rank` value and the final `dtype`.
 
 Typed values are fed to their dtype's hasher as they are read and are never retained. A count
-above 1,000,000 marks overflow and fails the entry; packing cannot exceed the 16 MiB Summary
-cap. Packed float/double payloads are hashed as contiguous byte spans; varint integers are
+above 1,000,000 marks overflow and fails the entry **only when that list is selected**; a packed
+span is bounded by the 16 MiB Summary cap, but the element count is not, which is why the
+saturating counter exists. Packed float/double payloads are hashed as contiguous byte spans; varint integers are
 decoded and re-encoded one element at a time with O(1) state.
 
 The frozen 16 MiB merged-`Summary` cap still outranks everything: an oversized Summary refuses
@@ -240,11 +267,11 @@ Inherited: exact tag (1..4,096 code points and UTF-8 bytes), signed 64-bit `step
 
 `checks/results.py`: `_extension_matches`/`_expected_extension`, `_locator_kind`, `capped_kinds`,
 the per-kind 128 MiB branch, the directory hint, the cap-message gate (`TENSORBOARD_CAP_MESSAGE_06`
-for 0.9), `check_results`' own `has_locators`, the `tensorboard_results` tuple, a new
+for 0.9), `check_results`' own `has_locators`, the `tensorboard_results` list, a new
 `tensor_requests` list, and the per-result dispatch branch all learn the kind. The scan has an
 **explicit** `schema_version == SCHEMA_VERSION_0_9` branch calling
 `scan_tensorboard_09(data, scalar_requests, string_requests, histogram_requests,
-image_requests, audio_requests, tensor_requests)` and returning seven mappings in that order;
+image_requests, audio_requests, tensor_requests)` and returning **six** mappings in that order;
 without it tensor requests fall through to `scan_scalars` and vanish.
 
 `models.py` admission: `TensorValue`, `TensorboardTensorLocator`, `Result09` with
@@ -287,7 +314,9 @@ encoding`; `unsupported_value` → `selects an unsupported value`. Comparison is
 elements)`, and the singular form is used for exactly one element. `--json` emits the
 object exactly. Compare rows gain `baseline_tensor`/`target_tensor`, and **both**
 `_structured_flag` and `_side_flag` must learn `"tensor"`, or the human row prints raw JSON.
-The leaderboard excludes the kind as `non_numeric_or_nonfinite`. `display_locator` renders
+`value_display` is the single dispatcher the human surfaces call, so it must route tensors to
+`tensor_display` or those surfaces still print raw JSON. The leaderboard excludes the kind as
+`non_numeric_or_nonfinite`. `display_locator` renders
 `tensorboard-tensor:step=<n>,occurrence=<k>`, never the tag; `run_claim`'s whitelist and value
 display gain the kind; the graph conflicting-evidence text uses the display.
 
@@ -348,7 +377,7 @@ help lists 0.9. The 0.9 cap text is the delivered `TENSORBOARD_CAP_MESSAGE_06`.
 | `checks/__init__.py` | locator admission, six-kind caps, csv cap, snapshot eligibility |
 | `checks/results.py` | explicit 0.9 routing, extension/kind maps, caps, 128 MiB branch, ladder |
 | `checks/graph.py` | version gates, capped hint, compact display |
-| `histogram_display.py` | `value_to_json` and `tensor_display` |
+| `histogram_display.py` | `value_to_json`, `tensor_display`, and `value_display` wiring |
 | `locator_profiles.py`, `run_claim.py` | display, whitelist, value branch |
 | `run_compare.py` | `_structured_flag` and `_side_flag`; `run_matrix.py`, `run_details.py`, `run_lineage.py`, `run_leaderboard.py`, `report.py` | display and JSON |
 | `migrate.py`, `run_comparability.py`, `cli.py`, `adapter.py` | targets, downgrade tuples, flags, texts, precedence, generator |
@@ -356,17 +385,23 @@ help lists 0.9. The 0.9 cap text is the delivered `TENSORBOARD_CAP_MESSAGE_06`.
 ## 9. Verification plan
 
 - Reader: canonical equality across `tensor_content` and typed forms for all four dtypes; packed
-  and unpacked values; int32 `-1` vs `0xFFFFFFFF`; non-minimal varints; truncated varints;
-  conflicting typed lists; content plus typed; empty content; shape merge; dimension 0, negative
-  and ninth dimension; unknown rank last-wins; unsupported dtypes and `_REF`; NaN payload and
-  `-0.0` distinctness; element-count and canonical-length mismatch; 1,000,000/1,000,001
-  elements; entry-local failures with sibling scalars intact; Summary-cap refusal.
+  and unpacked values; int32 `-1` vs `0xFFFFFFFF`; non-minimal varints; a truncated or overlong
+*unpacked* varint refusing the file, a packed float/double span with a bad length refusing the
+  file, damage inside a selected packed varint span failing the entry, and damage inside a
+  discarded span being ignored; stray wire-1/5 integer occurrences ignored;
+  a one-byte packed span counting as a non-empty foreign list and a zero-length one not;
+  conflicting typed lists; content plus typed; overflow beside content; shape merge; dimension
+  0, negative and ninth dimension; unknown rank last-wins; unsupported dtypes and `_REF`; NaN
+  payload and `-0.0` distinctness; element-count and canonical-length mismatch;
+  1,000,000/1,000,001 elements; entry-local failures with sibling scalars intact; Summary-cap
+  refusal.
 - Differential: for scalar, string, histogram and media requests, `scan_tensorboard_09`
   returns the same selections and outcomes as 0.5–0.8 on the same bytes, including files where
   the frozen grammar refuses.
 - Identity: per-kind occurrence, a scalar entry not consuming a tensor occurrence, tag filter,
   multifile names, occurrence 2,000,000,000; the two-outcome asymmetry (same entry: scalar
-  locator → unsupported encoding, tensor locator → value) and the rank-0/rank-1 `[1]` split.
+  locator → `selects an unsupported scalar encoding`, tensor locator → value) and the
+  rank-0/rank-1 `[1]` split.
 - Checker: every ladder row and byte-exact texts; six-kind caps; csv cap on 0.9; 128 MiB
   eligibility; digest, shape, dtype and count mismatches.
 - Adapter/CLI: flag matrix with 0.9 precedence; budget texts; tag texts; capability errors and
