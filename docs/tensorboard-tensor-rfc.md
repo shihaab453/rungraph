@@ -1,33 +1,31 @@
-# TensorBoard numeric tensor digests — design RFC (v0.5)
+# TensorBoard numeric tensor digests — design RFC (v0.6)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.9 admission decision are required before any code.
 Schema 0.1–0.8, their readers/checkers and every delivered behavior stay frozen, except the
 additive dispatch, model, migration and text edits this document names explicitly.
 
-## 0. Changes in v0.5
+## 0. Changes in v0.6
 
-Round 4 confirmed the frozen split, digest, overflow, mapping count and step-0 gate, and rejected
-v0.4 on the `float_val`/`double_val` wire rules plus stale changelog text. v0.5 folds all three
-seats:
+Round 5 confirmed every normative wire and damage rule against the frozen parser and rejected
+v0.5 on three cross-section slips. v0.6 fixes them:
 
-- **Exact payload-list wires.** `float_val` contributes on wire 2 or 5 and `double_val` on wire 2
-  or 1; every other wire on those fields refuses the file. `int_val`/`int64_val` contribute on
-  wire 0 or 2, skip wire 1/5 occurrences, and still refuse a short body.
-- **Damage classified by encoding, consistently.** Unpacked wire-0 and fixed-width damage refuses
-  the file; so does a packed `float_val`/`double_val` span with a bad length; only packed
-  **varint** damage (fields 7/10) is entry-local. §0, §3.2, §3.4 and §9 now say the same thing.
-- **Strict-decode list completed.** Any wire-0 field and any short fixed body refuses the file,
-  not just the fields that happen to be named.
-- **Scope and wording fixes.** Step 1 excepts the damage §3.2 already refused, foreign-list
-  "non-empty" ignores wire-1/5 integer strays, the ninth dimension is latched without abandoning
-  the walk, the two damaged-flag and "ignored list" phrases are scoped, field 18 is bytes
-  everywhere, and the two-outcome test names its entry. Lineage's display path is pinned.
+- **§9 now matches §3.2.** A truncated or overlong unpacked varint, or a short wire-1/5 integer
+  body, refuses the file; an overlong packed varint fails only a selected entry and is ignored
+  when the list is discarded.
+- **Lineage needs no own branch.** Every node already flows through `run_claim._display_row` to
+  `value_display`, so the edits are `value_to_json`, `value_display` and the claim whitelist.
+- **The two-outcome example is exact.** Only a rank-1 `[1]` float32 with exactly 4 content
+  bytes (or float64 with 8) plus one typed value produces the stated pair; rank 0 fails the
+  profile and `[1,1]` gives the scalar locator `selects an unsupported value`.
+- **Scope wording.** "Every field" becomes "every field the frozen walk visits"; the string-path
+  byte-count sentence is scoped to packed spans; the element count is described as bounded by
+  the 16 MiB Summary cap rather than unbounded.
 
-Earlier revisions (v0.2 to v0.4) folded rounds 1 to 3: the frozen-strictness boundary, varint
-and int32 rules, raw-wire float hashing, the separate O(1) accumulator, post-selection overflow,
-payload precedence, the stage-1 ladder row, all admission and text inventories, six mappings,
-and the step-0 gate.
+Earlier revisions folded rounds 1 to 4: the frozen-strictness boundary and encoding-based damage
+split, varint and int32 rules, raw-wire float hashing, the separate O(1) accumulator, post-selection
+overflow, payload precedence, the exact per-field wire table, the stage-1 ladder row, the step-0
+gate, six mappings, and every admission, text and display obligation.
 
 ## 1. Problem and scope
 
@@ -65,7 +63,8 @@ Rules:
 - strict (`extra="forbid"`), all five keys required, `kind` const;
 - `dtype` is const: `float32` (`DT_FLOAT=1`), `float64` (`DT_DOUBLE=2`), `int32` (`DT_INT32=3`)
   or `int64` (`DT_INT64=9`), compared as raw varint codes. Every other dtype (`bfloat16`,
-  `float16`, `uint32`, `complex64`, `string`, `bool`, variants, resources, `_REF` codes) is
+  `float16`, `half`, `uint32`, `uint64`, `complex64`, `string`, `bool`, variants, resources,
+  `_REF` codes) is
   excluded by the tensor profile and handled by §3.1;
 - `shape` is 1–8 `StrictInt` values, each `1..2**31-1`; `element_count` is a `StrictInt` in
   `1..1_000_000` and must equal the shape product;
@@ -109,10 +108,12 @@ tags, never for a tensor candidate.
 The 0.9 scanner reuses the frozen Event, `Summary.Value`, shape and tensor walks, so **every
 raise in those frozen parsers is a whole-file refusal in 0.9 too**. In particular:
 
-- wire-0 bodies are decoded strictly in **every** field, known or unknown: a truncated or
-  overlong varint refuses the file;
-- wire-1/5 bodies must be long enough: a short fixed32/fixed64 body refuses the file, in every
-  field;
+- wire-0 bodies are decoded strictly in **every field the frozen walk visits**: a truncated or
+  overlong varint refuses the file. Losing tensor occurrences, losing summaries and packed spans
+  are not decoded by that walk, and the 0.7/0.8 media decoders are lenient, so none of them
+  gains a strictness it never had;
+- wire-1/5 bodies must be long enough in every field the walk visits: a short fixed32/fixed64
+  body refuses the file;
 - `float_val` (5) accepts wire 2 or 5 and `double_val` (6) accepts wire 2 or 1; any other wire on
   those two fields refuses the file;
 - a packed `float_val` span not divisible by 4, or a packed `double_val` span not divisible by 8,
@@ -143,7 +144,7 @@ merge:
   (10, varint): repeated, appended, in packed (wire 2) or unpacked form;
 - `version_number` (3, varint), `string_val` (8, bytes), `scomplex_val` (9, fixed32),
   `bool_val` (11, varint), `dcomplex_val` (12, fixed64), `half_val` (13, varint),
-  `resource_handle_val` (14, bytes), `variant_val` (15, bytes), `uint32_val` (16, varint),
+  `resource_handle_val` (14, message), `variant_val` (15, message), `uint32_val` (16, varint),
   `uint64_val` (17, varint) and `float8_val` (18, bytes) are ignored.
 - Payload-list wires: `float_val` contributes on wire 2 (packed) or 5 (one fixed32) and
   `double_val` on wire 2 (packed) or 1 (one fixed64); any other wire on those fields refuses the
@@ -154,7 +155,8 @@ merge:
 Ignored fields are **wire-tolerated**, exactly as the frozen walk tolerates them: wire 0/1/2/5 is
 skipped without regard to the field's nominal type, and any other wire type refuses the file. A
 `string_val` sent as fixed32, or `scomplex_val` sent as varint, is skipped and never fails the
-entry — the frozen reader does the same.
+entry, provided its body is long enough for that wire; a short fixed32/fixed64 body refuses the
+file first (§3.2), exactly as the frozen reader does.
 
 ### 3.3a Finalization order
 
@@ -180,8 +182,10 @@ refuses the file where the frozen grammar would.
    - any **non-empty** list for another dtype fails the entry. Non-empty is a stored-span
      property: a packed span of at least one byte is non-empty even if it decodes to zero
      elements, an unpacked occurrence of that dtype is non-empty, and a zero-length packed span
-     is not. The frozen string path counts bytes the same way. The three other supported lists
-     saturate their counters; a foreign list never reaches this test in the content branch.
+     is not. For packed spans the frozen string path counts bytes the same way; its habit of
+     counting wire-0/1/5 integer occurrences as other-typed values is not the 0.9 rule, which
+     skips them. The three other supported lists saturate their counters; a foreign list never
+     reaches this test in the content branch.
 
 An empty `tensor_content` range is defined as absent for step 1. TF's broadcast form (fewer typed
 values than elements) is not supported and fails the entry.
@@ -205,8 +209,8 @@ The digest is over a canonical encoding so different writer forms of the same ar
 - varints are bounded to 10 bytes and the frozen `_read_varint` semantics; non-minimal
   encodings are accepted. Damage follows §3.2: truncated or overlong **unpacked** varints and
   packed float/double length damage refuse the file; damage inside the selected packed varint
-  span fails the entry; a discarded typed list is still decoded eagerly, its damage is latched,
-  and it is ignored after selection;
+  span fails the entry; a discarded **packed varint** list is still decoded eagerly, its damage
+  is latched, and it is ignored after selection;
 - if both a non-empty `tensor_content` and typed values are present, `tensor_content` wins and
   the typed values are ignored.
 
@@ -226,9 +230,9 @@ list" contract stays frozen. It holds:
 - the last `unknown_rank` value and the final `dtype`.
 
 Typed values are fed to their dtype's hasher as they are read and are never retained. A count
-above 1,000,000 marks overflow and fails the entry **only when that list is selected**; a packed
-span is bounded by the 16 MiB Summary cap, but the element count is not, which is why the
-saturating counter exists. Packed float/double payloads are hashed as contiguous byte spans; varint integers are
+above 1,000,000 marks overflow and fails the entry **only when that list is selected**. The
+16 MiB Summary cap bounds the raw bytes (about 16.7 million one-byte varints), but not the
+element count, which is why the saturating counter exists. Packed float/double payloads are hashed as contiguous byte spans; varint integers are
 decoded and re-encoded one element at a time with O(1) state.
 
 The frozen 16 MiB merged-`Summary` cap still outranks everything: an oversized Summary refuses
@@ -308,9 +312,10 @@ elements)`, and the singular form is used for exactly one element. `--json` emit
 object exactly. Compare rows gain `baseline_tensor`/`target_tensor`, and **both**
 `_structured_flag` and `_side_flag` must learn `"tensor"`, or the human row prints raw JSON.
 `value_display` is the dispatcher for inspect, claim, compare, details, matrix and report; it
-must route tensors to `tensor_display` or those surfaces print raw JSON. Lineage prints
-`value_to_json` details directly, so `run_lineage` needs its own tensor branch to render the
-compact form. The leaderboard excludes the kind as
+must route tensors to `tensor_display` or those surfaces print raw JSON. Lineage needs no branch
+of its own: `format_claim_lineage` sends every root and node through `run_claim._display_row`,
+which reaches `value_display`. Lineage still needs `value_to_json` to learn `TensorValue` for
+`--json`, and `run_claim`'s locator whitelist to admit the kind. The leaderboard excludes the kind as
 `non_numeric_or_nonfinite`. `display_locator` renders
 `tensorboard-tensor:step=<n>,occurrence=<k>`, never the tag; `run_claim`'s whitelist and value
 display gain the kind; the graph conflicting-evidence text uses the display.
@@ -381,10 +386,11 @@ help lists 0.9. The 0.9 cap text is the delivered `TENSORBOARD_CAP_MESSAGE_06`.
 
 - Reader: canonical equality across `tensor_content` and typed forms for all four dtypes; packed
   and unpacked values; int32 `-1` vs `0xFFFFFFFF`; non-minimal varints; a truncated or overlong
-*unpacked* varint and an overlong packed varint being entry-local, a wrong wire on
-  `float_val`/`double_val` and a packed float/double span with a bad length refusing the file,
-  damage inside a selected packed varint span failing the entry, and damage inside a discarded
-  packed varint span being ignored after selection; stray wire-1/5 integer occurrences ignored;
+  unpacked varint and a short wire-1/5 integer body refusing the file; an overlong packed varint
+  failing a selected entry and being ignored when the list is discarded; a wrong wire on
+  `float_val`/`double_val` and a packed float/double span with a bad length refusing the file;
+  damage inside a selected packed varint span failing the entry; stray wire-1/5 integer
+  occurrences not making a list non-empty;
   a one-byte packed span counting as a non-empty foreign list and a zero-length one not;
   conflicting typed lists; content plus typed; overflow beside content; shape merge; dimension
   0, negative and ninth dimension; unknown rank last-wins; unsupported dtypes and `_REF`; NaN
@@ -396,9 +402,11 @@ help lists 0.9. The 0.9 cap text is the delivered `TENSORBOARD_CAP_MESSAGE_06`.
   the frozen grammar refuses.
 - Identity: per-kind occurrence, a scalar entry not consuming a tensor occurrence, tag filter,
   multifile names, occurrence 2,000,000,000; the two-outcome asymmetry, named precisely: a
-  rank-2 tensor gives a scalar locator `selects an unsupported value`, while a one-element
-  float/double tensor with content plus typed values gives it `selects an unsupported scalar
-  encoding`, and both give a tensor locator a value.
+  rank-2 tensor gives a scalar locator `selects an unsupported value`, a rank-1 `[1]` float32
+  with exactly 4 content bytes (or float64 with 8) plus one typed value gives it `selects an
+  unsupported scalar encoding` and a tensor locator a value, rank 0 fails the tensor profile
+  with `selects an unsupported tensor encoding`, and a `[1,1]` float gives the scalar locator
+  `selects an unsupported value`.
 - Checker: every ladder row and byte-exact texts; six-kind caps; csv cap on 0.9; 128 MiB
   eligibility; digest, shape, dtype and count mismatches.
 - Adapter/CLI: flag matrix with 0.9 precedence; budget texts; tag texts; capability errors and
