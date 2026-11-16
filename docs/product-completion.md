@@ -1,0 +1,276 @@
+# RunGraph product completion contract
+
+Status: **living document, first issue 2026-11-16.** This is the authoritative record of what
+"complete" means for the primary RunGraph product, what is implemented today, and what
+evidence is required before a capability is called done. It records engineering facts only.
+
+The repository ships **RunEvidence** as the evidence-verification layer and grows it into
+**RunGraph**, the offline-first ML experiment evidence, provenance and analysis product.
+RunEvidence being feature-rich does not make RunGraph complete: the product is complete only
+when its capabilities work together through coherent interfaces, not when each part exists in
+isolation.
+
+---
+
+## 1. Product definition and boundary
+
+RunGraph answers questions about a body of recorded ML experiments, offline, using files as
+the only authority:
+
+1. What did each run record, and do those files still match it?
+2. Where did each recorded value, artifact and result come from?
+3. Which claims does the recorded evidence structure support or contradict, and which are
+   unsupported?
+4. What changed, what is missing, and which conclusions are affected?
+5. May these runs be compared at all under their recorded conditions?
+
+**RunEvidence V1 (the existing layer)** covers questions 1 and, within one manifest, 2–4. It
+records one `runevidence.json` per experiment folder and verifies it. It also ships
+**pairwise** cross-manifest checks: batch validation, semantic fingerprint comparison, the
+coverage/impact/review diff gates and condition comparability all take manifests from more
+than one experiment (comparability takes exactly one named pair).
+
+**RunGraph (the product)** additionally composes a whole body of experiments: discovery of
+many manifests as one workspace, stable member identities, a cross-manifest provenance graph,
+cross-manifest claims and evidence, impact that crosses manifest boundaries, cross-manifest
+comparison, and one consolidated report. It remains offline, file-based and CLI-first. No
+server, hosted service or graphical application is required.
+
+Pairwise checks are not composition. A diff between two named manifests is not a workspace,
+and it does not give a project-level answer.
+
+The boundary is deliberate. A single manifest's checks will not be described as a
+project-level guarantee, and a project-level report will not imply artifact integrity it did
+not verify. Recorded assertion, verified artifact integrity, verified source value,
+provenance, recorded-condition comparability and scientific validity stay distinct in every
+surface.
+
+---
+
+## 2. Capability matrix
+
+Status vocabulary: `NOT_STARTED`, `IN_PROGRESS`, `IMPLEMENTED` (code and focused tests
+exist), `VERIFIED` (focused plus full-suite evidence, with the proving tests named),
+`BLOCKED` (named external constraint), `COMPLETE` (verified and demonstrated end to end,
+with the qualification record). Two qualifiers are defined as follows:
+
+- `PARTIAL`: the capability works on a defined subset and the excluded subset is named.
+- `BOUNDED`: a limitation is deliberately accepted, is visible in the command output and
+  the docs, and does not change a claimed guarantee.
+
+"Evidence" names the artefact or test that justifies the status, not a promise.
+
+### 2.1 Recording and authoring
+
+| ID | Capability | Status | Acceptance criterion | Evidence |
+| --- | --- | --- | --- | --- |
+| A1 | Versioned manifest, frozen schemas, migration | VERIFIED | every frozen schema has a model, committed schema, freeze pin and docs page; migration is explicit and never infers | schemas 0.1–0.9 are frozen and pinned; `test_schema_freeze.py`, `test_cli_migrate.py` |
+| A2 | Generic folder ingestion | PARTIAL | a plain folder becomes a valid manifest with hashed artifacts and detected runs; a scan that finds nothing refuses with exit 2 instead of writing an empty manifest | generic adapter; `tests/test_adapters.py`, dogfood examples. **An empty folder currently writes a 0/0 manifest** (P0-4) |
+| A3 | Tool adapters (Hydra, MLflow file store, TensorBoard) | PARTIAL | each adapter discovers its real layout and records hashes; a scan that finds no files aborts with exit 2 and writes nothing; unreadable or unsafe *contents* inside an accepted layout are recorded as hashed artifacts with the extracted value omitted and a note, never silently dropped. A TensorBoard folder with files but no event files records them as artifacts and reports zero runs by design | adapter packages; `test_adapter_unreadable_integration.py`, `test_hydra_adapter.py`, `test_tensorboard_adapter.py`. **An empty folder writes a 0/0 manifest** (P0-4) |
+| A4 | Safe authoring of results, claims, evidence and relationships | NOT_STARTED | a user can add, edit and remove results, claims, evidence references and relationships from the CLI with validation, dry-run, stale-write protection and no hand-edited JSON; manifest-level objects are A4, workspace claims are D3 | artifacts and conditions are authorable; `rehash` refreshes locator-backed JSON values. Results, claims, evidence and relationships are hand-written |
+| A5 | Run-condition authoring | PARTIAL | strict patch, presence rules, dry-run, refusal writes nothing; works on every schema generation that carries the condition fields | `conditions`; currently accepts **schema 0.2 only** (`conditions_authoring.py` `TARGET_VERSION` gate), so 0.3–0.9 manifests are refused |
+| A6 | Code and environment provenance capture | NOT_STARTED | one command records the source revision (commit id) and an environment snapshot into the existing condition fields, offline. `source_revision` keeps its meaning; dirty state lives inside the environment snapshot. Values stay off the command line, the snapshot is opt-in and never includes credentials or environment variables the caller did not select | fields exist; capture does not. Depends on A5 covering the manifest's schema generation |
+| A7 | Safe mutation of an existing manifest | VERIFIED | byte-level stale-write detection on `add`, `rehash`, `migrate` and `conditions`, with atomic replacement; backup generations on `init --force`, `migrate` and `conditions`; cooperative admission lock where the host supports it; declared Windows limit. `init --force` regenerates with a backup but is not a compare-and-swap, and plain `add`/`rehash` do **not** keep a previous generation | `cli.py` `_finish_edit`, `save_raw`, `_backup_existing`; `manifest.py` `save_manifest`; `test_edit.py` |
+
+### 2.2 Evidence integrity
+
+| ID | Capability | Status | Acceptance criterion | Evidence |
+| --- | --- | --- | --- | --- |
+| B1 | File integrity and relocation | VERIFIED | missing, changed, moved, absolute, escaping and untracked paths are reported with stable codes and exit semantics | `tests/test_acceptance.py`, `tests/test_artifact_path_errors.py` |
+| B2 | Source-value verification | VERIFIED | supported locator kinds re-read the source under strict profiles with fixed refusals (schema 0.3 and later); the frozen 0.1/0.2 JSON-pointer path keeps its legacy `json.loads` behaviour, including its documented duplicate-key tolerance | `checks/results.py`, `locator_profiles.py`, `test_csv_checker.py`, schema locator tests |
+| B3 | Claim and evidence graph checks | VERIFIED | duplicate IDs, dangling edges, cycles, contradictions and claim-at-risk are reported | `checks/graph.py`, `tests/test_acceptance.py`, claim route tests |
+| B4 | Batch validation | VERIFIED | several manifests validate in order with per-manifest and aggregate counts | `validate-batch`; `tests/test_cli_batch_validation.py` |
+| B5 | Unreadable input handling | VERIFIED | unreadable adapter input is recorded, hashes retained, and never silently drops evidence | `tests/test_adapter_unreadable_integration.py` |
+| B6 | Directory artifacts | PARTIAL | a directory is recorded and re-verified as one artifact with a declared platform scope and guard rails; unsupported filesystems fail closed | read-only checking on Linux; guarded authoring on Linux/ext4; `--directory-artifacts` exists on `validate`/`inspect` but not on `validate-batch` |
+
+### 2.3 Analysis over one or two manifests
+
+| ID | Capability | Status | Acceptance criterion | Evidence |
+| --- | --- | --- | --- | --- |
+| C1 | Run and claim detail | VERIFIED | one run or claim can be inspected as text and machine-readable output | `run`, `claim`; route tests |
+| C2 | Provenance lineage | VERIFIED | a claim's recorded upstream dependency graph is returned with unresolved nodes and cycles named | `lineage`; route tests |
+| C3 | Impact analysis | VERIFIED | the claims potentially affected by a recorded object are returned with the dependency path | `impact`; route tests |
+| C4 | Structural coverage review | VERIFIED | unsupported, contradicted and uncited claims are flagged with explainable reasons | `coverage`, `coverage-gate`; route tests |
+| C5 | Cross-run comparison, matrix and leaderboard | VERIFIED | recorded values align by name with explicit non-numeric/missing accounting and no fairness claim; single manifest only | `compare`, `matrix`, `leaderboard`; route tests |
+| C6 | Recorded-condition comparability | IN_PROGRESS | five mandatory recorded conditions are compared for a named pair, with a stable preflight and a clearly experimental verdict, across 0.2 and every later schema generation that carries the fields (0.3–0.9, and 0.10 if it lands) | `comparability`; `run_comparability.py` refuses 0.3–0.9 today, so TensorBoard manifests cannot use it |
+| C7 | Evidence-aware comparison | NOT_STARTED | a comparison states whether recorded conditions permit it *and* whether the compared results are backed by intact, verified evidence; missing or changed artifacts, failed source-value checks and unverifiable values change the outcome instead of being ignored. The existing comparability function performs no artifact I/O and must not be presented as doing so | not started |
+| C8 | Change analysis between recorded snapshots | VERIFIED | two recorded manifests can be compared for semantic equality (`fingerprint`, `fingerprint-compare`) and for review-relevant differences (`coverage-diff`, `impact-diff`, `review-diff`, `review-gate`), with exit codes and machine-readable output; undocumented in the public command reference | `run_fingerprint*.py`, `run_*_diff.py`, `run_review_gate.py`; route tests |
+
+### 2.4 Cross-experiment composition (the RunGraph layer)
+
+| ID | Capability | Status | Acceptance criterion | Evidence |
+| --- | --- | --- | --- | --- |
+| D0 | Workspace document | NOT_STARTED | a versioned `rungraph.json`-style document names the members, assigns each a stable ID and path, and is created, validated and edited by documented commands with the same safety properties as manifest authoring. Discovery works without it and reports provisional IDs, but cross-manifest references require it | not started |
+| D1 | Workspace discovery over several manifests | NOT_STARTED | one command finds every manifest under a root and reports: each member's stable ID (from the workspace document when present, otherwise a deterministic provisional ID derived from its relative path), a duplicate when two discovered paths resolve to the same manifest file or the document assigns the same ID twice, and an unreadable member with its reason. It writes nothing. The check set matches `validate`, including directory artifacts when requested | not started; `validate-batch` has no directory-artifact flag today |
+| D2 | Cross-manifest provenance graph | NOT_STARTED | a cross-manifest identity is a qualified reference `(member-id, local-id)`, where the member ID comes from the workspace document, never from a manifest-local ID string; recorded relationships resolve across members, unresolved references are named rather than dropped, and cycles are detected across members | not started. The repository already warns that manifest-local IDs are not cross-manifest identities (`comparability-integration-rfc.md`) |
+| D3 | Cross-manifest claims and evidence | NOT_STARTED | a claim can cite a qualified `(member-id, local-id)` evidence reference in another member, and workspace-level claims can be authored, edited and removed by a documented command; validation reports present, unresolved and at-risk references across members without flagging a valid cross-member reference as dangling. Depends on D0 for the member IDs | not started |
+| D4 | Cross-manifest impact | NOT_STARTED | a change in one member lists the affected claims in every member with the path that carries the impact. Pairwise snapshot impact (`impact-diff`, `review-diff`) already exists for two named manifests; this capability is the workspace-wide version | `impact-diff`/`review-diff` pairwise only |
+| D5 | Consolidated report | NOT_STARTED | one command over a workspace reports, with an explicit baseline named for each section: (a) current recorded-versus-filesystem findings; (b) optional assertion changes against a named prior snapshot of each member; (c) per-claim evidence state; (d) cross-member impact. "Supported" here means only that the claim's cited evidence resolves and no error-level finding touches it; it is not scientific truth. Text and machine-readable forms agree | not started |
+| D6 | Cross-manifest comparison and ranking | NOT_STARTED | one command compares recorded values across members for a named metric or result name, applies the same missing/non-numeric accounting as the single-manifest surface, and states per pair whether recorded conditions permit the comparison; a leaderboard over members keeps the same honesty boundaries | `compare`/`matrix`/`leaderboard` are single-manifest only |
+
+### 2.5 Delivery, usability and qualification
+
+| ID | Capability | Status | Acceptance criterion | Evidence |
+| --- | --- | --- | --- | --- |
+| E1 | Discoverability for every public route | PARTIAL | every route appears in the README reference with purpose, inputs, outputs, exit codes and experimental status; a docs-contract test enforces it | 15 of 26 routes are absent from the command reference; `test_docs_contract.py` enforces only the TensorBoard schema/flag surface |
+| E2 | Examples covering every adapter and the composition layer | PARTIAL | each adapter and each product workflow has a runnable example, and a test keeps it clean | no TensorBoard or workspace example |
+| E3 | Packaging | PARTIAL | distributions build, contents and metadata are checked, and entry points resolve; a fresh-install run of the CLI and adapters is part of E6 | advisory job builds and inspects wheel/sdist and runs twine checks; it is not a required check and does not install the wheel |
+| E4 | Declared platform behaviour | PARTIAL | every platform-specific guarantee and its exclusion is stated; Windows CI stays green | POSIX locks; Linux/ext4 directory artifacts |
+| E5 | Machine-readable output | PARTIAL | every analysis route that offers JSON documents the envelope and keeps it stable; the sole text-only analysis mode, `comparability --preflight`, stays text-only by its frozen contract and must not gain JSON; write and diagnostic commands state whether they have a machine-readable form | analysis routes have `--json`, but envelope naming and versioning are not uniform; `init`, `rehash`, `add`, `schema` and `adapters` are text-only |
+| E6 | End-to-end acceptance harness | PARTIAL | a scripted, reproducible scenario exercises record → verify → analyse → compare → change → propagate → accept → revalidate → fresh install, with recorded commands, exit codes and expected versus observed results, plus negative paths | `test_acceptance.py` and the dogfood regression tests cover parts; no single workspace-level lifecycle run and no fresh-install run |
+| F1 | MLflow summary freshness (RE-10) | IN_PROGRESS | accepting changed MLflow bytes must not leave a recorded summary silently stale: `validate` verifies the summary against the file, and `rehash` refreshes it. The current NOTE reports that no re-read happened; it does not establish freshness. P0-1 requires this to reach `COMPLETE` | reproduced as a `validate --strict` exit 0 with a stale value |
+| F2 | MLflow metric memory (ML-1) | IN_PROGRESS | metric histories are read under a declared byte and row cap and an oversized history has a defined outcome. P0-2 requires this to reach `COMPLETE` | the adapter reads the whole file today |
+| F3 | Writer concurrency | BOUNDED | cooperative serialization where supported, and the exclusion is explicit everywhere else | documented limitation |
+| F4 | Resource and depth limits | VERIFIED | every scanner except the MLflow metric reader (F2) has a declared cap, and removing the cap makes a named test fail | `tests/test_tensorboard_tensors.py::test_one_million_elements_is_the_boundary`, `::test_sixteen_mib_summary_of_millions_of_empty_tensor_spans_stays_bounded`, `tests/test_csv_profile.py::test_columns_at_cap_and_one_over`, `::test_rows_at_cap_and_one_over` (the 16 MiB memory test is skipped on non-Linux hosts) |
+
+---
+
+## 3. Priority and sequencing
+
+Priority classes are a scheduling rule, not a permanent exclusion. P3 work may continue
+when it does not displace unresolved P0 or P1 work, and may be promoted when a P0/P1
+capability depends on it.
+
+### P0 — core correctness and evidence integrity
+
+1. **RE-10**: make the accepted-change path honest. `validate` must verify a recorded MLflow
+   summary against the metric file, and `rehash` must refresh it, through the owning adapter.
+   Accepting bytes while keeping a summary that was not re-read is not sufficient: refusing
+   acceptance would only force `init --force`, which drops hand-written claims. Refusal is
+   correct only when the metric file itself is unreadable or over its cap. RE-10 and ML-1 are
+   P0 and must reach `COMPLETE`; they may not be closed as `BOUNDED`.
+2. **ML-1**: bound MLflow metric-history reads (declared byte and row caps) and define the
+   oversized outcome.
+3. **False-clean probe**: for each command, exercise its documented success path with a
+   condition that should have failed; add a regression test for every defect found. Stop when
+   every documented success path has been probed once per capability class.
+4. **Empty scans report success (A2, A3)**: `init` currently writes a 0-file manifest with
+   exit 0 for an empty folder (generic and TensorBoard). A scan that finds no files must
+   refuse with exit 2 and write nothing, as the adapter contract already requires. A
+   TensorBoard folder that holds files but no event files keeps its delivered behaviour
+   (artifacts recorded, zero runs) and reports that fact.
+
+### P1 — missing primary capabilities
+
+5. **Composition core (D0–D6)**: a versioned workspace document with stable member IDs,
+   workspace discovery, a global provenance graph, cross-manifest claims and evidence,
+   cross-manifest impact, cross-manifest `compare`/`matrix`/`leaderboard`, and one
+   consolidated report. Read-only first; authoring of the document and of workspace claims
+   follows. The workspace document is required from the start because a cross-member
+   reference has no valid meaning without a qualified identity; it is a separate versioned
+   format, never a change to a frozen manifest schema.
+6. **Condition and comparability coverage (A5, C6)**: extend condition authoring and the
+   comparability preflight/verdict from the 0.2 projection to every schema generation that
+   carries the condition fields (0.3–0.9, and 0.10 if it lands). This is a dependency of the
+   comparison workflow: a TensorBoard manifest cannot currently record conditions or be
+   compared, so the product's own main adapters sit outside its comparison surface. It must
+   not change any frozen reading rule or existing output.
+7. **Authoring (A4, D3)**: CLI authoring for results, claims, evidence references and
+   relationships in a manifest, and for workspace-level claims, with the same safety
+   properties as artifact authoring.
+8. **Code/environment capture (A6)**: record source revision and an opt-in environment
+   snapshot from the working tree and interpreter, offline, without changing what
+   `source_revision` means and without capturing credentials.
+9. **Evidence-aware comparison (C7)**: combine comparability with the artifact and
+   source-value verification outcome, so a comparison states both whether recorded
+   conditions permit it and whether the evidence behind each value is intact; a missing or
+   changed artifact, a failed value check or an unverifiable result must change the outcome
+   and be named. It must never imply scientific validity.
+10. **Documentation of the whole surface (E1) and the end-to-end harness (E6)**: these are
+    P1 because `COMPLETE` requires capability evidence through documented commands. Their
+    implementation can follow the composition work, but they are completion blockers, not
+    optional polish.
+
+### P2 — integration, usability and release readiness
+
+11. **Examples (E2)**: a TensorBoard example and a composition example, kept clean by tests.
+12. **Output and interface consistency (E5)**: document and stabilize the JSON envelopes; do
+    not add JSON to `comparability --preflight`, which is text-only by its frozen contract.
+13. **Platform statements (E4)** and packaging updates for any new entry point (E3). Both are
+    completion blockers under criterion 7, with the same status as E1 and E6.
+
+### P3 — additional sophistication (permitted, not blocking)
+
+- TF2 media schema 0.10, TF2 `[k,3]` histograms, plugin-specific summaries, graph/run
+  metadata, additional adapters, richer comparison statistics, SQLite persistence (subject
+  to its hold), extra platform guarantees.
+
+### Documentation and truthfulness
+
+The README roadmap lists the adapters, single-manifest analysis, condition authoring,
+directory artifacts and comparability under "Delivered", which states availability: they
+exist and are usable. Availability is not a completion claim, and this document marks several
+of them `PARTIAL` or `IN_PROGRESS` for named limitations. When this contract merges, those
+limitations must also be discoverable from the public docs; that is part of E1, which also
+covers the 15 of 26 routes still absent from the command reference. Documentation must not
+describe a capability as complete while its acceptance criteria here are unmet.
+
+---
+
+## 4. Completion criteria
+
+The primary product is complete only when all of the following hold, each with recorded
+evidence:
+
+1. The intended core scope is defined here and is defensible from the repository's own design
+   history.
+2. Every capability marked P0/P1 above is `COMPLETE`, or is `BOUNDED`/`BLOCKED` with a named
+   constraint, a visible bound and an entry in §2 that records it. A P0 item may not be
+   closed as `BOUNDED` unless the bound is visible in the command output and the docs, and
+   RE-10 and ML-1 must reach `COMPLETE`.
+3. Those capabilities function together in the workflows in §5 through documented commands.
+4. The evidence-integrity and provenance guarantees each have tests that fail when the
+   guarantee is broken.
+5. Known correctness problems affecting an essential workflow are resolved or bounded
+   consistently with criterion 2.
+6. A realistic multi-run, multi-tool experiment demonstrates the whole workflow, including
+   deliberate evidence corruption and its propagation.
+7. Installation from a clean clone, packaging and the supported platform matrix are verified.
+8. The completion evidence is recorded, reproducible, and available for independent
+   assessment; every unresolved objection is recorded.
+9. Outstanding limitations are listed and distinguished from completed functionality.
+10. No unresolved blocker contradicts this document's status claims.
+
+Passing tests alone do not satisfy this contract, and neither does a larger test count.
+
+---
+
+## 5. Intended user workflows
+
+These are the workflows acceptance tests must exercise together.
+
+- **W1 Record.** Point RunGraph at a folder or a tool's output; get a valid manifest; author
+  the numbers, claims and links that matter; accept intended changes safely.
+- **W2 Verify.** Ask whether the evidence still holds: files, values, graph, claims.
+- **W3 Explain.** Ask why a claim is supported, contradicted, at risk or unsupported, and
+  which recorded objects it depends on.
+- **W4 Compare.** Ask which runs may be compared under recorded conditions and see their
+  recorded values side by side, with the limits of that comparison stated.
+- **W5 Compose.** Ask project-level questions across several experiments: what exists, how it
+  is connected, and where the same evidence or claim is shared.
+- **W6 Attribute impact.** Change one piece of evidence and ask which claims, in which
+  experiments, are now affected, with the dependency path.
+- **W7 Report.** Produce one consolidated, reproducible report stating, for each claim, whether
+  its cited evidence resolves and whether any error-level finding touches it, alongside what
+  changed against a named baseline and what needs review, in text and machine-readable form.
+  This is an evidence state, not a statement that the claim is scientifically true.
+
+---
+
+## 6. Status discipline
+
+- A capability moves to `IMPLEMENTED` only when code and focused tests exist.
+- It moves to `VERIFIED` only after the full suite passes on the supported Python versions.
+- It moves to `COMPLETE` only after the workflow-level evidence in §4 exists.
+- Regressions move a status back. A status is never inferred from code existing alone.
+- Every status change records the command or test that justifies it.
+- This document is updated with each milestone.
+
+---
+
+## 7. Explicit non-goals
+
+No experiment tracker, dashboard, web UI or server. No training, job launching, GPU use or
+network access. No model-weight loading or execution. No claim that structural consistency
+establishes scientific truth. Publication, tagging and version bumps are outside this
+contract. No change to a frozen, pinned schema's meaning.

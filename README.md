@@ -22,8 +22,10 @@ with any ML stack because it only looks at files.
 
 RunEvidence is V1 of the **RunGraph** project. Schema 0.2, migration and
 conditions authoring are stable; recorded-condition comparability has an
-experimental verdict CLI with a read-only readiness preflight. Lineage and the
-rest of RunGraph are still planned. See [Roadmap](#roadmap).
+experimental verdict CLI with a read-only readiness preflight. Single-manifest
+lineage, impact, coverage, review gates and fingerprints are delivered;
+composing several experiments is the remaining RunGraph work. See the
+[product completion contract](docs/product-completion.md) and [Roadmap](#roadmap).
 
 ---
 
@@ -1005,6 +1007,17 @@ stays free of tool dependencies:
   File-store only: no tracking server, database or remote artifacts. Metric
   text files are hash-checked; JSON value locators do not apply to them.
 
+- **`tensorboard`** ([packages/runevidence-tensorboard](https://github.com/shihaab453/rungraph/tree/main/packages/runevidence-tensorboard)):
+  reads `.tfevents` event files directly, without TensorFlow, and records
+  scalars, string tensors, histograms, image/audio references and numeric
+  tensor digests under opt-in flags. See the
+  [TensorBoard guide](https://github.com/shihaab453/rungraph/blob/main/docs/tensorboard-guide.md).
+
+  ```bash
+  pip install -e . -e ./packages/runevidence-tensorboard
+  runevidence init --adapter tensorboard path/to/logdir
+  ```
+
 See [docs/adapters.md](https://github.com/shihaab453/rungraph/blob/main/docs/adapters.md) for format details, limits and how to
 write an adapter for your tool.
 
@@ -1206,23 +1219,28 @@ launching or GPU use. No network access. No loading of model weights.
 
 ## Roadmap
 
-RunEvidence is the first layer of **RunGraph**. Schema 0.2, migration and
-conditions authoring are stable. Recorded-condition comparability (did both
-runs record the same data, split and code?) still has an experimental verdict
-CLI; its read-only readiness preflight is the supported discovery/readiness
-check, while the comparison verdict remains experimental.
-Directory artifacts are delivered: read-only checking through
-`validate`/`inspect --directory-artifacts` on Linux, and guarded authoring through
-`add --directory` / `rehash --directory` on Linux/ext4. YAML manifests are
-deferred for now: JSON remains the authority, and the
+RunEvidence is the first layer of **RunGraph**. The primary-product scope,
+capability status and completion criteria are recorded in
+[docs/product-completion.md](docs/product-completion.md).
+
+Delivered: versioned schemas 0.1–0.9 with frozen reading rules and migration;
+generic, Hydra, MLflow file-store and TensorBoard adapters; file, value and
+claim verification; batch validation; single-manifest analysis (run and claim
+detail, lineage, impact, coverage, review gates, fingerprints, comparison,
+metric matrix and leaderboard); guarded artifact authoring and condition
+authoring; directory artifacts; and a stable comparability preflight with an
+experimental comparison verdict.
+
+Remaining primary-product work: composing several experiments (cross-manifest
+provenance, claims, impact and one consolidated report); safe authoring for
+results, claims, evidence and relationships; code and environment capture;
+evidence-aware comparison; and the documentation, examples and end-to-end
+qualification that make the whole surface discoverable. Two known MLflow
+limitations (summary freshness after an accepted metric-file change, and
+unbounded metric-history memory) are tracked in the completion contract.
+YAML manifests remain deferred: JSON is the authority, and the
 [decision memo](https://github.com/shihaab453/rungraph/blob/main/docs/manifest-format-yaml-decision-memo.md)
-records why. [Locator slice B](https://github.com/shihaab453/rungraph/blob/main/docs/verified-value-locators-rfc.md)
-is delivered (2026-11-13): schema 0.3 verifies string JSON pointers and structured JSONL
-locators through one protected snapshot, with strict profiles, fixed findings
-and claim propagation. Slice C is delivered (2026-11-14): schema 0.4 adds
-verified numeric `csv-cell` locators under a strict CSV profile, with privacy
-and a documented migration path, without changing 0.1/0.2/0.3. TensorBoard,
-other adapters and cross-run lineage remain later work.
+records why.
 
 ## Development
 
