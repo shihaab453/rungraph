@@ -33,8 +33,10 @@ of it.  The merged ``summary`` cap uses O(1) state only.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import struct
+import zlib
 from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable, Iterator, NoReturn
@@ -1562,3 +1564,624 @@ def _string_results(states):
         else:
             results[key] = StringSelection(ScalarOutcome.mismatch)
     return results
+
+
+# --- Schema 0.8: image and audio references ---------------------------------
+
+MAX_MEDIA_VALUE_BYTES = 16 * 1024 * 1024
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_AUDIO_CONTENT_TYPES = (None, b"", b"audio/wav")
+
+
+@dataclass(slots=True)
+class _ImageState:
+    present: bool = False
+    failed: bool = False
+    wire_width: int = 0
+    wire_height: int = 0
+    encoded: tuple[int, int] | None = None
+
+
+@dataclass(slots=True)
+class _AudioState:
+    present: bool = False
+    failed: bool = False
+    content_type: bytes | None = None
+    encoded: tuple[int, int] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _MediaResult:
+    present: bool
+    value: dict | None
+
+
+def _read_varint_lenient(data, position, end):
+    try:
+        return _read_varint(data, position, end)
+    except EventFileError:
+        return None
+
+
+def _read_u32be(data, position):
+    return int.from_bytes(data[position : position + 4], "big")
+
+
+def _read_u32le(data, position):
+    return int.from_bytes(data[position : position + 4], "little")
+
+
+def _signed_int32(raw: int) -> int:
+    raw &= 0xFFFFFFFF
+    return raw - (1 << 32) if raw >= (1 << 31) else raw
+
+
+def _decode_image_part(data, start, end, state) -> bool:
+    position = start
+    while position < end:
+        key = _read_key_lenient(data, position, end)
+        if key is None:
+            return False
+        field, wire, position = key
+        if field == 1 and wire == 0:
+            read = _read_varint_lenient(data, position, end)
+            if read is None:
+                return False
+            raw, position = read
+            state.wire_height = _signed_int32(raw)
+        elif field == 2 and wire == 0:
+            read = _read_varint_lenient(data, position, end)
+            if read is None:
+                return False
+            raw, position = read
+            state.wire_width = _signed_int32(raw)
+        elif field == 3 and wire == 0:
+            read = _read_varint_lenient(data, position, end)
+            if read is None:
+                return False
+            _, position = read
+        elif field == 4 and wire == 2:
+            try:
+                payload_start, payload_end = _read_length(data, position, end)
+            except EventFileError:
+                return False
+            state.encoded = (payload_start, payload_end)
+            position = payload_end
+        else:
+            try:
+                position = _skip_field(data, position, end, wire)
+            except EventFileError:
+                return False
+    return True
+
+
+def _decode_audio_part(data, start, end, state) -> bool:
+    position = start
+    while position < end:
+        key = _read_key_lenient(data, position, end)
+        if key is None:
+            return False
+        field, wire, position = key
+        if field == 1 and wire == 5:
+            if end - position < 4:
+                return False
+            position += 4
+        elif field in (2, 3) and wire == 0:
+            read = _read_varint_lenient(data, position, end)
+            if read is None:
+                return False
+            _, position = read
+        elif field == 4 and wire == 2:
+            try:
+                payload_start, payload_end = _read_length(data, position, end)
+            except EventFileError:
+                return False
+            state.encoded = (payload_start, payload_end)
+            position = payload_end
+        elif field == 5 and wire == 2:
+            try:
+                value_start, value_end = _read_length(data, position, end)
+            except EventFileError:
+                return False
+            if value_end - value_start > 64:
+                return False
+            state.content_type = bytes(data[value_start:value_end])
+            position = value_end
+        else:
+            try:
+                position = _skip_field(data, position, end, wire)
+            except EventFileError:
+                return False
+    return True
+
+
+def _finalize_image(data, state) -> dict | None:
+    if state.failed or state.encoded is None:
+        return None
+    start, end = state.encoded
+    size = end - start
+    if not (1 <= size <= MAX_MEDIA_VALUE_BYTES) or size < 33:
+        return None
+    if bytes(data[start : start + 8]) != _PNG_SIGNATURE:
+        return None
+    if _read_u32be(data, start + 8) != 13:
+        return None
+    if bytes(data[start + 12 : start + 16]) != b"IHDR":
+        return None
+    ihdr = bytes(data[start + 16 : start + 33])
+    if (zlib.crc32(b"IHDR" + ihdr[:13]) & 0xFFFFFFFF) != int.from_bytes(
+        ihdr[13:17], "big"
+    ):
+        return None
+    width = int.from_bytes(ihdr[0:4], "big")
+    height = int.from_bytes(ihdr[4:8], "big")
+    if not (1 <= width <= 65_535 and 1 <= height <= 65_535):
+        return None
+    position = start + 8
+    idat_nonempty = False
+    seen_iend = False
+    while position < end:
+        if end - position < 12:
+            return None
+        length = _read_u32be(data, position)
+        if length > 2**31 - 1:
+            return None
+        chunk_type = bytes(data[position + 4 : position + 8])
+        data_end = position + 8 + length
+        crc_end = data_end + 4
+        if crc_end > end:
+            return None
+        if chunk_type == b"IHDR" and position != start + 8:
+            return None
+        if chunk_type == b"IDAT" and length > 0:
+            idat_nonempty = True
+        if chunk_type == b"IEND":
+            if length != 0 or crc_end != end:
+                return None
+            seen_iend = True
+            position = crc_end
+            break
+        position = crc_end
+    if not seen_iend or not idat_nonempty:
+        return None
+    if state.wire_width not in (0, width) or state.wire_height not in (0, height):
+        return None
+    digest = hashlib.sha256(memoryview(data)[start:end]).hexdigest()
+    return {
+        "kind": "image",
+        "media_type": "image/png",
+        "sha256": digest,
+        "size_bytes": size,
+        "width": width,
+        "height": height,
+    }
+
+
+def _finalize_audio(data, state) -> dict | None:
+    if state.failed or state.encoded is None:
+        return None
+    start, end = state.encoded
+    size = end - start
+    if not (12 <= size <= MAX_MEDIA_VALUE_BYTES):
+        return None
+    if state.content_type not in _AUDIO_CONTENT_TYPES:
+        return None
+    if bytes(data[start : start + 4]) != b"RIFF":
+        return None
+    if _read_u32le(data, start + 4) != size - 8:
+        return None
+    if bytes(data[start + 8 : start + 12]) != b"WAVE":
+        return None
+    position = start + 12
+    first = True
+    data_chunks = 0
+    while position < end:
+        if end - position < 8:
+            return None
+        chunk_type = bytes(data[position : position + 4])
+        length = _read_u32le(data, position + 4)
+        data_end = position + 8 + length
+        if data_end > end:
+            return None
+        if first:
+            if chunk_type != b"fmt " or length < 16:
+                return None
+            first = False
+        if chunk_type == b"data":
+            if length < 1:
+                return None
+            data_chunks += 1
+        pad = length % 2
+        if data_end + pad > end:
+            return None
+        position = data_end + pad
+    if position != end or first or data_chunks != 1:
+        return None
+    digest = hashlib.sha256(memoryview(data)[start:end]).hexdigest()
+    return {
+        "kind": "audio",
+        "media_type": "audio/wav",
+        "sha256": digest,
+        "size_bytes": size,
+    }
+
+
+def _parse_value_08(data, start, end, step):
+    tag_start = -1
+    tag_end = -1
+    kind = 0
+    simple_value = 0.0
+    tensor_restart = start
+    hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+    hist_limits: list[float] = []
+    hist_counts: list[float] = []
+    hist_present = False
+    hist_failed = False
+    image = _ImageState()
+    audio = _AudioState()
+    position = start
+    while position < end:
+        field_number, wire_type, position = _read_key(data, position, end)
+        if field_number == 1:
+            if wire_type != 2:
+                _refuse()
+            tag_start, tag_end = _read_length(data, position, end)
+            position = tag_end
+        elif field_number == 2:
+            if wire_type != 5 or end - position < 4:
+                _refuse()
+            simple_value = _F32.unpack_from(data, position)[0]
+            kind = 2
+            tensor_restart = position + 4
+            hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+            hist_limits = []
+            hist_counts = []
+            hist_present = False
+            hist_failed = False
+            image = _ImageState()
+            audio = _AudioState()
+            position += 4
+        elif field_number in (3, 5, 8):
+            if wire_type != 2:
+                _refuse()
+            payload_start, payload_end = _read_length(data, position, end)
+            kind = field_number
+            if field_number != 8:
+                tensor_restart = payload_end
+            hist_present = field_number == 5
+            if field_number != 5:
+                hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+                hist_limits = []
+                hist_counts = []
+                hist_failed = False
+            elif not hist_failed:
+                hist_values, hist_limits, hist_counts, ok = _decode_histogram_part(
+                    data,
+                    payload_start,
+                    payload_end,
+                    hist_values,
+                    hist_limits,
+                    hist_counts,
+                )
+                hist_failed = not ok
+            image = _ImageState()
+            audio = _AudioState()
+            position = payload_end
+        elif field_number == 4:
+            if wire_type != 2:
+                _refuse()
+            payload_start, payload_end = _read_length(data, position, end)
+            kind = 4
+            tensor_restart = payload_end
+            image.present = True
+            if not image.failed:
+                image.failed = not _decode_image_part(
+                    data, payload_start, payload_end, image
+                )
+            hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+            hist_limits = []
+            hist_counts = []
+            hist_present = False
+            hist_failed = False
+            audio = _AudioState()
+            position = payload_end
+        elif field_number == 6:
+            if wire_type != 2:
+                _refuse()
+            payload_start, payload_end = _read_length(data, position, end)
+            kind = 6
+            tensor_restart = payload_end
+            audio.present = True
+            if not audio.failed:
+                audio.failed = not _decode_audio_part(
+                    data, payload_start, payload_end, audio
+                )
+            hist_values = [0.0, 0.0, 0.0, 0.0, 0.0]
+            hist_limits = []
+            hist_counts = []
+            hist_present = False
+            hist_failed = False
+            image = _ImageState()
+            position = payload_end
+        elif field_number == 7:
+            if wire_type != 2:
+                _refuse()
+            _, position = _read_length(data, position, end)
+        elif field_number == 9:
+            if wire_type != 2:
+                _refuse()
+            _, position = _read_length(data, position, end)
+        else:
+            position = _skip_field(data, position, end, wire_type)
+    tensor = None
+    if kind == 8:
+        tensor = _TensorState()
+        _scan_tensor_region(data, tensor_restart, end, tensor, strings=True)
+    hist = _MediaResult(
+        hist_present,
+        _finalize_histogram(hist_values, hist_limits, hist_counts, hist_failed)
+        if hist_present
+        else None,
+    )
+    image_result = _MediaResult(
+        image.present, _finalize_image(data, image) if image.present else None
+    )
+    audio_result = _MediaResult(
+        audio.present, _finalize_audio(data, audio) if audio.present else None
+    )
+    return (
+        tag_start,
+        tag_end,
+        step,
+        kind,
+        simple_value,
+        tensor,
+        hist,
+        image_result,
+        audio_result,
+    )
+
+
+def _iter_summary_values_08(data, start, end, step):
+    position = start
+    while position < end:
+        field_number, wire_type, position = _read_key(data, position, end)
+        if field_number == 1:
+            if wire_type != 2:
+                _refuse()
+            value_start, value_end = _read_length(data, position, end)
+            yield _parse_value_08(data, value_start, value_end, step)
+            position = value_end
+        else:
+            position = _skip_field(data, position, end, wire_type)
+
+
+def _iter_winning_summaries_08(data, start, end, step):
+    position = start
+    while position < end:
+        field_number, wire_type, position = _read_key(data, position, end)
+        if field_number == 5:
+            if wire_type != 2:
+                _refuse()
+            summary_start, summary_end = _read_length(data, position, end)
+            yield from _iter_summary_values_08(data, summary_start, summary_end, step)
+            position = summary_end
+        else:
+            position = _skip_field(data, position, end, wire_type)
+
+
+def _iter_event_values_08(data, start, end):
+    step = 0
+    what = 0
+    last_other_end = start
+    summary_bytes = 0
+    position = start
+    while position < end:
+        field_number, wire_type, position = _read_key(data, position, end)
+        if field_number == 1:
+            if wire_type != 1 or end - position < 8:
+                _refuse()
+            position += 8
+        elif field_number == 2:
+            if wire_type != 0:
+                _refuse()
+            raw, position = _read_varint(data, position, end)
+            step = _signed_int64(raw)
+        elif 3 <= field_number <= 9:
+            if wire_type != 2:
+                _refuse()
+            payload_start, payload_end = _read_length(data, position, end)
+            if field_number == 5:
+                what = 5
+                summary_bytes += payload_end - payload_start
+            else:
+                what = field_number
+                last_other_end = payload_end
+                summary_bytes = 0
+            position = payload_end
+        else:
+            position = _skip_field(data, position, end, wire_type)
+    if what != 5:
+        return
+    if summary_bytes > MAX_SUMMARY_BYTES:
+        _refuse()
+    yield from _iter_winning_summaries_08(data, last_other_end, end, step)
+
+
+@dataclass(frozen=True, slots=True)
+class ImageRecord:
+    tag: bytes
+    step: int
+    value: dict
+
+
+@dataclass(frozen=True, slots=True)
+class AudioRecord:
+    tag: bytes
+    step: int
+    value: dict
+
+
+@dataclass(frozen=True, slots=True)
+class MediaSelection:
+    outcome: ScalarOutcome
+    value: dict | None = None
+
+
+def _iter_winning_values_08(data):
+    for payload_start, payload_end in _iter_records(data):
+        yield from _iter_event_values_08(data, payload_start, payload_end)
+
+
+def iter_supported_summaries_08(data):
+    """Yield every supported 0.8 summary in file order.
+
+    Scalars, strings, histograms, images and audio are yielded for every entry;
+    the adapter applies the ``--include-*`` filters.
+    """
+    for (
+        tag_start,
+        tag_end,
+        step,
+        kind,
+        simple_value,
+        tensor,
+        hist,
+        image,
+        audio,
+    ) in _iter_winning_values_08(data):
+        tag = _tag_bytes(data, tag_start, tag_end)
+        category, value, float32 = _classify(data, kind, simple_value, tensor)
+        if category == _SUPPORTED:
+            yield ScalarRecord(tag=tag, step=step, value=value, float32=float32)
+        string_category, raw = _classify_string(data, kind, tensor)
+        if string_category == _STRING_SUPPORTED:
+            yield StringRecord(tag=tag, step=step, value=raw)
+        if kind == 5 and hist.present and hist.value is not None:
+            yield HistogramRecord(tag=tag, step=step, value=hist.value)
+        if kind == 4 and image.present and image.value is not None:
+            yield ImageRecord(tag=tag, step=step, value=image.value)
+        if kind == 6 and audio.present and audio.value is not None:
+            yield AudioRecord(tag=tag, step=step, value=audio.value)
+
+
+def _media_results(states):
+    results: dict[tuple[bytes, int, int], MediaSelection] = {}
+    for key, state in states.items():
+        occurrence = key[2]
+        if occurrence >= 0 and state.supported > occurrence:
+            results[key] = MediaSelection(ScalarOutcome.value, state.values[occurrence])
+        elif state.supported:
+            results[key] = MediaSelection(ScalarOutcome.mismatch)
+        elif state.unsupported:
+            results[key] = MediaSelection(ScalarOutcome.unsupported_scalar)
+        elif state.non_scalar:
+            results[key] = MediaSelection(ScalarOutcome.unsupported_value)
+        else:
+            results[key] = MediaSelection(ScalarOutcome.mismatch)
+    return results
+
+
+def scan_tensorboard_08(
+    data,
+    scalar_requests,
+    string_requests,
+    histogram_requests,
+    image_requests,
+    audio_requests,
+):
+    """Select scalar, string, histogram, image and audio requests in one pass."""
+    scalar_states, scalar_by_tag, scalar_lengths = _normalise_requests(scalar_requests)
+    string_states, string_by_tag, string_lengths = _normalise_requests(string_requests)
+    hist_states, hist_by_tag, hist_lengths = _normalise_requests(histogram_requests)
+    image_states, image_by_tag, image_lengths = _normalise_requests(image_requests)
+    audio_states, audio_by_tag, audio_lengths = _normalise_requests(audio_requests)
+    if not (
+        scalar_states
+        or string_states
+        or hist_states
+        or image_states
+        or audio_states
+    ):
+        return {}, {}, {}, {}, {}
+
+    for (
+        tag_start,
+        tag_end,
+        step,
+        kind,
+        simple_value,
+        tensor,
+        hist,
+        image,
+        audio,
+    ) in _iter_winning_values_08(data):
+        tag_length = 0 if tag_start < 0 else tag_end - tag_start
+        tag = b"" if tag_start < 0 else data[tag_start:tag_end]
+        if type(tag) is not bytes:
+            tag = bytes(tag)
+
+        scalar_state = None
+        if tag_length in scalar_lengths:
+            by_step = scalar_by_tag.get(tag)
+            if by_step is not None:
+                scalar_state = by_step.get(step)
+        if scalar_state is not None:
+            category, value, float32 = _classify(data, kind, simple_value, tensor)
+            if category == _SUPPORTED:
+                occurrence = scalar_state.supported
+                scalar_state.supported += 1
+                if occurrence in scalar_state.wanted:
+                    scalar_state.values[occurrence] = (value, float32)
+            elif category == _UNSUPPORTED_SCALAR:
+                scalar_state.unsupported = True
+            else:
+                scalar_state.non_scalar = True
+
+        string_state = None
+        if tag_length in string_lengths:
+            by_step = string_by_tag.get(tag)
+            if by_step is not None:
+                string_state = by_step.get(step)
+        if string_state is not None:
+            category, raw = _classify_string(data, kind, tensor)
+            if category == _STRING_SUPPORTED:
+                occurrence = string_state.supported
+                string_state.supported += 1
+                if occurrence in string_state.wanted:
+                    string_state.values[occurrence] = raw
+            elif category == _STRING_FAILING:
+                string_state.unsupported = True
+            else:
+                string_state.non_scalar = True
+
+        for states_by_tag, lengths, field_kind, result, label in (
+            (hist_by_tag, hist_lengths, 5, hist, "histogram"),
+            (image_by_tag, image_lengths, 4, image, "image"),
+            (audio_by_tag, audio_lengths, 6, audio, "audio"),
+        ):
+            state = None
+            if tag_length in lengths:
+                by_step = states_by_tag.get(tag)
+                if by_step is not None:
+                    state = by_step.get(step)
+            if state is None:
+                continue
+            if kind == field_kind and result.present:
+                if result.value is not None:
+                    occurrence = state.supported
+                    state.supported += 1
+                    if occurrence in state.wanted:
+                        state.values[occurrence] = result.value
+                else:
+                    state.unsupported = True
+            else:
+                state.non_scalar = True
+
+    return (
+        _scalar_results(scalar_states),
+        _string_results(string_states),
+        _media_results(hist_states),
+        _media_results(image_states),
+        _media_results(audio_states),
+    )

@@ -412,6 +412,16 @@ def display_locator(locator: Any, *, limit: int = 200) -> str:
                 f"tensorboard-histogram:step={locator.get('step')},"
                 f"occurrence={locator.get('occurrence')}"
             )
+        if locator.get("kind") == "tensorboard-image":
+            return (
+                f"tensorboard-image:step={locator.get('step')},"
+                f"occurrence={locator.get('occurrence')}"
+            )
+        if locator.get("kind") == "tensorboard-audio":
+            return (
+                f"tensorboard-audio:step={locator.get('step')},"
+                f"occurrence={locator.get('occurrence')}"
+            )
         prefix, payload = f"jsonl:{locator.get('line')}#", str(locator.get('pointer', ''))
     elif getattr(locator, "kind", None) == "csv-cell":
         return f"csv-cell:{locator.row},{locator.column}"
@@ -425,6 +435,16 @@ def display_locator(locator: Any, *, limit: int = 200) -> str:
     elif getattr(locator, "kind", None) == "tensorboard-histogram":
         return (
             f"tensorboard-histogram:step={locator.step},"
+            f"occurrence={locator.occurrence}"
+        )
+    elif getattr(locator, "kind", None) == "tensorboard-image":
+        return (
+            f"tensorboard-image:step={locator.step},"
+            f"occurrence={locator.occurrence}"
+        )
+    elif getattr(locator, "kind", None) == "tensorboard-audio":
+        return (
+            f"tensorboard-audio:step={locator.step},"
             f"occurrence={locator.occurrence}"
         )
     else:

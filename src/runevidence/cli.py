@@ -61,6 +61,7 @@ from .models import (
     Manifest05,
     Manifest06,
     Manifest07,
+    Manifest08,
     backup_generation,
     json_schema,
 )
@@ -917,6 +918,14 @@ INIT_0_7_REFUSAL = (
 )
 
 
+INIT_0_8_REFUSAL = (
+    "ERROR: the existing manifest declares schema 0.8. init --force would regenerate the "
+    "manifest and cannot carry over first-class values or locators. Nothing was written. "
+    "Move the manifest aside, run init, then run runevidence migrate PATH --to 0.8 (unless "
+    "the adapter writes 0.8 itself) and reapply the first-class values and locators."
+)
+
+
 def _declared_manifest_version(path: Path):
     """Read only the declared schema_version, without validating the manifest."""
     try:
@@ -935,12 +944,16 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         print(f"ERROR: {out} already exists. Use --force to overwrite it.")
         return EXIT_INVALID
     declared = _declared_manifest_version(out) if out.exists() else None
-    if out.exists() and args.force and declared in ("0.2", "0.3", "0.4", "0.5", "0.6", "0.7"):
+    if out.exists() and args.force and declared in (
+        "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8"
+    ):
         # Refuse before adapter discovery, backup creation or any write: a raw
         # 0.2/0.3/0.4/0.5 declaration means hand-entered data (or a would-be
         # downgrade) is at risk. An unparseable manifest keeps the legacy
         # backup-and-replace path below.
-        if declared == "0.7":
+        if declared == "0.8":
+            print(INIT_0_8_REFUSAL)
+        elif declared == "0.7":
             print(INIT_0_7_REFUSAL)
         elif declared == "0.6":
             print(INIT_0_6_REFUSAL)
@@ -987,6 +1000,34 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
                 "Nothing was written."
             )
             return EXIT_INVALID
+    include_images = bool(getattr(args, "include_images", False))
+    if include_images:
+        if not getattr(adapter, "supports_include_images", False):
+            print(
+                f"ERROR: adapter {adapter.name!r} does not support --include-images. "
+                "Nothing was written."
+            )
+            return EXIT_INVALID
+        if not _accepts_keyword(adapter, "include_images"):
+            print(
+                f"ERROR: adapter {adapter.name!r} cannot apply --include-images. "
+                "Nothing was written."
+            )
+            return EXIT_INVALID
+    include_audio = bool(getattr(args, "include_audio", False))
+    if include_audio:
+        if not getattr(adapter, "supports_include_audio", False):
+            print(
+                f"ERROR: adapter {adapter.name!r} does not support --include-audio. "
+                "Nothing was written."
+            )
+            return EXIT_INVALID
+        if not _accepts_keyword(adapter, "include_audio"):
+            print(
+                f"ERROR: adapter {adapter.name!r} cannot apply --include-audio. "
+                "Nothing was written."
+            )
+            return EXIT_INVALID
     patterns = list(getattr(args, "tags", None) or [])
     tag_filter = None
     if patterns:
@@ -1014,6 +1055,10 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
             extra["include_strings"] = True
         if include_histograms:
             extra["include_histograms"] = True
+        if include_images:
+            extra["include_images"] = True
+        if include_audio:
+            extra["include_audio"] = True
         manifest = adapter.extract(
             root,
             discovery,
@@ -1058,7 +1103,16 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         return EXIT_INVALID
     if tag_filter is not None:
         for pattern in tag_filter.unmatched_patterns():
-            kind = "summary" if (include_strings or include_histograms) else "scalar"
+            kind = (
+                "summary"
+                if (
+                    include_strings
+                    or include_histograms
+                    or include_images
+                    or include_audio
+                )
+                else "scalar"
+            )
             print(
                 "WARNING: --tags pattern "
                 f"{ascii(pattern)} matches no representable supported {kind} tag"
@@ -1087,8 +1141,8 @@ _MIGRATE_ERROR_TEXT = {
     ),
     "UNSUPPORTED_TARGET": (
         "ERROR (UNSUPPORTED_TARGET): only --to 0.2, --to 0.3, --to 0.4, --to 0.5, "
-        "--to 0.6 or --to 0.7 is supported; downgrade and other versions are not available. "
-        "Nothing was written."
+        "--to 0.6, --to 0.7 or --to 0.8 is supported; downgrade and other versions are not "
+        "available. Nothing was written."
     ),
     "RESERVED_PATH": (
         "ERROR (RESERVED_PATH): the target resolves to a backup name; choose the "
@@ -1312,6 +1366,14 @@ _CONDITIONS_UNSUPPORTED_VERSION_0_7 = (
 )
 
 
+_CONDITIONS_UNSUPPORTED_VERSION_0_8 = (
+    "ERROR (UNSUPPORTED_VERSION): the conditions command requires an explicit "
+    "schema 0.2 manifest. A schema 0.1 manifest can be migrated with "
+    "runevidence migrate PATH --to 0.2; schema 0.3, 0.4, 0.5, 0.6, 0.7 and 0.8 have no "
+    "downgrade path. Nothing was written."
+)
+
+
 def _conditions_failure(code: str, as_json: bool, *, version: str | None = None) -> int:
     """Emit exactly one fixed document for a refused conditions update."""
     if code not in _CONDITIONS_ERROR_TEXT:
@@ -1333,6 +1395,8 @@ def _conditions_failure(code: str, as_json: bool, *, version: str | None = None)
         print(_CONDITIONS_UNSUPPORTED_VERSION_0_6)
     elif code == "UNSUPPORTED_VERSION" and version == "0.7":
         print(_CONDITIONS_UNSUPPORTED_VERSION_0_7)
+    elif code == "UNSUPPORTED_VERSION" and version == "0.8":
+        print(_CONDITIONS_UNSUPPORTED_VERSION_0_8)
     else:
         print(_CONDITIONS_ERROR_TEXT[code])
     return EXIT_INVALID
@@ -1465,7 +1529,7 @@ def _event_artifact_is_volatile(manifest: Manifest, patterns: list[str]) -> bool
     points at the artifact, so an empty or fully filtered event file is still
     protected.
     """
-    if not isinstance(manifest, (Manifest05, Manifest06, Manifest07)):
+    if not isinstance(manifest, (Manifest05, Manifest06, Manifest07, Manifest08)):
         return False
     return any(
         getattr(artifact, "artifact_type", "file") == "file"
@@ -2582,7 +2646,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "also record legacy TensorBoard histograms as schema 0.7 results "
-            "(opt-in; implies schema 0.7)"
+            "(opt-in; implies schema 0.7 unless a media flag selects 0.8)"
+        ),
+    )
+    p.add_argument(
+        "--include-images",
+        action="store_true",
+        help=(
+            "also record legacy TensorBoard image summaries as schema 0.8 results "
+            "(opt-in; implies schema 0.8)"
+        ),
+    )
+    p.add_argument(
+        "--include-audio",
+        action="store_true",
+        help=(
+            "also record legacy TensorBoard audio summaries as schema 0.8 results "
+            "(opt-in; implies schema 0.8)"
         ),
     )
     p.add_argument(
@@ -2614,10 +2694,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "migrate",
-        help="declare an existing manifest as schema 0.2, 0.3, 0.4, 0.5, 0.6 or 0.7 without changing any recorded value (explicit, no inference)",
+        help="declare an existing manifest as schema 0.2, 0.3, 0.4, 0.5, 0.6, 0.7 or 0.8 without changing any recorded value (explicit, no inference)",
     )
     p.add_argument("path", type=Path, help=f"experiment folder (containing {MANIFEST_FILENAME}) or manifest file")
-    p.add_argument("--to", required=True, metavar="VERSION", help="target schema version (0.2, 0.3, 0.4, 0.5, 0.6 or 0.7)")
+    p.add_argument("--to", required=True, metavar="VERSION", help="target schema version (0.2, 0.3, 0.4, 0.5, 0.6, 0.7 or 0.8)")
     p.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
     p.add_argument("--json", action="store_true", help="machine-readable result")
     p.set_defaults(func=cmd_migrate)

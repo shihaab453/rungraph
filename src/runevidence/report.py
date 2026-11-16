@@ -7,7 +7,7 @@ from typing import Optional
 
 from .checks import Report
 from .findings import Finding, Severity
-from .histogram_display import histogram_display
+from .histogram_display import value_display
 from .models import Manifest
 
 _LABEL = {Severity.error: "ERROR", Severity.warning: "WARN", Severity.info: "INFO"}
@@ -129,7 +129,7 @@ def format_overview(manifest: Manifest) -> str:
     if manifest.results:
         lines.append(f"\nResults ({len(manifest.results)}):")
         for r in manifest.results:
-            lines.append(f"  {r.id}: {r.run_id} {r.name} = {histogram_display(r.value) or repr(r.value)}")
+            lines.append(f"  {r.id}: {r.run_id} {r.name} = {value_display(r.value) or repr(r.value)}")
 
     if manifest.evidence:
         lines.append(f"\nEvidence ({len(manifest.evidence)}):")

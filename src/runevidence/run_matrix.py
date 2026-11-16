@@ -10,7 +10,7 @@ import json
 import math
 from typing import Any, Sequence
 
-from .histogram_display import histogram_display, value_to_json
+from .histogram_display import value_display, value_to_json
 from .models import Manifest
 
 
@@ -124,9 +124,9 @@ def _shown(value: Any) -> str:
 
 
 def _display_value(value: Any, *, text: bool) -> str:
-    hist = histogram_display(value)
-    if hist is not None:
-        return hist
+    shown_structured = value_display(value)
+    if shown_structured is not None:
+        return shown_structured
     if text and isinstance(value, str) and len(value) > 120:
         return json.dumps(value[:120], ensure_ascii=True, allow_nan=False) + "..."
     return _shown(value)

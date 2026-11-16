@@ -10,7 +10,7 @@ import math
 from typing import Any
 
 from .locator_profiles import display_locator
-from .histogram_display import histogram_display, value_to_json
+from .histogram_display import value_display, value_to_json
 from .models import Manifest, RelationshipType, locator_to_json
 
 
@@ -199,9 +199,9 @@ def format_run_details(data: dict[str, Any]) -> str:
             if isinstance(locator, dict)
             else getattr(locator, "kind", None)
         )
-        hist = histogram_display(value)
-        if hist is not None:
-            return json.dumps(hist, ensure_ascii=True, allow_nan=False)
+        shown_structured = value_display(value)
+        if shown_structured is not None:
+            return json.dumps(shown_structured, ensure_ascii=True, allow_nan=False)
         if (
             kind == "tensorboard-string"
             and isinstance(value, str)

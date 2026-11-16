@@ -57,6 +57,11 @@ HISTORICAL_25_ROUTES = ("validate", "validate-batch", "inspect", "compare", "com
 # conditions snapshot, before the public read-only directory flag.
 # M42-SCANNER-S3B (2026-11-12) superseded these; HISTORICAL RECORD only.
 HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
+    # Slice F (2026-11-16): the media gate added --include-images/--include-audio,
+    # the 0.8 init refusal, the 0.8 conditions text and the 0.8 migrate targets.
+    # Historical record; superseded by the current pin.
+    "c5c417cbe9040e27d595bd614467b7cfc1e22ababc5b93e6160f4db85cfe4397",  # LF
+    "2649c8f5e194017b45968630eb858bc3da57e50bae090eaf99825eef4e41d9b1",  # CRLF
     # Slice D accepted 26-route bytes before the multi-file/tags gate.
     "37ca37bf0f32fd45ffe9a10acf24ef5bae5ef3a2244b5dab8d40fcd117c22980",  # LF
     "97a89251f71f5255ee4dd68b47d3c401abb4b8e352385140c3ce143255740d19",  # CRLF
@@ -133,8 +138,8 @@ HISTORICAL_READER_DIGEST_23 = (
 # pin is an exact byte SHA-256. Nothing is normalized during checking. Static
 # != plugin safety.
 CLI_HASH = frozenset({
-    "c5c417cbe9040e27d595bd614467b7cfc1e22ababc5b93e6160f4db85cfe4397",  # LF
-    "2649c8f5e194017b45968630eb858bc3da57e50bae090eaf99825eef4e41d9b1",  # CRLF
+    "35762de77f57cf304ab5a189460a3b11b75b79fc846b3e892255d80fab44ada2",  # LF
+    "67aadf4aef0f9044cb1d18c1e920314bc2c70240067f6740cdfcfc51b0e895e1",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.

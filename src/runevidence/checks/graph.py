@@ -13,12 +13,13 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ..findings import Code, Finding, Severity
-from ..histogram_display import histogram_display
+from ..histogram_display import value_display
 from ..models import (
     SCHEMA_VERSION_0_4,
     SCHEMA_VERSION_0_5,
     SCHEMA_VERSION_0_6,
     SCHEMA_VERSION_0_7,
+    SCHEMA_VERSION_0_8,
     Manifest,
     RelationshipType as T,
 )
@@ -151,6 +152,7 @@ def check_graph(
             SCHEMA_VERSION_0_5,
             SCHEMA_VERSION_0_6,
             SCHEMA_VERSION_0_7,
+            SCHEMA_VERSION_0_8,
         )
         else "0.3"
     )
@@ -242,9 +244,9 @@ def check_graph(
                     message=(
                         f"Run {res.run_id!r} reports {res.name!r} twice with different values: "
                         f"{other_id!r}="
-                        f"{histogram_display(other_value) or repr(other_value)}, "
+                        f"{value_display(other_value) or repr(other_value)}, "
                         f"{res.id!r}="
-                        f"{histogram_display(res.value) or repr(res.value)}"
+                        f"{value_display(res.value) or repr(res.value)}"
                     ),
                 )
             )
@@ -424,6 +426,7 @@ def check_graph(
                             SCHEMA_VERSION_0_5,
                             SCHEMA_VERSION_0_6,
                             SCHEMA_VERSION_0_7,
+                            SCHEMA_VERSION_0_8,
                         )
                         and any(ident in capped for ident in at_risk)
                         else f"Claim: {ev.claim!r}"
