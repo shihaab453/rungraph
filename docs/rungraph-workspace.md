@@ -106,8 +106,10 @@ cycles are reported per strongly connected component with a bounded example list
   `leaderboard` ranks finite numeric values with ties sharing a rank. Rows are identified by
   `(member, run, result ID)`, so duplicate result names are distinct rows and an ambiguous
   matrix cell is counted, never averaged.
-- Cross-member comparability is currently unavailable for schemas 0.3–0.10 and is labelled
-  as such. No ranking implies a fair comparison or scientific validity.
+- `compare` reports each row pair's recorded-condition status (`comparable`,
+  `not-comparable` or `unavailable`) through the experimental comparability surface;
+  `matrix`/`leaderboard` show `conditions: available`. No ranking implies a fair comparison
+  or scientific validity. Pairwise comparison is bounded at 50 rows per metric.
 
 ## JSON and exit codes
 

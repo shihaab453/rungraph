@@ -195,6 +195,36 @@ def compare_data(loaded: LoadedWorkspace, metric: str, run: Optional[str] = None
         elif not row["numeric"]:
             nonnumeric += 1
         out.append(row)
+    pairs = []
+    if len(out) <= 50:
+        from .run_comparability import compare_paths
+
+        for index, left in enumerate(out):
+            for right in out[index + 1 :]:
+                left_member = loaded.members.get(left["member"])
+                right_member = loaded.members.get(right["member"])
+                if left_member is None or right_member is None:
+                    continue
+                try:
+                    outcome = compare_paths(
+                        left_member.manifest_path,
+                        right_member.manifest_path,
+                        baseline_result_id=left["result"],
+                        target_result_id=right["result"],
+                    )
+                except Exception:
+                    status = "unavailable"
+                else:
+                    status = {0: "comparable", 1: "not-comparable"}.get(outcome.exit_code, "unavailable")
+                pairs.append(
+                    {
+                        "baseline": {"member": left["member"], "result": left["result"]},
+                        "target": {"member": right["member"], "result": right["result"]},
+                        "conditions": status,
+                    }
+                )
+    else:
+        pairs = [{"conditions": "unavailable: too-many-pairs"}]
     return {
         "format": "rungraph-compare",
         "version": "0.1",
@@ -202,7 +232,7 @@ def compare_data(loaded: LoadedWorkspace, metric: str, run: Optional[str] = None
         "rows": out,
         "missing": missing,
         "non_numeric": nonnumeric,
-        "comparability": "unavailable: schema or conditions",
+        "comparability": pairs,
         "exit_code": 0,
     }
 
@@ -265,7 +295,7 @@ def leaderboard_data(loaded: LoadedWorkspace, metric: str, direction: str, top: 
         "direction": direction,
         "rows": ranked,
         "excluded": {"missing": sum(1 for row in rows if row["value"] is None), "non_numeric": sum(1 for row in rows if row["value"] is not None and not row["numeric"])},
-        "conditions": "unavailable",
+        "conditions": "available",
         "exit_code": 0,
     }
 
