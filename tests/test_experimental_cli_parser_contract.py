@@ -125,6 +125,9 @@ HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
     "67ddbd0d38b65038163c107ec5e82cb4666f0788ed769af54bbd16d889ca283b",  # CRLF
 })
 HISTORICAL_READER_HASHES = (
+    # Evidence-aware assessment (2026-11-16): the 26-route reader assertion was
+    # updated for the assess route. Historical only; superseded by READER_HASH.
+    "e02e60c2f2a1c893c73d32e1d59b3f3ea566ffd2e577f56d060239691c6ee5c4",
     "d1d0bfe3d854ba44e42db8b92b292b49bb408fe8c7bd0442ebbb616c0e0e67d5",  # original reader test
     "8fb6e0fd75b8617f968439c05e108da20eb6089c96310ccd08504b72aa34edfe",  # PC3R2 corrected loader
     # PC4 23-route reader-set assertion (2026-11-09); superseded by the Stage 2b
@@ -151,15 +154,15 @@ HISTORICAL_READER_DIGEST_23 = (
 # pin is an exact byte SHA-256. Nothing is normalized during checking. Static
 # != plugin safety.
 CLI_HASH = frozenset({
-    "f56cc6ad27a4739870107d8e9e4eaf2319c453301f2290e52402309f2c0249e7",  # LF
-    "fc5bc0684eb7741772f258c7b9587e96ef446fcfcc30bfaaea25cefefdbc9e02",  # CRLF
+    "d8fc4f824bfa77a21e5d27802f6cd2e3a712584e7c7db7fcb5eca4b5753b1744",  # LF
+    "d9bdae98a5ba16e8918f4a916389fb424e864346f8e05c00d73a5b5682ecb055",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.
 # Exactly one LF digest string: never a collection, no CRLF or historical alternative.
-READER_HASH = "e02e60c2f2a1c893c73d32e1d59b3f3ea566ffd2e577f56d060239691c6ee5c4"
+READER_HASH = "9f8f2d41e87f7c5be70d3e8e81bc4ab628b9cf3428a1f75464aba490aa3a6ded"
 # Exact registration order. Any missing, extra, duplicated or reordered route fails.
-ROUTES = ("validate", "validate-batch", "inspect", "compare", "comparability", "leaderboard", "matrix", "run", "claim",
+ROUTES = ("validate", "validate-batch", "inspect", "compare", "comparability", "assess", "leaderboard", "matrix", "run", "claim",
           "lineage", "impact", "coverage", "coverage-gate", "fingerprint", "fingerprint-compare",
           "coverage-diff", "review-diff", "impact-diff", "review-gate",
           "init", "migrate", "conditions", "rehash", "add", "schema", "adapters")
@@ -215,14 +218,14 @@ def test_pinned_parser_structure():
 
 def test_current_contract_preserves_historical_baselines():
     # Constant-only: records how the current contract relates to preserved history.
-    assert len(ROUTES) == len(set(ROUTES)) == 26
+    assert len(ROUTES) == len(set(ROUTES)) == 27
     assert set(HISTORICAL_SEVEN_ROUTES) <= set(ROUTES)
     assert [r for r in HISTORICAL_24_ROUTES if r != "comparability"] == list(HISTORICAL_23_ROUTES)
     assert [r for r in HISTORICAL_24_ROUTES if r not in ("validate-batch", "comparability")] == list(HISTORICAL_22_ROUTES)
     assert [r for r in HISTORICAL_25_ROUTES if r != "migrate"] == list(HISTORICAL_24_ROUTES)
-    assert [r for r in ROUTES if r not in ("migrate", "conditions")] == list(HISTORICAL_24_ROUTES)
+    assert [r for r in ROUTES if r not in ("migrate", "conditions", "assess")] == list(HISTORICAL_24_ROUTES)
     assert [r for r in HISTORICAL_25_ROUTES if r not in ("validate-batch", "comparability", "migrate")] == list(HISTORICAL_22_ROUTES)
-    assert [r for r in ROUTES if r != "conditions"] == list(HISTORICAL_25_ROUTES)
+    assert [r for r in ROUTES if r not in ("conditions", "assess")] == list(HISTORICAL_25_ROUTES)
     assert ROUTES[ROUTES.index("validate") + 1] == "validate-batch"
     assert ROUTES[ROUTES.index("compare") + 1] == "comparability"
     assert ROUTES[ROUTES.index("init") + 1] == "migrate"
@@ -301,7 +304,7 @@ def test_directory_flag_is_registered_only_on_read_only_routes():
     assert set(sub.choices) == set(ROUTES)
     for name, route in sub.choices.items():
         options = {option for action in route._actions for option in action.option_strings}
-        assert ("--directory-artifacts" in options) is (name in ("validate", "inspect"))
+        assert ("--directory-artifacts" in options) is (name in ("validate", "inspect", "assess"))
 
 
 def test_comparability_route_grammar_only():

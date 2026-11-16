@@ -427,6 +427,23 @@ def cmd_comparability(args: argparse.Namespace) -> int:
     return outcome.exit_code
 
 
+def cmd_assess(args: argparse.Namespace) -> int:
+    from . import run_assess
+
+    outcome = run_assess.assess(
+        args.baseline,
+        args.target,
+        baseline_result_id=args.baseline_result,
+        target_result_id=args.target_result,
+        directory_artifacts=args.directory_artifacts,
+    )
+    if args.json:
+        print(run_assess.assess_json(outcome))
+    else:
+        print(outcome.text)
+    return outcome.exit_code
+
+
 def cmd_leaderboard(args: argparse.Namespace) -> int:
     """Rank recorded metric values without opening any referenced artifact."""
     loaded = _load_or_report(args.path, args.json)
@@ -2547,6 +2564,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--json", action="store_true", help="machine-readable comparison envelope")
     p.set_defaults(func=cmd_comparability)
+
+    p = sub.add_parser(
+        "assess",
+        help="compare recorded conditions and artifact/value integrity together (read-only)",
+    )
+    p.add_argument("baseline", type=Path, help="baseline experiment folder or manifest JSON file")
+    p.add_argument("target", type=Path, help="target experiment folder or manifest JSON file")
+    p.add_argument("--baseline-result", required=True, metavar="ID")
+    p.add_argument("--target-result", required=True, metavar="ID")
+    p.add_argument("--directory-artifacts", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_assess)
 
     p = sub.add_parser("leaderboard", help="rank runs by a recorded numeric metric (no artifact checks)")
     p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")
