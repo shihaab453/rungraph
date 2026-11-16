@@ -58,6 +58,26 @@ def test_runs_are_only_immediate_subfolders_of_runs(tmp_path):
     assert "runs/x.txt" in discovery.files
 
 
+def test_generic_extract_refuses_an_empty_folder(tmp_path):
+    root = tmp_path / "empty"
+    root.mkdir()
+    adapter = GenericAdapter()
+    discovery = adapter.discover(root)
+
+    with pytest.raises(AdapterError) as excinfo:
+        adapter.extract(root, discovery, project_id="demo", project_name="Demo")
+
+    assert "no files to record" in str(excinfo.value)
+
+
+def test_init_generic_refuses_an_empty_folder_and_writes_nothing(tmp_path, capsys):
+    assert main(["init", str(tmp_path)]) == 2
+    out = capsys.readouterr().out
+    assert "adapter 'generic' cannot read" in out
+    assert "no files to record" in out
+    assert not (tmp_path / MANIFEST_FILENAME).exists()
+
+
 def test_extract_hashes_files_and_assigns_run_ids(tmp_path):
     root = tmp_path / "proj"
     write(root, "notes.txt", b"hello\n")
