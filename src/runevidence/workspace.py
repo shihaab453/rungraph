@@ -566,6 +566,12 @@ def _patch_error(message: str) -> WorkspaceError:
     return WorkspaceError(message)
 
 
+def _required(operation: dict[str, Any], key: str) -> Any:
+    if key not in operation:
+        raise _patch_error(f"patch operation {operation.get('op')!r} needs {key!r}")
+    return operation[key]
+
+
 def _apply_operation(raw: dict[str, Any], operation: dict[str, Any]) -> None:
     kind = operation.get("op")
     if kind == "set-workspace":
@@ -574,7 +580,7 @@ def _apply_operation(raw: dict[str, Any], operation: dict[str, Any]) -> None:
                 raw[key] = operation[key]
         return
     if kind == "add-member":
-        raw.setdefault("members", []).append(operation["member"])
+        raw.setdefault("members", []).append(_required(operation, "member"))
         return
     if kind in ("remove-member", "move-member", "rename-member"):
         members = raw.setdefault("members", [])
@@ -584,9 +590,9 @@ def _apply_operation(raw: dict[str, Any], operation: dict[str, Any]) -> None:
         if kind == "remove-member":
             members.pop(index)
         elif kind == "move-member":
-            members[index]["path"] = operation["path"]
+            members[index]["path"] = _required(operation, "path")
         else:
-            new_id = operation["new_id"]
+            new_id = _required(operation, "new_id")
             old_id = members[index]["id"]
             members[index]["id"] = new_id
             for claim in raw.setdefault("claims", []):
@@ -599,7 +605,7 @@ def _apply_operation(raw: dict[str, Any], operation: dict[str, Any]) -> None:
                         relationship[side]["member"] = new_id
         return
     if kind == "add-claim":
-        raw.setdefault("claims", []).append(operation["claim"])
+        raw.setdefault("claims", []).append(_required(operation, "claim"))
         return
     if kind in ("edit-claim", "remove-claim"):
         claims = raw.setdefault("claims", [])
@@ -609,13 +615,13 @@ def _apply_operation(raw: dict[str, Any], operation: dict[str, Any]) -> None:
         if kind == "remove-claim":
             claims.pop(index)
         else:
-            patch = operation["claim"]
+            patch = _required(operation, "claim")
             for key, value in patch.items():
                 if key != "id":
                     claims[index][key] = value
         return
     if kind == "add-relationship":
-        raw.setdefault("relationships", []).append(operation["relationship"])
+        raw.setdefault("relationships", []).append(_required(operation, "relationship"))
         return
     if kind == "remove-relationship":
         relationships = raw.setdefault("relationships", [])
@@ -689,7 +695,12 @@ def apply_patch(
     for operation in operations:
         if not isinstance(operation, dict):
             raise _patch_error("each operation must be an object")
-        _apply_operation(raw, operation)
+        try:
+            _apply_operation(raw, operation)
+        except WorkspaceError:
+            raise
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise _patch_error(f"invalid patch operation: {exc}") from None
     try:
         document = Workspace.model_validate(raw)
     except Exception as exc:

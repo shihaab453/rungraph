@@ -153,3 +153,49 @@ def test_a_claim_file_needs_an_id(tmp_path: Path, capsys):
     assert main(["claim", "add", str(root), "--file", str(claim_file)]) == 2
     assert "non-empty 'id'" in capsys.readouterr().out
     assert (root / "rungraph.json").read_bytes() == before
+
+
+def test_a_patch_must_declare_its_envelope(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    init(root)
+    capsys.readouterr()
+    patch_file = tmp_path / "patch.json"
+    patch_file.write_text(
+        json.dumps({"format": "other", "version": "99", "operations": [{"op": "set-workspace", "name": "x"}]}),
+        encoding="utf-8",
+    )
+    before = (root / "rungraph.json").read_bytes()
+    assert main(["patch", str(root), "--file", str(patch_file), "--expected-sha256", sha(root)]) == 2
+    assert "rungraph-patch 0.1" in capsys.readouterr().out
+    assert (root / "rungraph.json").read_bytes() == before
+
+
+def test_a_patch_operation_needs_its_payload(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    init(root)
+    capsys.readouterr()
+    patch_file = tmp_path / "patch.json"
+    patch_file.write_text(
+        json.dumps({"format": "rungraph-patch", "version": "0.1", "operations": [{"op": "add-member"}]}),
+        encoding="utf-8",
+    )
+    before = (root / "rungraph.json").read_bytes()
+    assert main(["patch", str(root), "--file", str(patch_file), "--expected-sha256", sha(root)]) == 2
+    captured = capsys.readouterr()
+    assert "needs 'member'" in captured.out
+    assert "Traceback" not in captured.err
+    assert (root / "rungraph.json").read_bytes() == before
+
+
+def test_invalid_utf8_in_an_authoring_file_is_refused(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    init(root)
+    capsys.readouterr()
+    broken = tmp_path / "broken.json"
+    broken.write_bytes(b"\xff")
+    before = (root / "rungraph.json").read_bytes()
+    assert main(["claim", "add", str(root), "--file", str(broken)]) == 2
+    captured = capsys.readouterr()
+    assert "rungraph-error" in captured.out
+    assert "Traceback" not in captured.err
+    assert (root / "rungraph.json").read_bytes() == before

@@ -8,45 +8,17 @@ from typing import Any, Optional
 from .findings import Severity
 from .models import Manifest
 from .workspace import LoadedWorkspace
-from .workspace_graph import ClaimState, Edge, Graph, Node, _closure, node_id
-
-
-def _state_targets(loaded: LoadedWorkspace, graph: Graph, state: ClaimState) -> list[str]:
-    targets: list[str] = []
-    if state.member is not None:
-        item = loaded.members[state.member]
-        if item.manifest is None:
-            return targets
-        for evidence in item.manifest.evidence:
-            if evidence.id != state.id:
-                continue
-            for local in list(evidence.supports) + list(evidence.contradicts):
-                for kind in ("result", "artifact", "run", "evidence"):
-                    candidate = node_id(kind, state.member, local)
-                    if candidate in graph.nodes:
-                        targets.append(candidate)
-                        break
-        return targets
-    for claim in loaded.document.claims:
-        if claim.id != state.id:
-            continue
-        for ref in claim.supports + claim.contradicts:
-            if ref.claim is not None:
-                targets.append(node_id("claim", loaded.document.id, ref.claim))
-            else:
-                for kind in ("result", "evidence", "artifact", "run"):
-                    candidate = node_id(kind, ref.member, ref.id)
-                    if candidate in graph.nodes:
-                        targets.append(candidate)
-                        break
-    return targets
+from .workspace_graph import ClaimState, Graph, claim_support_closure, node_id
 
 
 def claim_closure(loaded: LoadedWorkspace, graph: Graph, state: ClaimState) -> set[str]:
-    result: set[str] = set()
-    for target in _state_targets(loaded, graph, state):
-        result |= _closure(graph, target)
-    return result
+    if state.member is not None:
+        start = node_id("evidence", state.member, state.id)
+        relations = {"supports"}
+    else:
+        start = node_id("claim", loaded.document.id, state.id)
+        relations = {"supports", "contradicts"}
+    return claim_support_closure(graph, start, relations)
 
 
 def report_data(

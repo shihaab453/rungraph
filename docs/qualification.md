@@ -7,8 +7,8 @@ index, tagged or version-bumped.
 
 ## Capability status
 
-Every primary capability in the completion contract is `COMPLETE` except the deliberate
-platform bound listed under Limitations.
+Every primary capability in the completion contract is `COMPLETE` except two deliberate
+platform bounds, F3 and B6, listed under Limitations.
 
 | Area | Status | Evidence |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ platform bound listed under Limitations.
 | A6 source/environment capture | COMPLETE | `capture`; `tests/test_cli_capture.py` |
 | A7 safe mutation | COMPLETE | backups, stale-byte checks, POSIX admission lock |
 | B1–B5 file, value, graph, batch, unreadable input | COMPLETE | core checks; full suite |
-| B6 directory artifacts | COMPLETE (Linux bound) | guarded recording and re-verification; non-Linux filesystems fail closed |
+| B6 directory artifacts | BOUNDED (Linux only) | guarded recording and re-verification; non-Linux filesystems fail closed |
 | C1–C5 detail, lineage, impact, coverage, comparison | COMPLETE | analysis routes and tests |
 | C6 recorded-condition comparability 0.1–0.10 | COMPLETE (experimental verdict) | `comparability`, preflight; tests |
 | C7 evidence-aware comparison | COMPLETE | `assess`; `tests/test_cli_assess.py` |
@@ -39,7 +39,7 @@ platform bound listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,167 passed, 138 skipped on Python 3.12; 6,164 passed, 141 skipped on
+- **Full suite**: 6,180 passed, 138 skipped on Python 3.12; 6,177 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
@@ -57,8 +57,8 @@ platform bound listed under Limitations.
 ## False-clean probe
 
 Every capability class was exercised through its documented success path with a condition that
-should have failed. The probe changed only a copy of an example and checked both the exit code
-and the visible output:
+should have failed. The probe worked on copies of the examples and fresh temporary folders and
+checked both the exit code and the visible output:
 
 | Class | Condition that should fail | Observed |
 | --- | --- | --- |
@@ -69,7 +69,7 @@ and the visible output:
 | `migrate` | downgrade or unavailable target | exit 2, nothing written |
 | `conditions` | malformed patch | exit 2, manifest byte-identical |
 | `capture` | folder outside a git repository | exit 2, nothing written |
-| `result` / `evidence` / `relationship` authoring | dangling reference, duplicate ID, malformed file, missing `id` | exit 2, nothing written, no traceback |
+| `result` / `evidence` / `relationship` authoring | dangling reference, duplicate ID, malformed or invalid-UTF-8 file, missing or non-string `id` | exit 2, nothing written, no traceback |
 | `run` / `claim` / `lineage` / `impact` | unknown ID | exit 2 |
 | `coverage` / `coverage-gate` | selected structural flag | gate exit 1; coverage labels the claim |
 | `fingerprint-compare` / `review-diff` / `impact-diff` / `review-gate` | changed file bytes | not their domain: they state that recorded assertions only were compared and point at `validate` |
@@ -77,21 +77,40 @@ and the visible output:
 | `assess` | changed artifact or value | target evidence errors, `NOT PERMITTED`, exit 1 |
 | `discover` / `init` (workspace) | empty root; existing document without `--force` | exit 2 |
 | `validate` / `report` (workspace) | member evidence error | exit 1; unresolved references and cycles are named claim states, and `graph --fail-on-unresolved` exits 1 |
-| workspace authoring | path escape, duplicate member path, stale SHA, malformed file, missing claim `id` | exit 2, document byte-identical |
+| workspace authoring | path escape, duplicate member path, stale SHA, malformed or non-object file, wrong patch envelope, operation without its payload, missing claim `id` | exit 2, no traceback, document byte-identical |
+| workspace strictness | uncited claim warning with `--strict` | exit 1 and `"exit_code": 1` in JSON, for `validate` and `report` |
+| workspace graph | unknown member or unknown workspace-claim reference | named unresolved node; `graph --fail-on-unresolved` exits 1 |
 | workspace `impact` | unknown node | exit 2 |
 | `inspect` | untracked file in the folder | reported as an info line, exit 0 (the documented meaning of `inspect`) |
 
-The probe found three defects, all fixed with regression tests:
+The probe found and fixed these defects, each with a regression test:
 
-- `result`/`evidence`/`relationship --file` and workspace `claim`/`patch --file` raised a
-  traceback and exited 1 on malformed JSON or a missing `id`; they now refuse with exit 2 and
-  write nothing (`tests/test_authoring.py`, `tests/test_rungraph_authoring.py`).
-- A workspace claim with an unresolved support reference was not labelled `at-risk`, though
-  the claim-state table says an unresolved reference implies it; it now carries both
-  `unresolved` and `at-risk` (`tests/test_workspace_graph.py`).
-- A member claim with an unresolved support reference was `unresolved` without `at-risk`;
-  it now carries both, while a dangling contradiction stays `unresolved` without `at-risk`,
-  matching the documented asymmetry (`tests/test_workspace_graph.py`).
+- `result`/`evidence`/`relationship --file` and workspace `claim`/`relationship --file`
+  raised a traceback on malformed JSON, invalid UTF-8 or a missing `id`; `patch` accepted a
+  non-object file and discarded the supplied format/version. All now refuse with exit 2,
+  write nothing and print no traceback, and `patch` validates its `rungraph-patch` 0.1
+  envelope (`tests/test_authoring.py`, `tests/test_rungraph_authoring.py`).
+- A patch operation missing its payload raised `KeyError`; it now refuses with a named
+  message (`tests/test_rungraph_authoring.py`).
+- A result ID that was not a string raised `TypeError`; required IDs and reference names are
+  now checked as non-empty strings (`tests/test_authoring.py`).
+- Workspace and member claims with an unresolved support reference were not `at-risk`, and a
+  member claim did not follow relationship and dependency-closure errors. Claim states now
+  use the same support closure as `report`/`impact` (`tests/test_workspace_graph.py`).
+- An unknown member or workspace-claim reference disappeared from `graph`'s unresolved list
+  or raised `KeyError`; both are now named unresolved nodes, so `graph --fail-on-unresolved`
+  exits 1 (`tests/test_workspace_graph.py`).
+- `report --strict --json` ignored strictness, and `validate --strict --json` printed
+  `"exit_code": 0` before returning 1. Both now apply strictness before printing
+  (`tests/test_rungraph_cli.py`).
+- `result remove` and `evidence remove` wrote a document whose remaining claims still cited
+  the removed object; they now refuse and point at the citing references
+  (`tests/test_authoring.py`).
+- The manifest authoring routes did not take the folder admission lock; they now participate
+  in the same POSIX lock as the other writers (`tests/test_cli_writer_admission.py`).
+- The README command reference did not name the workspace routes, and the workspace guide
+  claimed `--json` for `graph`/`impact`; both are corrected and the docs-contract test now
+  covers the workspace parser (`tests/test_docs_contract.py`).
 
 No command reported a false success: every failing condition either changed the exit code or
 was named in the output as a state or warning. Where a route deliberately compares recorded
@@ -99,15 +118,18 @@ assertions rather than bytes, its output says so and directs the user to `valida
 
 ## End-to-end scenarios
 
-The qualification harness scripts the lifecycle against committed examples:
+The qualification harness records two experiments from scratch with `init`, authors a
+result and a claim in each, composes them with `rungraph init` plus a cross-member claim, and
+runs the lifecycle through the documented commands:
 
-1. Record a manifest and validate it (`--strict`), on an experiment and on a workspace.
-2. Change a recorded value or metric file; validation fails with a value mismatch and the
-   affected claims at risk.
-3. Ask what changed and what depends on it (`report`, `impact`, `lineage`).
-4. Accept the intended change with `rehash`; validation is clean again.
-5. Compose a workspace; validate, report and compare across members, including recorded
-   condition status.
+1. Record and validate both experiments (`--strict`).
+2. Compose the workspace; validate it and compare one metric across members.
+3. Change a recorded metric value; member and workspace validation fail, `report` labels the
+   affected claims `at-risk` (never `supported`), and `impact` names the cross-member claim.
+4. Accept the intended change with `rehash`; member and workspace validation are clean and
+   the comparison shows the new value.
+5. Negative paths: a malformed patch operation is refused with exit 2, no traceback and an
+   unchanged document; removing a cited result is refused.
 
 Negative paths are covered throughout the suite: missing/changed bytes, dangling and
 ambiguous references, duplicate IDs, path escapes, unresolved cross-member references, claim
@@ -118,7 +140,7 @@ cycles, over-cap readers, malformed hooks, stale documents, refused writes and e
 | Criterion (§4) | Evidence |
 | --- | --- |
 | 1. Scope defined and defensible | contract §1–§3; the delivered surface is the one the Phase A audit identified |
-| 2. Every P0/P1 `COMPLETE` or bounded | capability table above; the only bound is F3, with B6's Linux scope stated |
+| 2. Every P0/P1 `COMPLETE` or bounded | capability table above; F3 and B6 are `BOUNDED`, with their named constraints in Limitations |
 | 3. Capabilities work together | `tests/test_e2e_qualification.py`; README command reference; committed examples |
 | 4. Guarantees fail when broken | 12 mutation probes for RE-10/ML-1; negative-path suites; the false-clean probe above |
 | 5. Known correctness problems resolved or bounded | RE-10 and ML-1 fixed; F3 and directory artifacts bounded as stated |

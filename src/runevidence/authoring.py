@@ -38,6 +38,13 @@ def _validate(raw: dict) -> None:
         raise AuthoringError(f"the edited manifest is not valid: {exc}") from None
 
 
+def _text(entry: dict, key: str, what: str) -> str:
+    value = entry.get(key)
+    if not isinstance(value, str) or not value:
+        raise AuthoringError(f"{what} needs a non-empty string {key!r}")
+    return value
+
+
 def _check_refs(raw: dict, entry: dict, keys: tuple[str, ...] = ()) -> None:
     known = _ids(raw)
     for key in keys:
@@ -47,23 +54,25 @@ def _check_refs(raw: dict, entry: dict, keys: tuple[str, ...] = ()) -> None:
         if not isinstance(values, list):
             raise AuthoringError(f"{key} must be a list of IDs")
         for value in values:
-            if value not in known:
+            if not isinstance(value, str) or value not in known:
                 raise AuthoringError(f"{key} names {value!r}, which is not in the manifest")
 
 
 def add_result(raw: dict, entry: dict[str, Any]) -> None:
     entry = dict(entry)
     for key in ("id", "run_id", "name"):
-        if key not in entry:
-            raise AuthoringError(f"a result needs {key!r}")
+        _text(entry, key, "a result")
     if entry["id"] in _ids(raw):
         raise AuthoringError(f"ID {entry['id']!r} is already used")
     runs = {item["id"] for item in raw.get("runs", [])}
     if entry["run_id"] not in runs:
         raise AuthoringError(f"run {entry['run_id']!r} does not exist")
     artifact_id = entry.get("artifact_id")
-    if artifact_id is not None and artifact_id not in {item["id"] for item in raw.get("artifacts", [])}:
-        raise AuthoringError(f"artifact {artifact_id!r} does not exist")
+    if artifact_id is not None:
+        if not isinstance(artifact_id, str):
+            raise AuthoringError("a result needs a string 'artifact_id' or none")
+        if artifact_id not in {item["id"] for item in raw.get("artifacts", [])}:
+            raise AuthoringError(f"artifact {artifact_id!r} does not exist")
     raw.setdefault("results", []).append(entry)
     _validate(raw)
 
@@ -76,15 +85,39 @@ def edit_result(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
             continue
         result[key] = value
     runs = {item["id"] for item in raw.get("runs", [])}
-    if result.get("run_id") not in runs:
+    if not isinstance(result.get("run_id"), str) or result.get("run_id") not in runs:
         raise AuthoringError(f"run {result.get('run_id')!r} does not exist")
     artifact_id = result.get("artifact_id")
-    if artifact_id is not None and artifact_id not in {item["id"] for item in raw.get("artifacts", [])}:
-        raise AuthoringError(f"artifact {artifact_id!r} does not exist")
+    if artifact_id is not None:
+        if not isinstance(artifact_id, str):
+            raise AuthoringError("a result needs a string 'artifact_id' or none")
+        if artifact_id not in {item["id"] for item in raw.get("artifacts", [])}:
+            raise AuthoringError(f"artifact {artifact_id!r} does not exist")
     _validate(raw)
 
 
+def _citations(raw: dict, target: str) -> list[str]:
+    found: list[str] = []
+    for evidence in raw.get("evidence", []):
+        if target in (evidence.get("supports") or []) or target in (evidence.get("contradicts") or []):
+            found.append(f"claim {evidence.get('id')!r}")
+    for relationship in raw.get("relationships", []):
+        if target in (relationship.get("source"), relationship.get("target")):
+            found.append("a relationship")
+    return found
+
+
+def _refuse_if_cited(raw: dict, target: str, what: str) -> None:
+    citations = _citations(raw, target)
+    if citations:
+        raise AuthoringError(
+            f"{what} {target!r} is still cited by {', '.join(dict.fromkeys(citations))}; "
+            "remove those references first"
+        )
+
+
 def remove_result(raw: dict, entry_id: str) -> None:
+    _refuse_if_cited(raw, entry_id, "result")
     raw["results"].pop(_find(raw, "results", entry_id))
     _validate(raw)
 
@@ -92,8 +125,7 @@ def remove_result(raw: dict, entry_id: str) -> None:
 def add_evidence(raw: dict, entry: dict[str, Any]) -> None:
     entry = dict(entry)
     for key in ("id", "claim"):
-        if key not in entry:
-            raise AuthoringError(f"a claim needs {key!r}")
+        _text(entry, key, "a claim")
     if entry["id"] in _ids(raw):
         raise AuthoringError(f"ID {entry['id']!r} is already used")
     _check_refs(raw, entry, ("supports", "contradicts"))
@@ -113,6 +145,7 @@ def edit_evidence(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
 
 
 def remove_evidence(raw: dict, entry_id: str) -> None:
+    _refuse_if_cited(raw, entry_id, "claim")
     raw["evidence"].pop(_find(raw, "evidence", entry_id))
     _validate(raw)
 
@@ -120,8 +153,7 @@ def remove_evidence(raw: dict, entry_id: str) -> None:
 def add_relationship(raw: dict, entry: dict[str, Any]) -> None:
     entry = dict(entry)
     for key in ("source", "target", "type"):
-        if key not in entry:
-            raise AuthoringError(f"a relationship needs {key!r}")
+        _text(entry, key, "a relationship")
     known = _ids(raw)
     for key in ("source", "target"):
         if entry[key] not in known:
@@ -141,8 +173,8 @@ def remove_relationship(raw: dict, index: int) -> None:
 def read_json_file(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise AuthoringError(f"cannot read {path}: {exc}") from None
     if not isinstance(data, dict):
-        raise AuthoringError("the patch file must contain one JSON object")
+        raise AuthoringError("the file must contain one JSON object")
     return data

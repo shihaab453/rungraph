@@ -881,35 +881,59 @@ def _accepts_tag_filter(adapter) -> bool:
     return _accepts_keyword(adapter, "tag_filter")
 
 
-def _author_manifest(args: argparse.Namespace, mutate, summary: str) -> int:
-    loaded = _load_or_report(args.path, args.json)
-    if loaded is None:
-        return EXIT_INVALID
-    raw = load_raw(loaded)
-    try:
-        mutate(raw)
-    except authoring.AuthoringError as exc:
-        if args.json:
-            print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": str(exc), "exit_code": EXIT_INVALID}))
-        else:
-            print(f"ERROR: {exc}\nNothing was written.")
-        return EXIT_INVALID
-    if args.dry_run:
-        if args.json:
-            print(json.dumps({"format": "runevidence-authoring-v1", "ok": True, "changed": summary, "dry_run": True, "written": False, "exit_code": EXIT_OK}))
-        else:
-            print(f"Would {summary}.")
-        return EXIT_OK
-    try:
-        save_raw(raw, loaded.path, expected_bytes=loaded.source_bytes)
-    except OSError as exc:
-        print(f"ERROR: {exc}\nNothing was written.")
-        return EXIT_INVALID
+def _authoring_lock_failure(args: argparse.Namespace, code: str, message: str) -> int:
     if args.json:
-        print(json.dumps({"format": "runevidence-authoring-v1", "ok": True, "changed": summary, "dry_run": False, "written": True, "exit_code": EXIT_OK}))
+        print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "code": code, "error": message, "exit_code": EXIT_INVALID}))
     else:
-        print(f"Wrote {loaded.path}\nNext: runevidence validate {args.path}")
-    return EXIT_OK
+        print(message)
+    return EXIT_INVALID
+
+
+def _author_manifest(args: argparse.Namespace, mutate, summary: str) -> int:
+    try:
+        with _writer_lock(args.path, enabled=not args.dry_run) as manifest_path:
+            loaded = _load_or_report(manifest_path, args.json)
+            if loaded is None:
+                return EXIT_INVALID
+            raw = load_raw(loaded)
+            try:
+                mutate(raw)
+            except authoring.AuthoringError as exc:
+                if args.json:
+                    print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": str(exc), "exit_code": EXIT_INVALID}))
+                else:
+                    print(f"ERROR: {exc}\nNothing was written.")
+                return EXIT_INVALID
+            except (KeyError, TypeError, AttributeError) as exc:
+                message = f"invalid authoring payload: {exc}"
+                if args.json:
+                    print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": message, "exit_code": EXIT_INVALID}))
+                else:
+                    print(f"ERROR: {message}\nNothing was written.")
+                return EXIT_INVALID
+            if args.dry_run:
+                if args.json:
+                    print(json.dumps({"format": "runevidence-authoring-v1", "ok": True, "changed": summary, "dry_run": True, "written": False, "exit_code": EXIT_OK}))
+                else:
+                    print(f"Would {summary}.")
+                return EXIT_OK
+            try:
+                save_raw(raw, loaded.path, expected_bytes=loaded.source_bytes)
+            except OSError as exc:
+                if args.json:
+                    print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": str(exc), "exit_code": EXIT_INVALID}))
+                else:
+                    print(f"ERROR: {exc}\nNothing was written.")
+                return EXIT_INVALID
+            if args.json:
+                print(json.dumps({"format": "runevidence-authoring-v1", "ok": True, "changed": summary, "dry_run": False, "written": True, "exit_code": EXIT_OK}))
+            else:
+                print(f"Wrote {loaded.path}\nNext: runevidence validate {args.path}")
+            return EXIT_OK
+    except _WriterBusy:
+        return _authoring_lock_failure(args, "BUSY", BUSY_TEXT)
+    except _WriterLockUnavailable:
+        return _authoring_lock_failure(args, "LOCK_UNAVAILABLE", LOCK_UNAVAILABLE_TEXT)
 
 
 def _read_authoring_entry(args: argparse.Namespace) -> dict | None:

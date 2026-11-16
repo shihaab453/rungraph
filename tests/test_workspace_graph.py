@@ -142,3 +142,58 @@ def test_a_member_claim_with_a_dangling_contradiction_stays_unresolved(tmp_path:
     assert "unresolved" in member_claim.labels
     assert "at-risk" not in member_claim.labels
     assert "supported" not in member_claim.labels
+
+
+def test_a_member_claim_with_a_relationship_to_a_missing_id_is_at_risk(tmp_path: Path):
+    root = make_workspace(tmp_path)
+    manifest_path = root / "a" / "runevidence.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["relationships"] = [
+        {"source": "claim", "target": "absent", "type": "supports"}
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    graph, result = states(root)
+    member_claim = next(item for item in result if item.member == "a")
+    assert {"unresolved", "at-risk"} <= set(member_claim.labels)
+    assert "unresolved:a#absent" in graph.unresolved
+
+
+def test_an_unknown_member_citation_is_a_named_unresolved_node(tmp_path: Path):
+    claims = [
+        {
+            "id": "w1",
+            "claim": "a missing member still counts",
+            "supports": [{"member": "absent", "id": "acc"}],
+            "contradicts": [],
+        }
+    ]
+    graph, result = states(make_workspace(tmp_path, claims))
+    workspace_claim = next(item for item in result if item.member is None)
+    assert {"unresolved", "at-risk"} <= set(workspace_claim.labels)
+    assert "unresolved:absent#acc" in graph.unresolved
+
+
+def test_an_unknown_workspace_claim_citation_is_named_not_a_crash(tmp_path: Path):
+    claims = [
+        {
+            "id": "w1",
+            "claim": "a missing claim still counts",
+            "supports": [{"claim": "absent"}],
+            "contradicts": [],
+        }
+    ]
+    graph, result = states(make_workspace(tmp_path, claims))
+    workspace_claim = next(item for item in result if item.member is None)
+    assert {"unresolved", "at-risk"} <= set(workspace_claim.labels)
+    assert "claim:study#absent" in graph.unresolved
+
+
+def test_a_declared_claim_citation_is_not_unresolved(tmp_path: Path):
+    claims = [
+        {"id": "w1", "claim": "one", "supports": [], "contradicts": []},
+        {"id": "w2", "claim": "two", "supports": [{"claim": "w1"}], "contradicts": []},
+    ]
+    graph, result = states(make_workspace(tmp_path, claims))
+    assert graph.unresolved == []
+    second = next(item for item in result if item.id == "w2")
+    assert "unresolved" not in second.labels

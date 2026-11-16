@@ -170,6 +170,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
         directory_artifacts=args.directory_artifacts,
     )
     data["format"] = "rungraph-validate"
+    if args.strict and data["exit_code"] == 0:
+        warnings = sum(member["counts"]["warning"] for member in data["members"])
+        if warnings:
+            data["exit_code"] = EXIT_EVIDENCE
     if args.json:
         _print_json(data)
     else:
@@ -180,10 +184,6 @@ def cmd_validate(args: argparse.Namespace) -> int:
         for claim in data["claims"]:
             print(f"claim {claim['id']}: {', '.join(claim['labels'])}")
         print(f"{'FAIL' if data['exit_code'] else 'OK'}: exit {data['exit_code']}")
-    if args.strict and data["exit_code"] == 0:
-        warnings = sum(member["counts"]["warning"] for member in data["members"])
-        if warnings:
-            return EXIT_EVIDENCE
     return data["exit_code"]
 
 
@@ -228,6 +228,10 @@ def cmd_report(args: argparse.Namespace) -> int:
         directory_artifacts=args.directory_artifacts,
         baseline_root=args.baseline,
     )
+    if args.strict and data["exit_code"] == 0:
+        warnings = sum(member["counts"]["warning"] for member in data["members"])
+        if warnings:
+            data["exit_code"] = EXIT_EVIDENCE
     if args.json:
         _print_json(data)
     else:
@@ -315,21 +319,25 @@ def _author(args: argparse.Namespace, operations: list[dict], command: str) -> i
     return EXIT_OK
 
 
-def _read_workspace_entry(args: argparse.Namespace, command: str) -> tuple[dict | None, int | None]:
+def _read_workspace_entry(
+    args: argparse.Namespace, command: str, *, code: str = "file"
+) -> tuple[dict | None, int | None]:
     """Read a --file payload, returning (entry, failure)."""
     try:
         data = json.loads(Path(args.file).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return None, _error(command, "file", str(exc))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, _error(command, code, str(exc))
     if not isinstance(data, dict):
-        return None, _error(command, "file", "the file must contain one JSON object")
+        return None, _error(command, code, "the file must contain one JSON object")
     return data, None
 
 
 def cmd_patch(args: argparse.Namespace) -> int:
-    patch, failure = _read_workspace_entry(args, "patch")
+    patch, failure = _read_workspace_entry(args, "patch", code="patch")
     if failure is not None:
         return failure
+    if patch.get("format") != "rungraph-patch" or patch.get("version") != "0.1":
+        return _error("patch", "patch", "patch must be a rungraph-patch 0.1 document")
     if args.expected_sha256 is None:
         args.expected_sha256 = patch.get("expected_sha256")
     return _author(args, patch.get("operations", []), "patch")
