@@ -6,7 +6,12 @@ import json
 from pathlib import Path
 
 from runevidence.workspace import WORKSPACE_FILENAME, load_workspace
-from runevidence.workspace_graph import build_graph, claim_states, run_member_checks
+from runevidence.workspace_graph import (
+    build_graph,
+    claim_states,
+    claim_support_closure,
+    run_member_checks,
+)
 
 MANIFEST = {
     "schema_version": "0.1",
@@ -284,3 +289,21 @@ def test_a_run_input_makes_citing_claims_at_risk(tmp_path: Path):
     closure = claim_closure(loaded, graph, workspace_claim)
     assert "artifact:a#input" in closure
     assert "result:a#acc" in closure
+
+
+def test_a_cited_run_with_no_dependencies_stays_in_the_closure(tmp_path: Path):
+    root = make_workspace(tmp_path)
+    manifest_path = root / "a" / "runevidence.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"] = []
+    manifest["evidence"] = [
+        {"id": "e", "claim": "the run exists", "supports": ["r"], "contradicts": []}
+    ]
+    manifest["relationships"] = [
+        {"source": "r", "target": "absent", "type": "derived_from"}
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    graph, result = states(root)
+    member_claim = next(item for item in result if item.member == "a")
+    assert {"unresolved", "at-risk"} <= set(member_claim.labels)
+    assert "run:a#r" in claim_support_closure(graph, "evidence:a#e", {"supports"})

@@ -129,3 +129,21 @@ def test_a_strict_warning_fails_and_sets_the_json_exit_code(tmp_path: Path, caps
     assert main(["report", str(root), "--strict", "--json"]) == 1
     data = json.loads(capsys.readouterr().out)
     assert data["exit_code"] == 1
+
+
+def test_graph_dot_fails_on_unresolved_when_asked(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    document = json.loads((root / "rungraph.json").read_text(encoding="utf-8"))
+    document["claims"] = [
+        {
+            "id": "w1",
+            "claim": "missing member",
+            "supports": [{"member": "absent", "id": "x"}],
+            "contradicts": [],
+        }
+    ]
+    (root / "rungraph.json").write_text(json.dumps(document), encoding="utf-8")
+    capsys.readouterr()
+    assert main(["graph", str(root), "--format", "dot", "--fail-on-unresolved"]) == 1
+    assert "digraph rungraph" in capsys.readouterr().out

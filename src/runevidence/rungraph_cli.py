@@ -197,7 +197,7 @@ def cmd_graph(args: argparse.Namespace) -> int:
         for edge in graph.edges:
             print(f'  "{edge.source}" -> "{edge.target}" [label="{edge.relation}"];')
         print("}")
-        return EXIT_OK
+        return EXIT_EVIDENCE if args.fail_on_unresolved and graph.unresolved else EXIT_OK
     data = {
         "format": "rungraph-graph",
         "version": "0.1",

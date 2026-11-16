@@ -40,7 +40,7 @@ def _validate(raw: dict) -> None:
 
 def _text(entry: dict, key: str, what: str) -> str:
     value = entry.get(key)
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or not value.strip():
         raise AuthoringError(f"{what} needs a non-empty string {key!r}")
     return value
 

@@ -665,12 +665,13 @@ def _validate_refs(loaded_members: dict[str, LoadedMember], document: Workspace)
             else:
                 if ref.member not in indexes:
                     raise _patch_error(f"claim {claim.id!r}: unknown member {ref.member!r}")
+                if duplicates[ref.member]:
+                    raise _patch_error(
+                        f"claim {claim.id!r}: member {ref.member!r} has duplicate IDs; "
+                        "references into it cannot resolve"
+                    )
                 if ref.id not in indexes[ref.member]:
                     raise _patch_error(f"claim {claim.id!r}: {ref.member}#{ref.id} does not resolve")
-                if ref.id in duplicates[ref.member]:
-                    raise _patch_error(
-                        f"claim {claim.id!r}: {ref.member}#{ref.id} does not resolve unambiguously"
-                    )
     for relationship in document.relationships:
         for ref in (relationship.source, relationship.target):
             if ref.claim is not None:
@@ -679,12 +680,13 @@ def _validate_refs(loaded_members: dict[str, LoadedMember], document: Workspace)
             else:
                 if ref.member not in indexes:
                     raise _patch_error(f"relationship {relationship.id!r}: unknown member {ref.member!r}")
+                if duplicates[ref.member]:
+                    raise _patch_error(
+                        f"relationship {relationship.id!r}: member {ref.member!r} has duplicate IDs; "
+                        "references into it cannot resolve"
+                    )
                 if ref.id not in indexes[ref.member]:
                     raise _patch_error(f"relationship {relationship.id!r}: {ref.member}#{ref.id} does not resolve")
-                if ref.id in duplicates[ref.member]:
-                    raise _patch_error(
-                        f"relationship {relationship.id!r}: {ref.member}#{ref.id} does not resolve unambiguously"
-                    )
 
 
 def apply_patch(

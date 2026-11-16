@@ -39,7 +39,7 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,184 passed, 138 skipped on Python 3.12; 6,181 passed, 141 skipped on
+- **Full suite**: 6,186 passed, 138 skipped on Python 3.12; 6,183 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
@@ -102,7 +102,7 @@ The probe found and fixed these defects, each with a regression test:
 - An unknown member, unknown workspace-claim or ambiguous duplicate-ID member reference
   disappeared from `graph`'s unresolved list, raised `KeyError`, or was silently dropped;
   all are now named unresolved nodes, so `graph --fail-on-unresolved` exits 1, and new
-  workspace claims/relationships into such an ID are refused
+  workspace claims/relationships into a member with duplicate IDs are refused
   (`tests/test_workspace_graph.py`, `tests/test_rungraph_authoring.py`).
 - `report --strict --json` ignored strictness, and `validate --strict --json` printed
   `"exit_code": 0` before returning 1. Both now apply strictness before printing

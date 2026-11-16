@@ -205,7 +205,10 @@ def test_a_claim_into_an_ambiguous_member_id_is_refused(tmp_path: Path, capsys):
     root = make_root(tmp_path)
     manifest_path = root / "a" / "runevidence.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["results"] = [{"id": "r", "run_id": "r", "name": "accuracy", "value": 0.9}]
+    manifest["results"] = [
+        {"id": "r", "run_id": "r", "name": "accuracy", "value": 0.9},
+        {"id": "ok", "run_id": "r", "name": "other", "value": 0.8},
+    ]
     manifest["evidence"] = []
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     init(root)
@@ -213,12 +216,12 @@ def test_a_claim_into_an_ambiguous_member_id_is_refused(tmp_path: Path, capsys):
     claim = {
         "id": "w1",
         "claim": "ambiguous",
-        "supports": [{"member": "prov-a", "id": "r"}],
+        "supports": [{"member": "prov-a", "id": "ok"}],
         "contradicts": [],
     }
     claim_file = tmp_path / "claim.json"
     claim_file.write_text(json.dumps(claim), encoding="utf-8")
     before = (root / "rungraph.json").read_bytes()
     assert main(["claim", "add", str(root), "--file", str(claim_file), "--expected-sha256", sha(root)]) == 2
-    assert "does not resolve unambiguously" in capsys.readouterr().out
+    assert "duplicate IDs" in capsys.readouterr().out
     assert (root / "rungraph.json").read_bytes() == before

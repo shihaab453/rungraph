@@ -310,7 +310,7 @@ def _finding_touches(findings: dict[str, list[Finding]], node: str) -> bool:
 def _dependency_maps(graph: Graph):
     """Recorded dependency relations, with input_to read in its dependency direction."""
     reported: dict[str, set[str]] = defaultdict(set)
-    producer: dict[str, str] = {}
+    producer: dict[str, set[str]] = defaultdict(set)
     produced: dict[str, set[str]] = defaultdict(set)
     inputs: dict[str, set[str]] = defaultdict(set)
     derived: dict[str, set[str]] = defaultdict(set)
@@ -319,9 +319,9 @@ def _dependency_maps(graph: Graph):
         if edge.relation == "reported_in":
             reported[edge.source].add(edge.target)
         elif edge.relation == "result_of":
-            producer[edge.source] = edge.target
+            producer[edge.source].add(edge.target)
         elif edge.relation == "produced_by":
-            producer[edge.source] = edge.target
+            producer[edge.source].add(edge.target)
             produced[edge.target].add(edge.source)
         elif edge.relation == "input_to":
             inputs[edge.target].add(edge.source)
@@ -350,12 +350,11 @@ def claim_support_closure(graph: Graph, start: str, relations: set[str]) -> set[
         current = kind(node)
         if current == "result":
             found = {node} | set(reported.get(node, ()))
-            run = producer.get(node)
-            if run is not None:
+            for run in producer.get(node, ()):
                 found |= set(inputs.get(run, ()))
             return found
         if current == "run":
-            return set(produced.get(node, ())) | set(inputs.get(node, ()))
+            return {node} | set(produced.get(node, ())) | set(inputs.get(node, ()))
         return {node}
 
     def upstream(node: str) -> set[str]:
@@ -363,13 +362,9 @@ def claim_support_closure(graph: Graph, start: str, relations: set[str]) -> set[
         found: set[str] = set()
         if current == "result":
             found |= set(reported.get(node, ()))
-            run = producer.get(node)
-            if run is not None:
-                found.add(run)
+            found |= set(producer.get(node, ()))
         elif current == "artifact":
-            run = producer.get(node)
-            if run is not None:
-                found.add(run)
+            found |= set(producer.get(node, ()))
             found |= set(derived.get(node, ()))
         elif current == "run":
             found |= set(inputs.get(node, ())) | set(derived.get(node, ()))
