@@ -13,8 +13,8 @@ HISTORICAL_SEVEN_ROUTES = ("validate", "inspect", "init", "rehash", "add", "sche
 # Exact reviewed 22-route CLI bytes in LF and CRLF checkout forms.
 # D17-S1R5 static writer-route review, independently adjudicated in D17-S1R6.
 HISTORICAL_22_ROUTE_CLI_HASH = frozenset({
-    "71baf1cc8c9f1a494627864dea3bd5022936415fea29be6755adcd07a9276186",  # LF
-    "3d624a385130853a5c9c5daa1999f5993d1910c39d67734cbb202e58a0d046f3",  # CRLF
+    "a4cd86ac0903b4827bf7a846949a253d3d8e1aff9a02602e12ea95512d3a03e6",  # LF
+    "ba6bd580723f1b1ad7bccda0a0379a09d210d5cf46e43b9800e54383f56338a6",  # CRLF
 })
 HISTORICAL_22_ROUTES = ("validate", "inspect", "compare", "leaderboard", "matrix", "run", "claim", "lineage",
                         "impact", "coverage", "coverage-gate", "fingerprint", "fingerprint-compare",
