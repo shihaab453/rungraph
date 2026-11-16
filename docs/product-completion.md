@@ -112,7 +112,7 @@ with the qualification record). Two qualifiers are defined as follows:
 
 | ID | Capability | Status | Acceptance criterion | Evidence |
 | --- | --- | --- | --- | --- |
-| E1 | Discoverability for every public route | PARTIAL | every route appears in the README reference with purpose, inputs, outputs, exit codes and experimental status; a docs-contract test enforces it | 15 of 26 routes are absent from the command reference; `test_docs_contract.py` enforces only the TensorBoard schema/flag surface |
+| E1 | Discoverability for every public route | COMPLETE | every route appears in the README reference with purpose, inputs, outputs, exit codes and experimental status; a docs-contract test enforces it | every route is named in the README reference; `test_docs_contract.py::test_readme_names_every_public_cli_route` |
 | E2 | Examples covering every adapter and the composition layer | PARTIAL | each adapter and each product workflow has a runnable example, and a test keeps it clean | no TensorBoard or workspace example |
 | E3 | Packaging | PARTIAL | distributions build, contents and metadata are checked, and entry points resolve; a fresh-install run of the CLI and adapters is part of E6 | advisory job builds and inspects wheel/sdist and runs twine checks; it is not a required check and does not install the wheel |
 | E4 | Declared platform behaviour | PARTIAL | every platform-specific guarantee and its exclusion is stated; Windows CI stays green | POSIX locks; Linux/ext4 directory artifacts |
