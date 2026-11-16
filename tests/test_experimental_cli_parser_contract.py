@@ -125,6 +125,9 @@ HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
     "67ddbd0d38b65038163c107ec5e82cb4666f0788ed769af54bbd16d889ca283b",  # CRLF
 })
 HISTORICAL_READER_HASHES = (
+    # Capture (2026-11-16): the 30-route reader assertion was updated for capture.
+    # Historical only; superseded by READER_HASH.
+    "f4b5d38e5d258a4ded9f6821255efbd72266dfa767038596667a4b273f559dec",
     # Manifest authoring (2026-11-16): the 27-route reader assertion was updated
     # for result/evidence/relationship. Historical only; superseded by READER_HASH.
     "9f8f2d41e87f7c5be70d3e8e81bc4ab628b9cf3428a1f75464aba490aa3a6ded",
@@ -157,19 +160,19 @@ HISTORICAL_READER_DIGEST_23 = (
 # pin is an exact byte SHA-256. Nothing is normalized during checking. Static
 # != plugin safety.
 CLI_HASH = frozenset({
-    "7420e8d1ebc9d5a8eec45187e46cdc130cad7bcf61b094f778cbe10d5c484b16",  # LF
-    "9dcd14cb635382ae21da358e78e0d828f1a40ea23c2a11a6619b5960296ef334",  # CRLF
+    "0a12dc964da57d928b9a6e8102c53c85e9cbbe92be1fcaf8fc70d6ec95b14f7e",  # LF
+    "7ab929f6b2c454a9b9d9ef137f7e3f81c47134315a361d2a68b68f2edb7c35ca",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.
 # Exactly one LF digest string: never a collection, no CRLF or historical alternative.
-READER_HASH = "f4b5d38e5d258a4ded9f6821255efbd72266dfa767038596667a4b273f559dec"
+READER_HASH = "017e3cadded6ce6ce5b3381c40f6bde34c925bb854fa79ca0c424ccac6eb157c"
 # Exact registration order. Any missing, extra, duplicated or reordered route fails.
 ROUTES = ("validate", "validate-batch", "inspect", "compare", "comparability", "assess", "leaderboard", "matrix", "run", "claim",
           "lineage", "impact", "coverage", "coverage-gate", "fingerprint", "fingerprint-compare",
           "coverage-diff", "review-diff", "impact-diff", "review-gate",
           "result", "evidence", "relationship",
-          "init", "migrate", "conditions", "rehash", "add", "schema", "adapters")
+          "init", "migrate", "conditions", "capture", "rehash", "add", "schema", "adapters")
 PRIVATE_ROUTE_MARKERS = ("experimental", "sqlite", "stage", "shadow", "witness")
 
 
@@ -222,14 +225,14 @@ def test_pinned_parser_structure():
 
 def test_current_contract_preserves_historical_baselines():
     # Constant-only: records how the current contract relates to preserved history.
-    assert len(ROUTES) == len(set(ROUTES)) == 30
+    assert len(ROUTES) == len(set(ROUTES)) == 31
     assert set(HISTORICAL_SEVEN_ROUTES) <= set(ROUTES)
     assert [r for r in HISTORICAL_24_ROUTES if r != "comparability"] == list(HISTORICAL_23_ROUTES)
     assert [r for r in HISTORICAL_24_ROUTES if r not in ("validate-batch", "comparability")] == list(HISTORICAL_22_ROUTES)
     assert [r for r in HISTORICAL_25_ROUTES if r != "migrate"] == list(HISTORICAL_24_ROUTES)
-    assert [r for r in ROUTES if r not in ("migrate", "conditions", "assess", "result", "evidence", "relationship")] == list(HISTORICAL_24_ROUTES)
+    assert [r for r in ROUTES if r not in ("migrate", "conditions", "assess", "result", "evidence", "relationship", "capture")] == list(HISTORICAL_24_ROUTES)
     assert [r for r in HISTORICAL_25_ROUTES if r not in ("validate-batch", "comparability", "migrate")] == list(HISTORICAL_22_ROUTES)
-    assert [r for r in ROUTES if r not in ("conditions", "assess", "result", "evidence", "relationship")] == list(HISTORICAL_25_ROUTES)
+    assert [r for r in ROUTES if r not in ("conditions", "assess", "result", "evidence", "relationship", "capture")] == list(HISTORICAL_25_ROUTES)
     assert ROUTES[ROUTES.index("validate") + 1] == "validate-batch"
     assert ROUTES[ROUTES.index("compare") + 1] == "comparability"
     assert ROUTES[ROUTES.index("init") + 1] == "migrate"

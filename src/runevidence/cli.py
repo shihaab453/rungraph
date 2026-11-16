@@ -52,7 +52,7 @@ from .edit import EditError, glob_match, plan_add, plan_rehash, select_artifacts
 from .manifest import (LoadedManifest, ManifestLoadError, load_manifest, load_raw,
                        parse_manifest_source, resolve_manifest_path, save_manifest,
                        save_raw)
-from . import authoring
+from . import authoring, capture
 from .conditions_authoring import FIELDS as CONDITIONS_FIELDS, ConditionsError, author_conditions
 from .migrate import TARGET_VERSIONS, MigrationError, migrate_manifest
 from .models import (
@@ -936,6 +936,35 @@ def cmd_relationship(args: argparse.Namespace) -> int:
         return _author_manifest(args, lambda raw: authoring.remove_relationship(raw, args.index), f"remove relationship {args.index}")
     entry = authoring.read_json_file(Path(args.file))
     return _author_manifest(args, lambda raw: authoring.add_relationship(raw, entry), "add relationship")
+
+
+def cmd_capture(args: argparse.Namespace) -> int:
+    loaded = _load_or_report(args.path, args.json)
+    if loaded is None:
+        return EXIT_INVALID
+    try:
+        result = capture.capture(loaded, args.run, dry_run=args.dry_run)
+    except capture.CaptureError as exc:
+        if args.json:
+            print(json.dumps({"format": "runevidence-capture-v1", "ok": False, "error": str(exc), "exit_code": EXIT_INVALID}))
+        else:
+            print(f"ERROR: {exc}\nNothing was written.")
+        return EXIT_INVALID
+    document = {
+        "format": "runevidence-capture-v1",
+        "ok": True,
+        "run": result.run_id,
+        "source_revision": result.source_revision,
+        "environment": result.environment,
+        "dry_run": result.dry_run,
+        "written": result.written,
+        "exit_code": EXIT_OK,
+    }
+    if args.json:
+        print(json.dumps(document, indent=2))
+    else:
+        print(f"{'Would record' if result.dry_run else 'Recorded'} {result.source_revision} and an environment snapshot for {result.run_id}.")
+    return EXIT_OK
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -2863,6 +2892,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     def add_edit_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("path", type=Path, help=f"experiment folder (containing {MANIFEST_FILENAME}) or manifest file")
+
+    p = sub.add_parser("capture", help="record a run's git source revision and environment snapshot")
+    p.add_argument("path", type=Path)
+    p.add_argument("--run", required=True, metavar="RUN_ID")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_capture)
 
     p = sub.add_parser("rehash", help="accept intended changes: re-record digests (and result values) of chosen files")
     add_edit_args(p)
