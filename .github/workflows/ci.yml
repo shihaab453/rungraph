@@ -431,9 +431,9 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip build
-          python -m build --wheel --out-dir dist .
+          python -m build --wheel --outdir dist .
           for pkg in runevidence-tensorboard runevidence-mlflow runevidence-hydra; do
-            python -m build --wheel --out-dir dist "packages/$pkg"
+            python -m build --wheel --outdir dist "packages/$pkg"
           done
           python -m venv v
           v/bin/pip install dist/*.whl
