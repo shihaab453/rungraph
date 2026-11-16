@@ -716,6 +716,7 @@ def check_targeted_results(
             SCHEMA_VERSION_0_6,
             SCHEMA_VERSION_0_7,
             SCHEMA_VERSION_0_8,
+            SCHEMA_VERSION_0_9,
         ):
             directory_hint = (
                 "Point the result at a single JSON, JSONL, CSV or TensorBoard event "

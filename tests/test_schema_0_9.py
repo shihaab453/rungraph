@@ -220,3 +220,34 @@ def test_migrate_09_to_08_is_a_downgrade(tmp_path):
     with pytest.raises(MigrationError) as excinfo:
         migrate_manifest(path, target_version="0.8")
     assert excinfo.value.code == "DOWNGRADE_UNSUPPORTED"
+
+
+def test_directory_hint_names_tensorboard_for_09():
+    from runevidence.checks import results as results_module
+    from runevidence.models import Manifest09
+
+    class _DirectoryCheck:
+        state = "directory"
+
+    document = document09()
+    document["artifacts"][0].update(
+        {
+            "path": "logs",
+            "artifact_type": "directory",
+            "kind": "directory",
+            "digest_format": "runevidence-directory-v1",
+        }
+    )
+    document["results"][0]["locator"] = {
+        "kind": "tensorboard-tensor",
+        "tag": "t",
+        "step": 0,
+        "occurrence": 0,
+    }
+    manifest = validate_manifest(document)
+    assert isinstance(manifest, Manifest09)
+    findings, _broken, _capped = results_module.check_targeted_results(
+        manifest, manifest.artifacts[0], _DirectoryCheck()
+    )
+    hints = [finding.hint or "" for finding in findings]
+    assert any("TensorBoard event" in hint for hint in hints), hints
