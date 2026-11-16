@@ -82,3 +82,19 @@ def test_guide_lists_every_include_flag_in_the_table():
         "--include-tf2-media",
     ):
         assert any(flag in row for row in table_rows), f"{flag} has no guide table row"
+
+def test_workspace_guide_names_every_shipped_route():
+    guide = (REPO / "docs" / "rungraph-workspace.md").read_text(encoding="utf-8")
+    for route in (
+        "discover",
+        "init",
+        "validate",
+        "graph",
+        "report",
+        "impact",
+        "compare",
+        "matrix",
+        "leaderboard",
+    ):
+        assert f"rungraph {route}" in guide, f"rungraph {route} is missing from the workspace guide"
+    assert "rungraph-workspace.md" in README, "the README does not link the workspace guide"

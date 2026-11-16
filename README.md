@@ -1025,6 +1025,24 @@ stays free of tool dependencies:
 See [docs/adapters.md](https://github.com/shihaab453/rungraph/blob/main/docs/adapters.md) for format details, limits and how to
 write an adapter for your tool.
 
+## RunGraph workspaces
+
+`rungraph` composes several `runevidence.json` manifests into one project-level view.
+It is read-only in this release: it never rewrites a member manifest.
+
+```bash
+rungraph discover path/to/project
+rungraph init path/to/project --id study --name "Study"
+rungraph validate path/to/project
+rungraph report path/to/project
+rungraph impact path/to/project --from artifact:exp-a#test-data
+rungraph compare path/to/project --metric accuracy
+```
+
+`rungraph.json` names the members and may carry cross-member claims and relationships.
+See [docs/rungraph-workspace.md](https://github.com/shihaab453/rungraph/blob/main/docs/rungraph-workspace.md)
+for the document, claim states, graph, impact, comparison and limits.
+
 ## Limits and guarantees
 
 Read these before relying on a green `validate` for anything important.
