@@ -720,6 +720,11 @@ re-verification against the event file and compact display. See
 [docs/schema-0.8-tensorboard-media.md](docs/schema-0.8-tensorboard-media.md).
 
 
+Schema 0.10 adds opt-in **TF2 image and audio summaries**
+(`init --include-tf2-media`): `tf.summary.image`/`tf.summary.audio` string
+tensors become digest references with a per-payload `element` index. See
+[docs/schema-0.10-tf2-media.md](docs/schema-0.10-tf2-media.md).
+
 Schema 0.9 adds opt-in **numeric tensor digests** (`init --include-tensors`):
 canonical `TensorValue` results for float32/float64/int32/int64 arrays, with exact
 re-verification and compact display. See

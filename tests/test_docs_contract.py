@@ -17,6 +17,7 @@ PAGES = {
     "0.7": "schema-0.7-tensorboard-histograms.md",
     "0.8": "schema-0.8-tensorboard-media.md",
     "0.9": "schema-0.9-tensorboard-tensors.md",
+    "0.10": "schema-0.10-tf2-media.md",
 }
 
 
@@ -35,6 +36,7 @@ def test_guide_names_every_init_include_flag():
         "--include-images",
         "--include-audio",
         "--include-tensors",
+        "--include-tf2-media",
     ):
         assert flag in GUIDE, f"{flag} is missing from the TensorBoard guide"
         assert flag in README, f"{flag} is missing from README.md"
@@ -77,5 +79,6 @@ def test_guide_lists_every_include_flag_in_the_table():
         "--include-images",
         "--include-audio",
         "--include-tensors",
+        "--include-tf2-media",
     ):
         assert any(flag in row for row in table_rows), f"{flag} has no guide table row"
