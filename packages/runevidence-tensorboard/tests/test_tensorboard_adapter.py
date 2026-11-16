@@ -3060,3 +3060,213 @@ def test_init_force_refuses_an_existing_08_manifest(tmp_path, capsys):
     out = capsys.readouterr()
     assert cli_module.INIT_0_8_REFUSAL in (out.out + out.err)
     assert (root / MANIFEST_FILENAME).read_bytes() == before
+
+
+# --- Schema 0.9 tensor digests ---------------------------------------------
+
+
+def _tensor_payload(dtype: int, dims: tuple[int, ...], content: bytes) -> bytes:
+    shape = b"".join(_bytes_field(2, _varint_field(1, d)) for d in dims)
+    return _varint_field(1, dtype) + _bytes_field(2, shape) + _bytes_field(4, content)
+
+
+def _tensor_event(tag: bytes, payload: bytes, *, step: int = 0) -> bytes:
+    return _event(step=step, summary_bytes=_summary(_value(tag, tensor_bytes=payload)))
+
+
+def test_include_tensors_writes_schema_09(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    payload = _tensor_payload(1, (2, 2), struct.pack("<4f", 1, 2, 3, 4))
+    _write(root / "e.tfevents", _records(_scalar_event(b"loss", 0.5, step=1), _tensor_event(b"logits", payload)))
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tensors"]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.9"
+    kinds = {result["locator"]["kind"] for result in document["results"]}
+    assert kinds == {"tensorboard", "tensorboard-tensor"}
+    tensor = next(r for r in document["results"] if r["locator"]["kind"] == "tensorboard-tensor")
+    assert tensor["name"] == "logits @ 0 (tensor)"
+    assert tensor["value"]["dtype"] == "float32"
+    assert tensor["value"]["shape"] == [2, 2]
+    assert tensor["value"]["element_count"] == 4
+    assert main(["validate", str(root)]) == 0
+    capsys.readouterr()
+
+
+def test_tensor_only_skips_other_kinds(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    payload = _tensor_payload(1, (2,), struct.pack("<2f", 1, 2))
+    _write(
+        root / "e.tfevents",
+        _records(
+            _scalar_event(b"loss", 0.5, step=1),
+            _string_event(b"config", b"x", step=2),
+            _histo_event(b"weights", step=3),
+            _image_event(b"samples", _media_png(), step=4),
+            _tensor_event(b"logits", payload, step=5),
+        ),
+    )
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tensors"]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    kinds = [result["locator"]["kind"] for result in document["results"]]
+    assert kinds == ["tensorboard", "tensorboard-tensor"]
+
+
+def test_all_flags_record_every_tensorboard_kind_at_09(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    payload = _tensor_payload(2, (2,), struct.pack("<2d", 1, 2))
+    _write(
+        root / "e.tfevents",
+        _records(
+            _scalar_event(b"loss", 0.5, step=1),
+            _string_event(b"config", b"x", step=2),
+            _histo_event(b"weights", step=3),
+            _image_event(b"samples", _media_png(), step=4),
+            _audio_event(b"clip", _media_wav(), step=5),
+            _tensor_event(b"logits", payload, step=6),
+        ),
+    )
+    assert (
+        main(
+            [
+                "init",
+                str(root),
+                "--adapter",
+                "tensorboard",
+                "--include-strings",
+                "--include-histograms",
+                "--include-images",
+                "--include-audio",
+                "--include-tensors",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert document["schema_version"] == "0.9"
+    assert len(document["results"]) == 6
+    assert main(["validate", str(root)]) == 0
+    capsys.readouterr()
+
+
+def test_tensor_display_and_compare_flags(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    for run, seed in (("trainA", 1.0), ("trainB", 2.0)):
+        payload = _tensor_payload(1, (2, 2), struct.pack("<4f", seed, seed, seed, seed))
+        _write(root / run / "e.tfevents", _records(_tensor_event(b"logits", payload)))
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tensors"]) == 0
+    capsys.readouterr()
+    document = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    runs = {run["name"]: run["id"] for run in document["runs"]}
+    assert main(["inspect", str(root)]) == 0
+    assert "tensor(float32[2x2], 4 elements)" in capsys.readouterr().out
+    assert main(["compare", "--base", runs["trainA"], "--target", runs["trainB"], str(root)]) == 0
+    assert "tensor(float32[2x2], 4 elements)" in capsys.readouterr().out
+    assert main(["compare", "--base", runs["trainA"], "--target", runs["trainB"], str(root), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    row = next(item for item in data["results"] if item["name"].startswith("logits"))
+    assert row["baseline_tensor"] is True and row["target_tensor"] is True
+    assert "baseline_histogram" not in row
+    assert main(["matrix", str(root)]) == 0
+    assert "tensor(float32[2x2], 4 elements)" in capsys.readouterr().out
+
+
+def test_tensor_checker_reports_a_tampered_digest(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    payload = _tensor_payload(1, (2,), struct.pack("<2f", 1, 2))
+    _write(root / "e.tfevents", _records(_tensor_event(b"logits", payload)))
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tensors"]) == 0
+    capsys.readouterr()
+    path = root / MANIFEST_FILENAME
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["results"][0]["value"]["sha256"] = "b" * 64
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert main(["validate", str(root)]) == 1
+    out = capsys.readouterr().out
+    assert "does not match the recorded value" in out
+    assert "tensorboard-tensor:step=0,occurrence=0" in out
+
+
+def test_tensor_checker_missing_occurrence(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    payload = _tensor_payload(1, (2,), struct.pack("<2f", 1, 2))
+    _write(root / "e.tfevents", _records(_tensor_event(b"logits", payload)))
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tensors"]) == 0
+    capsys.readouterr()
+    path = root / MANIFEST_FILENAME
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["results"][0]["locator"]["occurrence"] = 1
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert main(["validate", str(root)]) == 1
+    out = capsys.readouterr().out
+    assert "was not found" in out
+    assert "tensorboard-tensor:step=0,occurrence=1" in out
+
+
+def test_tensor_scalar_recorded_value_is_unsupported(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    payload = _tensor_payload(1, (2,), struct.pack("<2f", 1, 2))
+    _write(root / "e.tfevents", _records(_tensor_event(b"logits", payload)))
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tensors"]) == 0
+    capsys.readouterr()
+    path = root / MANIFEST_FILENAME
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["results"][0]["value"] = 1.5
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert main(["validate", str(root)]) == 1
+    assert "selects an unsupported value" in capsys.readouterr().out
+
+
+def test_tensor_budget_texts_by_flag_set():
+    from runevidence_tensorboard import adapter as adapter_module
+
+    def message(**flags):
+        return adapter_module._budget_message(adapter_module._State(None, **flags))
+
+    assert message(include_tensors=True) == adapter_module.BUDGET_MESSAGE_08
+    assert (
+        message(include_tensors=True, include_strings=True)
+        == adapter_module.BUDGET_MESSAGE_06
+    )
+    assert (
+        message(include_tensors=True, include_histograms=True)
+        == adapter_module.BUDGET_MESSAGE_07_HIST
+    )
+    assert (
+        message(include_tensors=True, include_strings=True, include_histograms=True)
+        == adapter_module.BUDGET_MESSAGE_07
+    )
+    assert (
+        message(include_tensors=True, include_images=True, include_histograms=True)
+        == adapter_module.BUDGET_MESSAGE_07_HIST
+    )
+
+
+def test_tensor_capability_error_names_the_selected_adapter(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    _write(root / "metrics.json", b"{}")
+    assert main(["init", str(root), "--adapter", "generic", "--include-tensors"]) == 2
+    out = capsys.readouterr()
+    assert (
+        "ERROR: adapter 'generic' does not support --include-tensors. Nothing was written."
+        in (out.out + out.err)
+    )
+
+
+def test_init_force_refuses_an_existing_09_manifest(tmp_path, capsys):
+    from runevidence import cli as cli_module
+
+    root = tmp_path / "experiment"
+    payload = _tensor_payload(1, (2,), struct.pack("<2f", 1, 2))
+    _write(root / "e.tfevents", _records(_tensor_event(b"logits", payload)))
+    assert main(["init", str(root), "--adapter", "tensorboard", "--include-tensors"]) == 0
+    capsys.readouterr()
+    before = (root / MANIFEST_FILENAME).read_bytes()
+    assert (
+        main(["init", str(root), "--adapter", "tensorboard", "--include-tensors", "--force"])
+        == 2
+    )
+    assert cli_module.INIT_0_9_REFUSAL in (capsys.readouterr().out)
+    assert (root / MANIFEST_FILENAME).read_bytes() == before

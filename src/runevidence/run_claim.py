@@ -46,6 +46,7 @@ def _display_details(details: dict[str, Any]) -> dict[str, Any]:
         "tensorboard-histogram",
         "tensorboard-image",
         "tensorboard-audio",
+        "tensorboard-tensor",
     ):
         return {**details, "locator": display_locator(locator)}
     return details

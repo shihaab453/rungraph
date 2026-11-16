@@ -20,6 +20,7 @@ from ..models import (
     SCHEMA_VERSION_0_6,
     SCHEMA_VERSION_0_7,
     SCHEMA_VERSION_0_8,
+    SCHEMA_VERSION_0_9,
     Manifest,
     RelationshipType as T,
 )
@@ -153,6 +154,7 @@ def check_graph(
             SCHEMA_VERSION_0_6,
             SCHEMA_VERSION_0_7,
             SCHEMA_VERSION_0_8,
+            SCHEMA_VERSION_0_9,
         )
         else "0.3"
     )
@@ -427,6 +429,7 @@ def check_graph(
                             SCHEMA_VERSION_0_6,
                             SCHEMA_VERSION_0_7,
                             SCHEMA_VERSION_0_8,
+                            SCHEMA_VERSION_0_9,
                         )
                         and any(ident in capped for ident in at_risk)
                         else f"Claim: {ev.claim!r}"

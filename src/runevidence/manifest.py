@@ -22,6 +22,7 @@ from .models import (
     SCHEMA_VERSION_0_5,
     SCHEMA_VERSION_0_7,
     SCHEMA_VERSION_0_8,
+    SCHEMA_VERSION_0_9,
     Artifact,
     CsvCellLocator,
     JsonlLocator,
@@ -31,12 +32,15 @@ from .models import (
     Manifest06,
     Manifest07,
     Manifest08,
+    Manifest09,
     AudioValue,
     HistogramValue,
+    TensorValue,
     ImageValue,
     TensorboardHistogramLocator,
     TensorboardAudioLocator,
     TensorboardImageLocator,
+    TensorboardTensorLocator,
     TensorboardLocator,
     TensorboardStringLocator,
 )
@@ -92,6 +96,7 @@ _LOCATOR_TAGS: dict[str, type[BaseModel]] = {
     "tensorboard-histogram": TensorboardHistogramLocator,
     "tensorboard-image": TensorboardImageLocator,
     "tensorboard-audio": TensorboardAudioLocator,
+    "tensorboard-tensor": TensorboardTensorLocator,
 }
 
 
@@ -152,7 +157,16 @@ def _issue_location(
                     return None
                 if (index == len(loc) - 1
                         and all(
-                            a in (bool, int, float, str, HistogramValue, ImageValue, AudioValue)
+                            a in (
+                                bool,
+                                int,
+                                float,
+                                str,
+                                HistogramValue,
+                                ImageValue,
+                                AudioValue,
+                                TensorValue,
+                            )
                             for a in options
                         )):
                     return "".join("/" + component for component in parts)
@@ -312,6 +326,8 @@ def validate_manifest(raw: object) -> Manifest:
             return Manifest07.model_validate(raw)
         if version == SCHEMA_VERSION_0_8:
             return Manifest08.model_validate(raw)
+        if version == SCHEMA_VERSION_0_9:
+            return Manifest09.model_validate(raw)
     return Manifest.model_validate(raw)
 
 
@@ -329,6 +345,8 @@ def _root_model_for(raw: object) -> type[BaseModel]:
             return Manifest07
         if version == SCHEMA_VERSION_0_8:
             return Manifest08
+        if version == SCHEMA_VERSION_0_9:
+            return Manifest09
     return Manifest
 
 
@@ -436,7 +454,7 @@ def artifact_to_dict(artifact: Artifact, schema_version: str = "0.1") -> dict:
     when it was supplied; an omitted label stays omitted.
     """
     if schema_version not in (
-        "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8"
+        "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9"
     ):
         raise ValueError(f"unsupported schema version {schema_version!r}")
     data = artifact.model_dump(mode="json", exclude_defaults=False)

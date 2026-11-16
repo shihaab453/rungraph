@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .models import AudioValue, HistogramValue, ImageValue
+from .models import AudioValue, HistogramValue, ImageValue, TensorValue
 
 
 def histogram_display(value: Any) -> str | None:
@@ -45,13 +45,31 @@ def media_display(value: Any) -> str | None:
     return None
 
 
+def tensor_display(value: Any) -> str | None:
+    """Return ``tensor(<dtype>[<shape>], <n> element[s])`` for a tensor value."""
+    if isinstance(value, TensorValue):
+        data = value.model_dump(mode="json")
+    elif isinstance(value, dict) and value.get("kind") == "tensor":
+        data = value
+    else:
+        return None
+    dtype = data.get("dtype")
+    shape = data.get("shape")
+    count = data.get("element_count")
+    if not isinstance(shape, list):
+        return None
+    dimensions = "x".join(str(item) for item in shape)
+    unit = "element" if count == 1 else "elements"
+    return f"tensor({dtype}[{dimensions}], {count} {unit})"
+
+
 def value_display(value: Any) -> str | None:
     """Compact display for a histogram or media value, in model or dict form."""
-    return histogram_display(value) or media_display(value)
+    return histogram_display(value) or media_display(value) or tensor_display(value)
 
 
 def value_to_json(value: Any) -> Any:
     """Return a JSON-compatible recorded value."""
-    if isinstance(value, (HistogramValue, ImageValue, AudioValue)):
+    if isinstance(value, (HistogramValue, ImageValue, AudioValue, TensorValue)):
         return value.model_dump(mode="json")
     return value
