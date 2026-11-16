@@ -1,34 +1,32 @@
-# TF2 media summaries — design RFC (v0.5)
+# TF2 media summaries — design RFC (v0.6)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED. NOTHING AUTHORIZED BY THIS DOCUMENT.**
 A new design gate and an owner schema-0.10 admission decision are required before any code.
 Schema 0.1–0.9, their readers/checkers and every delivered behavior stay frozen, except the
 additive dispatch, model, migration and text edits this document names explicitly.
 
-## 0. Changes in v0.5
+## 0. Changes in v0.6
 
-Round 4 confirmed the v0.4 design and rejected it on one precedence contradiction and two
-missing test flips. v0.5 fixes them:
+Round 5 accepted the design and rejected v0.5 on one wrong help claim and two missing test
+inventory items. v0.6 fixes them:
 
-- **Ladder completed and ordered like the delivered reader.** Precedence is value, exhausted
-  occurrence (`missing`), element beyond the entry's payload count (`missing`), string-tensor
-  encoding failure (including an entry that conforms only as the other TF2 kind), anything
-  outside structural recognition (`unsupported_value`), absent (`missing`). The encoding-failure
-  flag wins over the other-kind flag exactly as `_media_results` orders `unsupported_scalar`
-  before `non_scalar`; the summary, table and verification plan now agree.
-- **One merge rule, everywhere.** Repeated field-8 fragments merge by protobuf rules and the
-  merged state is validated; the stale "merge fails" test line and the stale compare-flag row
-  are removed.
-- **Derivable ids and a pinned counting unit.** The adapter kind tokens are `tf2-image` and
-  `tf2-audio`; ids append them and `e<element>` always. Occurrence advances once per conforming
-  **entry**, and element records share it.
-- **No new compare flags.** Compare flags derive from the value kind, so TF2 results already set
-  `baseline_image`/`baseline_audio`.
-- Corrections folded: payload range `2..k+1`, `uint32_val`/`uint64_val` and wrong-wire
-  `string_val`, 128-offset retention until the rank is known, seven downgrade edits (0.2 generic,
-  0.3–0.9 explicit), the explicit `--to 0.10` branch, a bounded width/height parse, the
-  docs-contract and guide updates, the legacy media help strings, the capability-error texts,
-  and the multifile name replacing the occurrence suffix.
+- **Tensor help.** It keeps "(opt-in; implies schema 0.9)" only as a prefix; when the TF2 media
+  flag is also passed the run writes 0.10, so the help reads "implies schema 0.9 unless
+  --include-tf2-media selects 0.10".
+- **Future-version tests move forward, not away.** `test_future_schema_version_is_manifest_load_failed`
+  moves to 0.11, and a new test asserts the 0.10 manifest loads and reaches the 0.10
+  `UNSUPPORTED_VERSION` text.
+- **The CLI pin is inventoried.** `tests/test_experimental_cli_parser_contract.py` pins `cli.py`'s
+  bytes; every 0.10 edit repoints it and records the previous pair as historical, as the 0.9
+  slice did.
+- Precision: the encoding-failure precedence names the `non_scalar` flag; the content state is
+  "last-wins non-empty", not a sticky flag; and the inventory adds the schema pins, the package
+  README, the adapter test file, `_decoded_tag`'s 0.10 parameter, `_locator_kind`, and the
+  guide's quick-reference table and identity sentence.
+
+Earlier revisions fixed the reader layouts, the two 0.10-only locator kinds, the ladder order,
+the occurrence unit, the digit bound, the merge rule and the migration arms; those normative
+sections are unchanged here.
 
 ## 1. Problem and scope
 
@@ -67,7 +65,7 @@ Rules:
 - the value↔locator matrix extends one-way: `ImageValue` requires `tensorboard-image`,
   `tensorboard-tf2-image` or `null`; `AudioValue` requires `tensorboard-audio`,
   `tensorboard-tf2-audio` or `null`; scalars keep every locator kind;
-- `Result10` and `Manifest10` add the two kinds (`Manifest10._version_specific_shape` lists ten
+- `Result10` and `Manifest10` add the two kinds (the base `Manifest._version_specific_shape` lists ten
   structured kinds) and nothing else; `TensorboardImageLocator`/`TensorboardAudioLocator` are
   unchanged, so 0.8/0.9 models, generated schemas and pinned files cannot widen;
 - a 0.10 manifest never emits `element` on a legacy locator, and a 0.8/0.9 manifest still
@@ -140,7 +138,9 @@ entry, so the per-element 16 MiB bound is a defensive ceiling, not a reachable b
 
 A candidate that fails any check is an entry-local failure: it yields no result, consumes no
 occurrence, and does not affect siblings. Structural failures the frozen walk already refuses —
-bad keys, wrong wires, truncation, the summary cap — still refuse the whole file.
+bad keys, wire types 3/4/6/7, truncation, the summary cap — still refuse the whole file. The one
+exception is a `string_val` sent on wire 0/1/5: the frozen walk flags it and the entry fails, as
+the 0.6 string profile already does.
 
 ### 3.6 Merge and retention
 
@@ -155,8 +155,8 @@ The 0.10 state is separate from `_TensorState` and retains at most **128** eleme
 covers the largest valid layout (audio `[64, 2]` = 128 values) and the image form (2 + 64 = 66).
 A 129th retained string fails the entry while reading. Besides those offsets it retains the
 dimension count and the first two dimension values (the layouts are rank 1 or rank 2), the final
-dtype, `unknown_rank`, the `tensor_content`, typed-field and wrong-wire flags, per-string size
-flags and one failed flag — all O(1). `_TensorState` and every 0.5–0.9 reader stay byte-identical.
+dtype, `unknown_rank`, the last-wins non-empty `tensor_content` range, typed-field and
+wrong-wire flags, per-string size flags and one failed flag — all O(1). `_TensorState` and every 0.5–0.9 reader stay byte-identical.
 
 ## 4. Identity, ordering, names
 
@@ -185,6 +185,9 @@ extension/kind maps, `capped_kinds`, the directory hint, the cap-message gate,
 an **explicit** `schema_version == SCHEMA_VERSION_0_10` branch; without it TF2 requests fall
 through to `scan_scalars` and vanish.
 
+This ladder governs **only** the two TF2 kinds. Requests for the six delivered TensorBoard kinds
+keep their delivered ladders inside `scan_tensorboard_10`, so a legacy image request on a
+TF2-shaped entry still reports `selects an unsupported value` and no frozen outcome moves.
 Requests for these kinds are `(tag, step, occurrence, element)`; a dedicated state keeps one
 selection per four-tuple. Recognition is structural: an entry is a **string-tensor entry** when
 its winning member is `tensor` (8) and its merged dtype is `DT_STRING` (7), whatever its shape.
@@ -256,10 +259,10 @@ reports "schema 0.3" and loses the cap hint.
 - `migrate --to 0.10` admits 0.1/0.2 through the locator precheck and 0.3–0.9 as version-only
   rewrites. No JSON field is added or removed: `element` exists only on the new kinds, which no
   older manifest can carry.
-- Seven target paths need edits: 0.3 through 0.8 each have an explicit downgrade list, and the
-  0.9 arm has none and needs one; the 0.2 arm already refuses every non-0.1 source generically.
-  The new `--to 0.10` target needs its own explicit branch, because the final `else` in the
-  dispatcher is the 0.5 arm.
+- Seven existing downgrade lists need 0.10: 0.3 through 0.8 each have one, and the 0.9 arm has
+  none and needs one; the 0.2 arm already refuses every non-0.1 source generically. Separately,
+  the new `--to 0.10` target needs its own explicit branch and a `TARGET_VERSIONS` entry, because
+  the final `else` in the dispatcher is the 0.5 arm.
 - Comparability refuses 0.10 by version; `init --force` refuses a declared 0.10 manifest before
   discovery; `_event_artifact_is_volatile` admits `Manifest10`.
 - Fixed texts, all literal:
@@ -276,8 +279,11 @@ the base `_CONDITIONS_ERROR_TEXT` entry and the 0.3-0.9 constants stay byte-iden
 
 `--include-tf2-media` help: `also record TensorFlow 2 image and audio string summaries as
 schema 0.10 results (opt-in; implies schema 0.10)`. The `--include-images`/`--include-audio`
-help becomes "implies schema 0.8 unless a tensor or TF2 media flag selects a later schema"; the
-histogram help already reads that way and the tensor help needs no "unless" clause. Capability errors
+help becomes "implies schema 0.8 unless a tensor or TF2 media flag selects a later schema". The
+histogram help already reads "unless a media or tensor flag selects a later schema", which covers
+the TF2 flag; the tensor help becomes "implies schema 0.9 unless --include-tf2-media selects
+0.10". Both `--include-images`/`--include-audio` and the histogram text are re-read as "unless
+the selected run is a later schema", so no string is false under the precedence. Capability errors
 for the new flag are pinned as `ERROR: adapter {name!r} does not support --include-tf2-media.
 Nothing was written.` and the matching "cannot apply" line. `--to` and migrate parser help list 0.10. The 0.10 cap text
 is `TENSORBOARD_CAP_MESSAGE_06`.
@@ -298,9 +304,12 @@ is `TENSORBOARD_CAP_MESSAGE_06`.
 | `tests/tensorboard_builder.py` | `string_val` support (single and repeated fragments) |
 | `tests/test_cli_migrate.py`, `tests/test_migrate_0_3.py`, `tests/test_migrate_0_4.py`, `tests/test_migrate_0_5.py`, `tests/test_manifest_0_2.py` | the 0.10-as-unsupported expectations move to 0.11 |
 | `tests/data/schema-vectors/reject-unknown-version.json` | declares 0.10; move the fixture to 0.11 so the unknown-version rejection still has a subject |
-| `tests/test_cli_conditions.py` | a 0.10 manifest now loads and reaches the 0.10 `UNSUPPORTED_VERSION` text |
+| `tests/test_cli_conditions.py` | the future-version test moves to 0.11 and a new test asserts the 0.10 `UNSUPPORTED_VERSION` text |
+| `tests/test_experimental_cli_parser_contract.py` | `CLI_HASH` repointed to the 0.10 bytes with the previous pair recorded as historical |
+| `tests/test_schema_freeze.py` | `SCHEMA_PINS` gains the 0.10 schema hash |
+| `packages/runevidence-tensorboard/README.md`, `packages/runevidence-tensorboard/tests/test_tensorboard_adapter.py` | flag documentation and adapter coverage |
 | `tests/test_docs_contract.py` | page map, flag lists, migrate-target and locator-kind assertions gain 0.10 |
-| `docs/tensorboard-guide.md` | schema range, precedence, per-kind list, locator list, caps, migrate/comparability paragraphs, page list and the deliberate-limits section all gain 0.10 and TF2 media |
+| `docs/tensorboard-guide.md` | schema range, precedence, quick-reference flag table, per-kind list, locator list, identity sentence, caps, migrate/comparability paragraphs, page list and the deliberate-limits section all gain 0.10 and TF2 media |
 | `docs/`, `schema/`, `README.md` | 0.10 page, schema file, flag documentation |
 
 ## 9. Verification plan
@@ -320,8 +329,9 @@ is `TENSORBOARD_CAP_MESSAGE_06`.
   and without a conforming entry, so the encoding-before-other-kind precedence is pinned.
 - Differential: for scalar, string, histogram, media and numeric-tensor requests,
   `scan_tensorboard_10` returns the same selections and outcomes as 0.5–0.9 on the same bytes,
-  including lower-kind requests **on TF2-shaped entries** (a rank-1/2 dtype-7 tensor is still an
-  unsupported numeric/scalar entry for those requests).
+  including lower-kind requests **on TF2-shaped entries**, with the per-kind outcomes pinned:
+  scalar, string, histogram and legacy media requests return `unsupported_value`, while a
+  numeric-tensor request returns `unsupported_scalar`.
 - Migration: 0.9 → 0.10 identity; 0.10 → every lower target `DOWNGRADE_UNSUPPORTED`;
   comparability; force guard; 0.8/0.9 still reject both new kinds and `element`.
 - Adapter/CLI: flag precedence, combined flags keep lower kinds, budget text, tag skip, no-match
@@ -341,6 +351,6 @@ is `TENSORBOARD_CAP_MESSAGE_06`.
 
 ## 11. Non-goals
 
-- TF2 `[k,3]` histogram tensors and `tf.make_tensor_proto` rank-0 media.
+- TF2 `[k,3]` histogram tensors and `tf.make_tensor_proto` rank-0/`[1]` single-payload media.
 - Plugin-specific summaries (PR curves, embeddings).
 - Graph/run metadata; transcoding; extraction.
