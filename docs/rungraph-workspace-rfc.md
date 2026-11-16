@@ -1,19 +1,20 @@
-# RunGraph workspace RFC (v0.4)
+# RunGraph workspace RFC (v0.5)
 
 Status: draft for independent review. No implementation is authorised until this contract is
 accepted.
 
 ## 0. Changes in this version
 
-- v0.4 folds the third review: claim citations to artifacts/runs/projects are context, not
-  edges; the member-claim mapping matches the delivered findings; `supported` excludes
-  inherited and unresolved states; the closure is defined once per object kind and matches
-  `foundations`; row identity is the result ID everywhere; `workspace-claim-uncited` replaces
-  the confusing name; `--expected-sha256` precedence and `init --force` staleness are stated;
-  discovery includes declared members under ignored folders.
-- v0.3 folded the second review: stable discovery IDs, full scanning, workspace-claim refs,
-  member relationships/evidence edges, corrected claim predicates, per-kind closure,
-  result-ID rows, patch mapping, JSON envelopes and baseline cases.
+- v0.5 folds the fourth review: context citations are explicitly excluded from every claim
+  predicate; the member-claim `uncited` rule uses the delivered result/artifact/run target
+  set; a cited artifact's closure includes its producing run and inputs; the intended
+  member/workspace asymmetries and `contradicts` inheritance are stated; the combination list
+  is exhaustive.
+- v0.4 folded the third review: context citations retained but not edges; member mapping
+  matched to delivered findings; `supported` excludes inherited/unresolved; closure defined
+  once per object kind and matched to `foundations`; row identity is the result ID everywhere;
+  workspace finding subjects and `uncited` pairs; `--expected-sha256` precedence and
+  `init --force` staleness; declared members under ignored folders.
 
 ## 1. Problem and scope
 
@@ -199,8 +200,13 @@ several findings carries several labels.
 | `conflicting-evidence` on the claim (same target in both lists) | `contradiction-recorded` |
 | `conflicting-evidence` on a result subject (a run reports one metric twice) | no claim state; a result-level finding |
 | any resolved `contradicts` target | `contradiction-recorded` |
-| no result/evidence/claim support target | `uncited` |
+| no support target at all (the `unsupported-claim` warning) | `uncited` |
+| no result/artifact/run support target with a contradiction present | `uncited` + `contradiction-recorded` |
 | otherwise | `supported` |
+
+The workspace-only rule "result/evidence/claim support target" does **not** apply to member
+claims: a member claim supported only by an artifact or run is `supported`, exactly as the
+delivered `ALLOWED_ENDPOINTS` allows.
 
 Structural coverage flags cannot imply `at-risk`; only the delivered `claim-at-risk` finding,
 an inherited state, or the closure rule can.
@@ -211,7 +217,8 @@ The dependency closure is defined once, here, and used by both report and impact
   producing runs recursively, and `derived_from` ancestors of the artifact and inputs;
 - cited run: the run, its input artifacts recursively, and the artifacts it produced (the
   delivered `foundations` for a run);
-- cited artifact: the artifact and its `derived_from` ancestors;
+- cited artifact: the artifact, its `derived_from` ancestors, its producing run, and that
+  run's input artifacts and their producing runs recursively (the delivered `lineage` rule);
 - cited evidence or claim: its citations recursively;
 - every closure follows `derived_from` and member/workspace relationship edges.
 
@@ -228,9 +235,11 @@ artifact in the closure, "touches" the claim. Workspace findings carry a subject
 a `claim:<workspace>#<id>` node ID, or the qualified reference text; a finding with no subject
 touches the member only.
 
-Predicates:
+Predicates. In this section "target" means a traversed citation (result, evidence or
+workspace claim). A context citation (artifact, run, project) never satisfies a predicate and
+never makes a claim `at-risk`.
 
-- `unresolved`: any support/contradicts ref names a missing member, a missing local ID, an
+- `unresolved`: any support/contradicts target names a missing member, a missing local ID, an
   ambiguous duplicate local ID, or a missing workspace claim; or a cited claim carries
   `unresolved`.
 - `contradiction-recorded`: at least one `contradicts` target resolves, or a cited claim
@@ -238,18 +247,31 @@ Predicates:
 - `at-risk`: any support/contradicts target or closure is touched by an error-level finding;
   any ref is unresolved; or a cited claim carries `at-risk`. `unresolved` therefore always
   implies `at-risk`.
-- `supported`: at least one support target is a result, evidence or claim; every support
-  target resolves; no support target, contradiction target or closure is touched by an error;
-  no ref is unresolved; no cited claim carries `unresolved` or `at-risk`. A recorded
+- `supported`: for a workspace claim, at least one support target is a result, evidence or
+  claim; for a member claim, any delivered support target (result, artifact or run). Every
+  support target resolves; no support target, contradiction target or closure is touched by an
+  error; no ref is unresolved; no cited claim carries `unresolved` or `at-risk`. A recorded
   contradiction does **not** block `supported`.
-- `uncited`: no result/evidence/claim support target (context-only or contradiction-only).
+- `uncited`: for a workspace claim, no result/evidence/claim support target; for a member
+  claim, no support target at all (context-only or contradiction-only workspace claims are
+  `uncited`).
 
-Allowed combinations: `unresolved` with `at-risk`; `contradiction-recorded` with `supported`
-or `at-risk`; `supported` with `contradiction-recorded`; `uncited` with `at-risk` (a broken
-contradiction target or inherited state) or `unresolved`. Never `supported` with `at-risk` or
-`unresolved`; never `uncited` with `supported`. For a single sort label the precedence is
+Allowed combinations: `unresolved` with `at-risk` or `contradiction-recorded`;
+`contradiction-recorded` with `supported`, `at-risk` or `uncited`; `supported` with
+`contradiction-recorded`; `uncited` with `at-risk` (a broken contradiction target or inherited
+state) or `unresolved`. Never `supported` with `at-risk` or `unresolved`; never `uncited`
+with `supported`. The list is exhaustive for the labels above. For a single sort label the
+precedence is
 `unresolved` > `contradiction-recorded` > `at-risk` > `supported` > `uncited`. All applicable
 labels are printed in text and JSON.
+
+Two asymmetries are intended. A member claim's state is its own recorded structure: a
+same-target `conflicting-evidence` error makes it `contradiction-recorded` while it stays
+`supported`. A workspace claim citing it is `at-risk`, because that error is on an object in
+the workspace claim's closure. Likewise, a result-subject `conflicting-evidence` makes a
+workspace claim citing the result `at-risk`, while the member claim citing it stays
+`supported`. Inheritance applies through `contradicts` as well as `supports`: contradicting an
+at-risk claim makes the contradicting claim `at-risk`.
 
 `report` runs checks with the same default as `validate`: `--directory-artifacts` is an
 explicit flag; without it the report states that directory artifacts were not checked. It
@@ -515,7 +537,9 @@ Claims: every state and allowed combination, including `supported` + `contradict
 citations retained but not traversed (an error on a context artifact does not make `at-risk`);
 a cited at-risk member claim inherits its state and is never `supported`; an evidence closure;
 the per-kind closure (`foundations` parity: a cited result does not include the run's other
-outputs, a cited run does); an output-artifact break where report and impact agree; duplicate
+outputs, a cited run does, a cited artifact includes its producing run and inputs); a broken
+upstream artifact (A0 -> run X -> A1) is in the closure and listed by impact; an
+output-artifact break where report and impact agree; duplicate
 local ID refusal; the member mapping table for `claim-unverified`, `unsupported-claim`
 warning/error and same-target `conflicting-evidence`; an ordinary member contradiction; a
 claim with several findings; a claim with no subject finding.
