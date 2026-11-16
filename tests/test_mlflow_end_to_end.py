@@ -32,6 +32,24 @@ def append_row(root: Path, text: str) -> None:
         handle.write(text)
 
 
+def test_an_out_of_range_step_is_unreadable_at_init_and_validate_agrees(tmp_path, capsys):
+    root = make_store(tmp_path)
+    (root / "mlruns/0/run1/metrics/accuracy").write_text(
+        "1700000000000 0.5 9223372036854775808\n", encoding="utf-8"
+    )
+
+    assert main(["init", str(root), "--adapter", "mlflow"]) == 0
+    doc = json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert doc["results"] == []
+    run = doc["runs"][0]
+    assert "mlruns/0/run1/metrics/accuracy" in run["metadata"]["mlflow"]["unreadable"]
+
+    assert main(["validate", str(root)]) == 0
+    assert "result-unverified" in capsys.readouterr().out
+    assert main(["validate", str(root), "--strict"]) == 1
+    assert main(["rehash", str(root), "--all"]) == 0
+
+
 def test_mlflow_summary_lifecycle(tmp_path, capsys):
     root = make_store(tmp_path)
 

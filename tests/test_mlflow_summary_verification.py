@@ -137,6 +137,14 @@ class _ExplodingValue:
     timestamp = 1
 
 
+class _WeirdInt(int):
+    def __le__(self, other):
+        return True
+
+    def __ge__(self, other):
+        return True
+
+
 @pytest.mark.parametrize(
     "owner",
     [
@@ -145,11 +153,22 @@ class _ExplodingValue:
         _MalformedOwner(Summary(float("nan"), 3, 1)),
         _MalformedOwner(Summary(10**400, 3, 1)),
         _MalformedOwner(Summary(0.9, 10**5000, 1)),
+        _MalformedOwner(Summary(0.9, _WeirdInt(3), 1)),
         _MalformedOwner(Summary(0.9, True, 1)),
         _MalformedOwner(_ExplodingValue()),
         _MalformedOwner({"value": 0.9, "step": 3, "timestamp": 1}),
     ],
-    ids=["raises", "string-value", "nan", "huge-int", "huge-step", "bool-step", "raising-property", "dict"],
+    ids=[
+        "raises",
+        "string-value",
+        "nan",
+        "huge-int",
+        "huge-step",
+        "int-subclass",
+        "bool-step",
+        "raising-property",
+        "dict",
+    ],
 )
 def test_a_broken_adapter_warns_instead_of_crashing(tmp_path, capsys, monkeypatch, owner):
     root = make_manifest(tmp_path, value=0.1)

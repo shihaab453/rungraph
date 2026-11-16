@@ -59,7 +59,7 @@ import yaml
 from runevidence.adapters import Adapter, AdapterError, Discovery, Summary
 from runevidence.adapters.generic import slug
 from runevidence.checks.files import IGNORED_DIRS
-from runevidence.summaries import read_bounded, summary_shape
+from runevidence.summaries import MAX_SAFE_INT, MIN_SAFE_INT, read_bounded, summary_shape
 from runevidence.hashing import sha256_file
 from runevidence.models import Artifact, Manifest, Project, Result, Run, is_own_file
 
@@ -574,6 +574,10 @@ def _parse_row(raw: bytes) -> tuple[tuple[int, int, float], tuple[float, int, in
     except (ValueError, OverflowError):
         return None
     if not math.isfinite(value):
+        return None
+    if not (MIN_SAFE_INT <= step <= MAX_SAFE_INT):
+        return None
+    if not (MIN_SAFE_INT <= timestamp <= MAX_SAFE_INT):
         return None
     return (step, timestamp, value), (value, step, timestamp)
 

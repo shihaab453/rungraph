@@ -134,5 +134,15 @@ def test_crlf_and_lone_cr_are_line_boundaries():
     assert _parse_summary(b"1 0.5 1\r2 0.6 2\r") == (0.6, 2, 2)
 
 
+def test_out_of_range_step_and_timestamp_are_refused():
+    assert _parse_summary(b"1 0.5 9223372036854775808\n") is None
+    assert _parse_summary(b"9223372036854775808 0.5 1\n") is None
+    assert _parse_summary(b"9223372036854775807 0.5 9223372036854775807\n") == (
+        0.5,
+        9223372036854775807,
+        9223372036854775807,
+    )
+
+
 def test_empty_input_has_no_summary():
     assert _parse_summary(b"") is None

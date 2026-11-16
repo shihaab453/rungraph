@@ -78,8 +78,8 @@ def summary_owner(manifest: Manifest, result: Result) -> tuple[Optional[Adapter]
     return None, reason
 
 
-_MIN_SAFE_INT = -(2**63)
-_MAX_SAFE_INT = 2**63 - 1
+MIN_SAFE_INT = -(2**63)
+MAX_SAFE_INT = 2**63 - 1
 
 
 def checked_summary(summary: object) -> Optional[tuple[float, int, int]]:
@@ -93,15 +93,15 @@ def checked_summary(summary: object) -> Optional[tuple[float, int, int]]:
         value = getattr(summary, "value", None)
         step = getattr(summary, "step", None)
         timestamp = getattr(summary, "timestamp", None)
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if type(value) not in (int, float):
             return None
-        if isinstance(step, bool) or not isinstance(step, int):
+        if type(step) is not int:
             return None
-        if isinstance(timestamp, bool) or not isinstance(timestamp, int):
+        if type(timestamp) is not int:
             return None
-        if not (_MIN_SAFE_INT <= step <= _MAX_SAFE_INT):
+        if not (MIN_SAFE_INT <= step <= MAX_SAFE_INT):
             return None
-        if not (_MIN_SAFE_INT <= timestamp <= _MAX_SAFE_INT):
+        if not (MIN_SAFE_INT <= timestamp <= MAX_SAFE_INT):
             return None
         if not math.isfinite(value):
             return None
