@@ -123,6 +123,10 @@ HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
     # version-keyed conditions; superseded by the phase 4b volatile hook.
     "acfb857e1e1b0af5963036c4e848e356449f2b7f8fe97e38209675af559e9084",  # LF
     "67ddbd0d38b65038163c107ec5e82cb4666f0788ed769af54bbd16d889ca283b",  # CRLF
+    # Pre-qualification 31-route bytes (2026-11-16): superseded by clean refusal
+    # of a malformed authoring --file in both CLIs. Historical only.
+    "0a12dc964da57d928b9a6e8102c53c85e9cbbe92be1fcaf8fc70d6ec95b14f7e",  # LF
+    "7ab929f6b2c454a9b9d9ef137f7e3f81c47134315a361d2a68b68f2edb7c35ca",  # CRLF
 })
 HISTORICAL_READER_HASHES = (
     # Capture (2026-11-16): the 30-route reader assertion was updated for capture.
@@ -160,8 +164,10 @@ HISTORICAL_READER_DIGEST_23 = (
 # pin is an exact byte SHA-256. Nothing is normalized during checking. Static
 # != plugin safety.
 CLI_HASH = frozenset({
-    "0a12dc964da57d928b9a6e8102c53c85e9cbbe92be1fcaf8fc70d6ec95b14f7e",  # LF
-    "7ab929f6b2c454a9b9d9ef137f7e3f81c47134315a361d2a68b68f2edb7c35ca",  # CRLF
+    # Qualification (2026-11-16): authoring --file read and workspace --file read
+    # refuse malformed JSON cleanly instead of raising. Same 31-route surface.
+    "2ad833db92f66331f20a33380b699716beb05953860d3812d9868768646ecb71",  # LF
+    "b78aff513643e346fe95cd788a8ecc5c280fd8644aaa08e75d1497e23085af40",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.

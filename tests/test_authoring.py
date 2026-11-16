@@ -80,3 +80,29 @@ def test_dry_run_writes_nothing(tmp_path: Path, capsys):
     result = {"id": "acc", "run_id": "run", "name": "accuracy", "value": 0.9}
     assert main(["result", "add", str(path), "--file", write_json(tmp_path / "r.json", result), "--dry-run"]) == 0
     assert path.read_bytes() == before
+
+
+def test_a_malformed_file_is_refused_without_a_traceback(tmp_path: Path, capsys):
+    path = make_manifest(tmp_path)
+    broken = tmp_path / "broken.json"
+    broken.write_text("{", encoding="utf-8")
+    before = path.read_bytes()
+    for argv in (
+        ["result", "add", str(path), "--file", str(broken)],
+        ["evidence", "add", str(path), "--file", str(broken)],
+        ["relationship", "add", str(path), "--file", str(broken)],
+    ):
+        assert main(argv) == 2
+        captured = capsys.readouterr()
+        assert "cannot read" in captured.out
+        assert "Traceback" not in captured.err
+        assert path.read_bytes() == before
+
+
+def test_edit_needs_an_id_in_the_file(tmp_path: Path, capsys):
+    path = make_manifest(tmp_path)
+    before = path.read_bytes()
+    entry = {"run_id": "run", "name": "accuracy", "value": 0.9}
+    assert main(["result", "edit", str(path), "--file", write_json(tmp_path / "r.json", entry)]) == 2
+    assert "non-empty 'id'" in capsys.readouterr().out
+    assert path.read_bytes() == before

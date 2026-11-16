@@ -912,29 +912,64 @@ def _author_manifest(args: argparse.Namespace, mutate, summary: str) -> int:
     return EXIT_OK
 
 
+def _read_authoring_entry(args: argparse.Namespace) -> dict | None:
+    """Read a --file payload, reporting a bad file like any other authoring refusal."""
+    try:
+        return authoring.read_json_file(Path(args.file))
+    except authoring.AuthoringError as exc:
+        if args.json:
+            print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": str(exc), "exit_code": EXIT_INVALID}))
+        else:
+            print(f"ERROR: {exc}\nNothing was written.")
+        return None
+
+
+def _authoring_entry_id(args: argparse.Namespace, entry: dict) -> str | None:
+    entry_id = entry.get("id")
+    if isinstance(entry_id, str) and entry_id:
+        return entry_id
+    message = "the file needs a non-empty 'id' for this action"
+    if args.json:
+        print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": message, "exit_code": EXIT_INVALID}))
+    else:
+        print(f"ERROR: {message}\nNothing was written.")
+    return None
+
+
 def cmd_result(args: argparse.Namespace) -> int:
     if args.action == "remove":
         return _author_manifest(args, lambda raw: authoring.remove_result(raw, args.id), f"remove result {args.id}")
-    path = Path(args.file)
-    entry = authoring.read_json_file(path)
+    entry = _read_authoring_entry(args)
+    if entry is None:
+        return EXIT_INVALID
     if args.action == "add":
         return _author_manifest(args, lambda raw: authoring.add_result(raw, entry), f"add result {entry.get('id')}")
-    return _author_manifest(args, lambda raw: authoring.edit_result(raw, entry["id"], entry), f"edit result {entry.get('id')}")
+    entry_id = _authoring_entry_id(args, entry)
+    if entry_id is None:
+        return EXIT_INVALID
+    return _author_manifest(args, lambda raw: authoring.edit_result(raw, entry_id, entry), f"edit result {entry.get('id')}")
 
 
 def cmd_evidence(args: argparse.Namespace) -> int:
     if args.action == "remove":
         return _author_manifest(args, lambda raw: authoring.remove_evidence(raw, args.id), f"remove claim {args.id}")
-    entry = authoring.read_json_file(Path(args.file))
+    entry = _read_authoring_entry(args)
+    if entry is None:
+        return EXIT_INVALID
     if args.action == "add":
         return _author_manifest(args, lambda raw: authoring.add_evidence(raw, entry), f"add claim {entry.get('id')}")
-    return _author_manifest(args, lambda raw: authoring.edit_evidence(raw, entry["id"], entry), f"edit claim {entry.get('id')}")
+    entry_id = _authoring_entry_id(args, entry)
+    if entry_id is None:
+        return EXIT_INVALID
+    return _author_manifest(args, lambda raw: authoring.edit_evidence(raw, entry_id, entry), f"edit claim {entry.get('id')}")
 
 
 def cmd_relationship(args: argparse.Namespace) -> int:
     if args.action == "remove":
         return _author_manifest(args, lambda raw: authoring.remove_relationship(raw, args.index), f"remove relationship {args.index}")
-    entry = authoring.read_json_file(Path(args.file))
+    entry = _read_authoring_entry(args)
+    if entry is None:
+        return EXIT_INVALID
     return _author_manifest(args, lambda raw: authoring.add_relationship(raw, entry), "add relationship")
 
 

@@ -127,3 +127,29 @@ def test_report_baseline_lists_changed_objects(tmp_path: Path, capsys):
     data = json.loads(capsys.readouterr().out)
     member = next(item for item in data["baseline"]["members"] if item["id"] == "prov-a")
     assert ["result", "acc"] in member["changed"]
+
+
+def test_a_malformed_claim_file_is_refused_without_a_traceback(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    init(root)
+    capsys.readouterr()
+    broken = tmp_path / "broken.json"
+    broken.write_text("{", encoding="utf-8")
+    before = (root / "rungraph.json").read_bytes()
+    assert main(["claim", "add", str(root), "--file", str(broken)]) == 2
+    captured = capsys.readouterr()
+    assert "rungraph-error" in captured.out
+    assert "Traceback" not in captured.err
+    assert (root / "rungraph.json").read_bytes() == before
+
+
+def test_a_claim_file_needs_an_id(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    init(root)
+    capsys.readouterr()
+    claim_file = tmp_path / "claim.json"
+    claim_file.write_text(json.dumps({"claim": "no id"}), encoding="utf-8")
+    before = (root / "rungraph.json").read_bytes()
+    assert main(["claim", "add", str(root), "--file", str(claim_file)]) == 2
+    assert "non-empty 'id'" in capsys.readouterr().out
+    assert (root / "rungraph.json").read_bytes() == before

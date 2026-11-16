@@ -94,6 +94,21 @@ def test_a_context_citation_does_not_count_as_support(tmp_path: Path):
     assert "uncited" in workspace_claim.labels
 
 
+def test_a_workspace_claim_with_an_unresolved_reference_is_flagged(tmp_path: Path):
+    claims = [
+        {
+            "id": "w1",
+            "claim": "a's missing result holds",
+            "supports": [{"member": "a", "id": "absent"}],
+            "contradicts": [],
+        }
+    ]
+    _, result = states(make_workspace(tmp_path, claims))
+    workspace_claim = next(item for item in result if item.member is None)
+    assert {"unresolved", "at-risk"} <= set(workspace_claim.labels)
+    assert "supported" not in workspace_claim.labels
+
+
 def test_claim_cycles_are_reported(tmp_path: Path):
     claims = [
         {"id": "c1", "claim": "one", "supports": [{"claim": "c2"}], "contradicts": []},
@@ -101,3 +116,29 @@ def test_claim_cycles_are_reported(tmp_path: Path):
     ]
     graph, _ = states(make_workspace(tmp_path, claims))
     assert graph.cycles
+
+
+def test_a_member_claim_with_an_unresolved_support_ref_is_at_risk(tmp_path: Path):
+    root = make_workspace(tmp_path)
+    manifest_path = root / "a" / "runevidence.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["evidence"][0]["supports"] = ["absent"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    _, result = states(root)
+    member_claim = next(item for item in result if item.member == "a")
+    assert {"unresolved", "at-risk"} <= set(member_claim.labels)
+    assert "supported" not in member_claim.labels
+
+
+def test_a_member_claim_with_a_dangling_contradiction_stays_unresolved(tmp_path: Path):
+    root = make_workspace(tmp_path)
+    manifest_path = root / "a" / "runevidence.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["evidence"][0]["supports"] = ["r"]
+    manifest["evidence"][0]["contradicts"] = ["absent"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    _, result = states(root)
+    member_claim = next(item for item in result if item.member == "a")
+    assert "unresolved" in member_claim.labels
+    assert "at-risk" not in member_claim.labels
+    assert "supported" not in member_claim.labels

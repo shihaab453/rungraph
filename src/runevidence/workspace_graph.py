@@ -354,6 +354,7 @@ def claim_states(
             target = _claim_ref_target(graph, loaded, ref)
             if target is None or graph.nodes.get(target, Node("", "", None, None)).status == "unresolved":
                 labels.add("unresolved")
+                labels.add("at-risk")
                 continue
             node = graph.nodes[target]
             if node.kind in ("artifact", "run", "project"):
@@ -401,6 +402,8 @@ def _member_state(member_id, evidence, index, graph, by_node) -> ClaimState:
             labels.add("contradiction-recorded")
     if evidence.contradicts:
         labels.add("contradiction-recorded")
+    if any(ref not in index for ref in evidence.supports):
+        labels.add("at-risk")
     if not evidence.supports:
         labels.add("uncited")
     if labels & {"unresolved", "at-risk"}:

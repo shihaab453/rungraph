@@ -20,12 +20,13 @@ weights: files are hashed as raw bytes. Core checks metric values in JSON;
 optional adapters also read plain configuration and metric logs. It works
 with any ML stack because it only looks at files.
 
-RunEvidence is V1 of the **RunGraph** project. Schema 0.2, migration and
-conditions authoring are stable; recorded-condition comparability has an
-experimental verdict CLI with a read-only readiness preflight. Single-manifest
-lineage, impact, coverage, review gates and fingerprints are delivered;
-composing several experiments is the remaining RunGraph work. See the
-[product completion contract](docs/product-completion.md) and [Roadmap](#roadmap).
+RunEvidence is V1 of the **RunGraph** project. Versioned schemas with frozen
+reading rules, single-manifest lineage, impact, coverage, review gates and
+fingerprints are delivered, and `rungraph.json` composes several experiments
+into one workspace with cross-member claims. Recorded-condition comparability
+has an experimental verdict CLI with a read-only readiness preflight. See the
+[product completion contract](docs/product-completion.md), the
+[qualification record](docs/qualification.md) and [Roadmap](#roadmap).
 
 ---
 
@@ -1348,22 +1349,23 @@ RunEvidence is the first layer of **RunGraph**. The primary-product scope,
 capability status and completion criteria are recorded in
 [docs/product-completion.md](docs/product-completion.md).
 
-Delivered: versioned schemas 0.1–0.9 with frozen reading rules and migration;
+Delivered: versioned schemas 0.1–0.10 with frozen reading rules and migration;
 generic, Hydra, MLflow file-store and TensorBoard adapters; file, value and
 claim verification; batch validation; single-manifest analysis (run and claim
 detail, lineage, impact, coverage, review gates, fingerprints, comparison,
-metric matrix and leaderboard); guarded artifact authoring and condition
-authoring; directory artifacts; and a stable comparability preflight with an
+metric matrix and leaderboard); guarded artifact, result, evidence,
+relationship and condition authoring; code and environment capture; directory
+artifacts; evidence-aware comparison; a workspace layer (`rungraph.json` and
+the `rungraph` CLI) for cross-member graphs, claims, reports, impact, compare,
+matrix and leaderboard; and a stable comparability preflight with an
 experimental comparison verdict.
 
-Remaining primary-product work: composing several experiments (cross-manifest
-provenance, claims, impact and one consolidated report); safe authoring for
-results, claims, evidence and relationships; code and environment capture;
-evidence-aware comparison; and the documentation, examples and end-to-end
-qualification that make the whole surface discoverable. Two known MLflow
-limitations (summary freshness after an accepted metric-file change, and
-unbounded metric-history memory) are tracked in the completion contract.
-YAML manifests remain deferred: JSON is the authority, and the
+Every capability in the completion contract is complete except the declared
+platform bound (writer concurrency without a POSIX directory lock, and
+directory artifacts on non-Linux filesystems). The
+[qualification record](qualification.md) holds the evidence. No tag, version
+bump or package-index publication is part of this contract. YAML manifests
+remain deferred: JSON is the authority, and the
 [decision memo](https://github.com/shihaab453/rungraph/blob/main/docs/manifest-format-yaml-decision-memo.md)
 records why.
 
