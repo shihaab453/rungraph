@@ -21,7 +21,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
 from .adapters.generic import _unique, valid_slug
-from .checks.files import _is_absolute, _within, iter_files
+from .checks.files import ScanLimitError, _is_absolute, _within, iter_files
 from .checks.graph import check_graph
 from .checks.results import _MISSING, MAX_JSON_BYTES, resolve_pointer, values_match
 from .findings import Code
@@ -475,7 +475,11 @@ def plan_add(
         if not _within(root, full):
             raise EditError(f"{str(given)!r} is outside the experiment folder {root}")
         if full.is_dir():
-            for rel in iter_files(root, full):
+            try:
+                tree = list(iter_files(root, full))
+            except ScanLimitError as exc:
+                raise EditError(f"{str(given)!r} cannot be scanned: {exc}") from None
+            for rel in tree:
                 if is_own_file(rel):
                     continue
                 if _key(root / rel) in tracked:

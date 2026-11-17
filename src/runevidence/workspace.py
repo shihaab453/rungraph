@@ -280,9 +280,34 @@ class LoadedWorkspace:
 
 
 def _member_folder(root: Path, member: Member) -> Path:
-    folder = root.joinpath(*PurePosixPath(member.path).parts)
+    parts = PurePosixPath(member.path).parts
+    folder = root.joinpath(*parts)
     if not folder.is_dir():
         raise WorkspaceError(f"member {member.id!r}: folder {member.path!r} does not exist")
+    try:
+        root_real = root.resolve()
+        folder_real = folder.resolve(strict=True)
+    except OSError:
+        raise WorkspaceError(f"member {member.id!r}: folder {member.path!r} cannot be resolved") from None
+    if folder_real != root_real and root_real not in folder_real.parents:
+        raise WorkspaceError(
+            f"member {member.id!r}: folder {member.path!r} resolves outside the workspace"
+        )
+    # A member folder is physical: a symlinked component could be repointed
+    # after this check, so it is refused rather than followed.
+    current = root
+    for part in parts:
+        current = current / part
+        try:
+            info = os.lstat(current)
+        except OSError:
+            raise WorkspaceError(
+                f"member {member.id!r}: folder {member.path!r} cannot be inspected"
+            ) from None
+        if stat.S_ISLNK(info.st_mode):
+            raise WorkspaceError(
+                f"member {member.id!r}: folder {member.path!r} contains a symbolic link"
+            )
     return folder
 
 
@@ -353,7 +378,7 @@ def load_workspace(target: Path) -> LoadedWorkspace:
     loaded = _resolve_members(root, document)
     for item in loaded.values():
         try:
-            item.manifest = load_manifest(item.folder).manifest
+            item.manifest = load_manifest(item.manifest_path).manifest
         except (ManifestLoadError, OSError, ValueError) as exc:
             item.error = str(exc)
     return LoadedWorkspace(root=root, path=path, document=document, members=loaded)
@@ -368,6 +393,7 @@ class DiscoveredMember:
     schema_version: Optional[str] = None
     error: Optional[str] = None
     duplicate: bool = False
+    manifest: str = MANIFEST_FILENAME
 
 
 @dataclass
@@ -460,9 +486,12 @@ def discover(root: Path) -> Discovery:
             stable = False
         used.add(member_id)
         by_folder[folder] = member_id
-        entry = DiscoveredMember(path=rel, id=member_id, stable=stable, loads=False)
+        manifest_name = member.manifest if member is not None else MANIFEST_FILENAME
+        entry = DiscoveredMember(
+            path=rel, id=member_id, stable=stable, loads=False, manifest=manifest_name
+        )
         try:
-            loaded = load_manifest(folder)
+            loaded = load_manifest(folder / manifest_name)
             entry.loads = True
             entry.schema_version = loaded.manifest.schema_version
         except (ManifestLoadError, OSError, ValueError) as exc:
@@ -471,7 +500,11 @@ def discover(root: Path) -> Discovery:
         result.members.append(entry)
     seen: dict[tuple[int, int], str] = {}
     for folder in folders:
-        manifest = folder / MANIFEST_FILENAME
+        rel = folder.relative_to(root).as_posix()
+        declared_member = declared.get(rel)
+        manifest = folder / (
+            declared_member.manifest if declared_member is not None else MANIFEST_FILENAME
+        )
         try:
             info = os.lstat(manifest)
         except OSError:
@@ -728,7 +761,7 @@ def apply_patch(
 
     for member_id, item in members.items():
         try:
-            item.manifest = load_manifest(item.folder).manifest
+            item.manifest = load_manifest(item.manifest_path).manifest
         except (ManifestLoadError, OSError, ValueError) as exc:
             raise _patch_error(f"member {member_id!r}: {exc}") from None
     _validate_refs(members, document)

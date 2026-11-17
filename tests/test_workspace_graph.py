@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from runevidence.findings import Code, Severity
 from runevidence.workspace import WORKSPACE_FILENAME, load_workspace
-from runevidence.workspace_consumers import impact_data
+from runevidence.workspace_consumers import impact_data, report_data
 from runevidence.workspace_graph import (
     build_graph,
     claim_states,
@@ -374,3 +375,88 @@ def test_the_closure_keeps_every_recorded_producer(tmp_path: Path):
     assert "at-risk" in member_claim.labels
     closure = claim_support_closure(graph, "evidence:a#e", {"supports"})
     assert {"run:a#r", "run:a#r2", "artifact:a#input2"} <= closure
+
+
+def test_a_member_removed_before_verification_fails_closed(tmp_path: Path):
+    root = make_workspace(tmp_path)
+    loaded = load_workspace(root)
+    graph = build_graph(loaded)
+    (root / "a" / "runevidence.json").unlink()
+
+    checks = run_member_checks(loaded)
+
+    assert checks["reports"] == {}
+    codes = [finding.code for finding in checks["findings"]["a"]]
+    assert Code.manifest_not_found in codes
+    assert checks["findings"]["a"][-1].code is Code.claim_at_risk
+
+    states = claim_states(loaded, graph, checks["findings"])
+    member_claim = next(item for item in states if item.member == "a")
+    assert "at-risk" in member_claim.labels
+    assert "supported" not in member_claim.labels
+    data = report_data(loaded, graph, states, checks)
+    assert data["exit_code"] == 1
+    assert data["members"][0]["counts"]["error"] >= 2
+
+
+def test_a_workspace_claim_loses_support_when_its_member_cannot_be_checked(tmp_path: Path):
+    claims = [
+        {
+            "id": "w1",
+            "claim": "a's evidence holds",
+            "supports": [{"member": "a", "id": "claim"}],
+            "contradicts": [],
+        }
+    ]
+    root = make_workspace(tmp_path, claims)
+    loaded = load_workspace(root)
+    graph = build_graph(loaded)
+    (root / "a" / "runevidence.json").unlink()
+
+    checks = run_member_checks(loaded)
+    states = claim_states(loaded, graph, checks["findings"])
+
+    workspace_claim = next(item for item in states if item.member is None)
+    assert "at-risk" in workspace_claim.labels
+    assert "supported" not in workspace_claim.labels
+
+
+def test_an_unexpected_check_exception_is_an_error_finding(tmp_path: Path, monkeypatch):
+    root = make_workspace(tmp_path)
+    loaded = load_workspace(root)
+
+    def boom(*args: object, **kwargs: object):
+        raise RuntimeError("simulated verifier failure")
+
+    monkeypatch.setattr("runevidence.workspace_graph.run_checks", boom)
+    checks = run_member_checks(loaded)
+
+    codes = [finding.code for finding in checks["findings"]["a"]]
+    assert Code.member_check_failed in codes
+    assert checks["findings"]["a"][0].severity is Severity.error
+
+
+def test_a_long_workspace_claim_chain_is_evaluated_iteratively(tmp_path: Path):
+    count = 1_100
+    claims = [
+        {
+            "id": f"c{index}",
+            "claim": f"claim {index}",
+            "supports": (
+                [{"claim": f"c{index + 1}"}]
+                if index + 1 < count
+                else [{"member": "a", "id": "claim"}]
+            ),
+            "contradicts": [],
+        }
+        for index in range(count)
+    ]
+    root = make_workspace(tmp_path, claims)
+
+    _, result = states(root)
+
+    workspace = [item for item in result if item.member is None]
+    assert len(workspace) == count
+    # The tail cites a member evidence claim whose artifact is missing, so
+    # every link in the chain inherits at-risk without a RecursionError.
+    assert all("at-risk" in item.labels for item in workspace)

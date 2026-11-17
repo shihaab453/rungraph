@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
@@ -12,10 +13,13 @@ from .workspace import (
     WORKSPACE_FILENAME,
     WORKSPACE_FORMAT,
     WORKSPACE_VERSION,
+    Workspace,
     WorkspaceError,
     apply_patch,
     discover,
     load_workspace,
+    save_workspace,
+    workspace_lock,
 )
 from .workspace_consumers import (
     compare_data,
@@ -60,7 +64,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
                 continue
             try:
                 report = run_checks(
-                    load_manifest(result.root / item.path),
+                    load_manifest(result.root / item.path / item.manifest),
                     enable_directory_artifacts=args.directory_artifacts,
                 )
             except Exception:
@@ -121,6 +125,10 @@ def cmd_init(args: argparse.Namespace) -> int:
             if not item.duplicate
         ],
     }
+    try:
+        workspace = Workspace.model_validate(document)
+    except Exception as exc:
+        return _error("init", "invalid", f"invalid workspace document: {exc}")
     if args.dry_run:
         if args.json:
             _print_json({"format": "rungraph-init", "version": "0.1", "path": str(path), "members": document["members"], "backup": None, "written": False, "exit_code": 0})
@@ -128,14 +136,27 @@ def cmd_init(args: argparse.Namespace) -> int:
             print(f"Would write {path} with {len(document['members'])} members.")
         return EXIT_OK
     backup = None
-    if path.exists():
-        backup = path.with_name(path.name + ".bak")
-        index = 2
-        while backup.exists():
-            backup = path.with_name(f"{path.name}.bak.{index}")
-            index += 1
-        path.replace(backup)
-    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    try:
+        with workspace_lock(root):
+            if path.exists():
+                if not args.force:
+                    return _error("init", "exists", f"{WORKSPACE_FILENAME} already exists; use --force")
+                backup = path.with_name(path.name + ".bak")
+                index = 2
+                while backup.exists():
+                    backup = path.with_name(f"{path.name}.bak.{index}")
+                    index += 1
+                shutil.copy2(path, backup)
+                expected = path.read_bytes()
+            else:
+                expected = None
+            # An atomic replace under the workspace lock: a failed write leaves
+            # the previous document (and its copy) in place.
+            save_workspace(workspace, path, expected)
+    except WorkspaceError as exc:
+        return _error("init", "workspace", str(exc))
+    except OSError as exc:
+        return _error("init", "workspace", f"cannot write {path}: {exc.strerror or exc}")
     data = {
         "format": "rungraph-init",
         "version": "0.1",
@@ -235,6 +256,11 @@ def cmd_report(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(data)
     else:
+        policy = data["check_policy"]
+        print(
+            "Policy: directory artifacts "
+            + ("enabled" if policy.get("directory_artifacts") else "disabled")
+        )
         print("Current evidence:")
         for member in data["members"]:
             print(f"  {member['id']}: {member['counts']['error']} errors, {member['counts']['warning']} warnings")
@@ -244,6 +270,34 @@ def cmd_report(args: argparse.Namespace) -> int:
         print("Impact:")
         for item in data["impact"]:
             print(f"  {item['code']} {item['node']}: {', '.join(item['claims']) or 'none'}")
+        baseline = data.get("baseline")
+        if baseline is not None:
+            print(f"Baseline ({args.baseline}):")
+            for member in baseline["members"]:
+                detail = member["status"]
+                counts = [
+                    f"+{len(member.get('added', []))}",
+                    f"-{len(member.get('removed', []))}",
+                    f"~{len(member.get('changed', []))}",
+                ]
+                if any(
+                    member.get(key)
+                    for key in ("added", "removed", "changed")
+                ) or member.get("schema_changed"):
+                    detail += f" ({' '.join(counts)}"
+                    if member.get("schema_changed"):
+                        detail += ", schema changed"
+                    detail += ")"
+                print(f"  {member['id']}: {detail}")
+            if baseline["removed_members"]:
+                print(f"  removed members: {', '.join(baseline['removed_members'])}")
+            for kind in ("claims", "relationships"):
+                changes = baseline[kind]
+                if any(changes.values()):
+                    print(
+                        f"  {kind}: +{len(changes['added'])} -{len(changes['removed'])}"
+                        f" ~{len(changes['changed'])}"
+                    )
         print(f"exit {data['exit_code']}")
     return data["exit_code"]
 

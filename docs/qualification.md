@@ -39,7 +39,7 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,288 passed, 138 skipped on Python 3.12; 6,285 passed, 141 skipped on
+- **Full suite**: 6,307 passed, 138 skipped on Python 3.12; 6,304 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
@@ -119,10 +119,32 @@ The probe found and fixed these defects, each with a regression test:
 - The README command reference did not name the workspace routes, and the workspace guide
   claimed `--json` for `graph`/`impact`; both are corrected and the docs-contract test now
   covers the workspace parser (`tests/test_docs_contract.py`).
+- Workspace verification could report success after a member changed: a member manifest that
+  loaded once but could not be re-read or checked was skipped, so `validate` exited `0` and
+  the member claim stayed `supported`. A check failure is now an error finding plus
+  `claim-at-risk` on every claim that member recorded, and `report`/`validate` exit `1`
+  (`tests/test_workspace_graph.py`).
+- Workspace creation renamed the previous document before an unlocked, non-atomic write, and
+  accepted IDs the reader rejects. `init` now validates first, holds the workspace lock,
+  replaces atomically and keeps a backup copy, so a failed `--force` leaves the document
+  intact (`tests/test_rungraph_cli.py`).
+- A member folder could be a symlink outside the workspace, `compare`/`matrix` raised
+  `TypeError` on structured 0.8-0.11 values, a declared `manifest` filename was ignored by
+  some readers, and Sacred resolved a path and then read it through a separate call. Member
+  folders must now be physical and in-root, structured values are serialized, the declared
+  filename is the authority everywhere, and Sacred reads through the protected descriptor
+  walk (`tests/test_workspace.py`, `tests/test_rungraph_cli.py`,
+  `packages/runevidence-sacred/tests`).
+- Recursive scans and workspace claims were not all bounded: a deep folder could omit a file,
+  a 1,100-claim chain raised `RecursionError`, and Sacred allocated an oversized document
+  before its cap. Scans now stop at depth 64, 10,000 folders and 1,000,000 files, claim states
+  are evaluated iteratively, and Sacred reads through the capped reader (`tests/test_files.py`,
+  `tests/test_workspace_graph.py`).
 
 No command reported a false success: every failing condition either changed the exit code or
 was named in the output as a state or warning. Where a route deliberately compares recorded
-assertions rather than bytes, its output says so and directs the user to `validate`.
+assertions rather than bytes, its output says so and directs the user to `validate`. In
+particular, a member that cannot be verified can no longer leave a `supported` claim behind.
 
 ## End-to-end scenarios
 
@@ -137,7 +159,15 @@ runs the lifecycle through the documented commands:
 4. Accept the intended change with `rehash`; member and workspace validation are clean and
    the comparison shows the new value.
 5. Negative paths: a malformed patch operation is refused with exit 2, no traceback and an
-   unchanged document; removing a cited result is refused.
+   unchanged document; removing a cited result is refused; a member removed after it loaded
+   becomes an error with at-risk claims.
+
+A second lifecycle composes adapters instead of one adapter: a Sacred run folder and a
+Lightning `version_*/metrics.csv` are ingested with their own adapters, one workspace spans
+both, `compare` reads the same metric from each, and editing the Sacred value makes member
+and workspace validation fail with the workspace claim `at-risk`. The fresh-install wheel
+smoke repeats the same multi-adapter composition from installed wheels.
+(`tests/test_e2e_qualification.py`, `.github/workflows/ci.yml`).
 
 Negative paths are covered throughout the suite: missing/changed bytes, dangling and
 ambiguous references, duplicate IDs, path escapes, unresolved cross-member references, claim
@@ -169,9 +199,9 @@ cycles, over-cap readers, malformed hooks, stale documents, refused writes and e
   reproducibility, statistical equivalence or scientific truth.
 - **Directory artifacts**: read-only checking is Linux-only and authoring is Linux/ext4 only;
   other filesystems fail closed, and Windows is not claimed.
-- **Keras adapter**: requires POSIX directory-descriptor support for protected reads; hosts
-  without it refuse `--adapter keras` rather than fall back to an unlocked read. The generic
-  adapter remains available.
+- **Keras and Lightning adapters**: both require POSIX directory-descriptor support for
+  protected reads; hosts without it refuse `--adapter keras` or `--adapter lightning` rather
+  than fall back to an unlocked read. The generic adapter remains available.
 - **Adapters**: the MLflow adapter reads a local file store only; no tracking server, remote
   URI or network access.
 - **Accepted changes**: `rehash` records the new bytes and value; it does not re-adjudicate

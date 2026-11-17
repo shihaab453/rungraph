@@ -460,3 +460,37 @@ def test_rehash_refuses_an_outside_artifact_without_reads(experiment, tmp_path, 
     _forbid_reading(outside, monkeypatch)
 
     assert main(["rehash", str(experiment), "tuned-metrics"]) == 2
+
+
+def test_a_scan_over_the_depth_cap_refuses(tmp_path: Path):
+    deepest = tmp_path
+    for _ in range(file_checks.MAX_SCAN_DEPTH + 1):
+        deepest = deepest / "d"
+    deepest.mkdir(parents=True)
+    (deepest / "deep.txt").write_text("x", encoding="utf-8")
+
+    with pytest.raises(file_checks.ScanLimitError, match="depth"):
+        list(file_checks.iter_files(tmp_path))
+    assert main(["init", str(tmp_path)]) == 2
+    assert not (tmp_path / MANIFEST).exists()
+
+
+def test_a_scan_over_the_directory_cap_refuses(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(file_checks, "MAX_SCAN_DIRECTORIES", 1)
+    for name in ("a", "b"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "file.txt").write_text("x", encoding="utf-8")
+
+    with pytest.raises(file_checks.ScanLimitError, match="folders"):
+        list(file_checks.iter_files(tmp_path))
+
+
+def test_a_scan_over_the_file_cap_refuses(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(file_checks, "MAX_SCAN_FILES", 1)
+    (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("x", encoding="utf-8")
+
+    with pytest.raises(file_checks.ScanLimitError, match="files"):
+        list(file_checks.iter_files(tmp_path))
+    assert main(["init", str(tmp_path)]) == 2
+    assert not (tmp_path / MANIFEST).exists()

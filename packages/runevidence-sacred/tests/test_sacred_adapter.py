@@ -257,3 +257,23 @@ def test_an_unreadable_file_refuses(tmp_path: Path):
         assert not (tmp_path / "runevidence.json").exists()
     finally:
         secret.chmod(0o600)
+
+
+def test_malformed_metrics_are_visible_in_inspect(tmp_path: Path, capsys):
+    folder = write_run(tmp_path)
+    (folder / "metrics.json").write_text("{not json", encoding="utf-8")
+    assert main(["init", str(tmp_path), "--adapter", "sacred", "--name", "Study", "--id", "study"]) == 0
+    capsys.readouterr()
+
+    assert main(["inspect", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "Inputs the adapter could not read" in out
+    assert "sacred" in out and "metrics.json" in out
+
+    assert main(["inspect", str(tmp_path), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    entries = data["summary"]["adapter_unreadable"]
+    assert any(
+        item["adapter"] == "sacred" and item["path"] == "1/metrics.json"
+        for item in entries
+    )

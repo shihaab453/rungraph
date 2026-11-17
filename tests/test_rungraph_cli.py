@@ -6,6 +6,10 @@ import hashlib
 import json
 from pathlib import Path
 
+import os
+
+import pytest
+
 from runevidence.rungraph_cli import main
 
 MANIFEST = {
@@ -147,3 +151,135 @@ def test_graph_dot_fails_on_unresolved_when_asked(tmp_path: Path, capsys):
     capsys.readouterr()
     assert main(["graph", str(root), "--format", "dot", "--fail-on-unresolved"]) == 1
     assert "digraph rungraph" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(os.name == "nt", reason="workspace locks are POSIX-only")
+def test_init_holds_the_workspace_lock(tmp_path: Path, capsys):
+    from runevidence.workspace import WorkspaceError, workspace_lock
+
+    root = make_root(tmp_path)
+    try:
+        with workspace_lock(root):
+            assert main(["init", str(root), "--id", "study", "--name", "Study", "--json"]) == 2
+    except WorkspaceError:
+        pytest.skip("this platform does not support workspace locks")
+    data = json.loads(capsys.readouterr().out)
+    assert data["error"]["code"] == "workspace"
+    assert not (root / "rungraph.json").exists()
+
+
+def test_a_failed_force_keeps_the_previous_document(tmp_path: Path, capsys, monkeypatch):
+    root = make_root(tmp_path)
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    capsys.readouterr()
+    before = (root / "rungraph.json").read_bytes()
+
+    def fail(*args: object, **kwargs: object):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("runevidence.rungraph_cli.save_workspace", fail)
+    assert main(["init", str(root), "--id", "study", "--name", "Study", "--force", "--json"]) == 2
+
+    assert (root / "rungraph.json").read_bytes() == before
+    assert (root / "rungraph.json.bak").read_bytes() == before
+    data = json.loads(capsys.readouterr().out)
+    assert data["error"]["code"] == "workspace"
+
+
+def test_init_refuses_an_invalid_workspace_id(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    assert main(["init", str(root), "--id", "bad#id", "--name", "Study"]) == 2
+    assert not (root / "rungraph.json").exists()
+    data = json.loads(capsys.readouterr().out)
+    assert data["error"]["code"] == "invalid"
+
+
+def test_compare_and_matrix_serialize_histogram_values(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    histogram = {
+        "schema_version": "0.11",
+        "project": {"id": "p", "name": "p"},
+        "runs": [{"id": "r"}],
+        "results": [
+            {
+                "id": "hist",
+                "run_id": "r",
+                "name": "weights",
+                "value": {
+                    "kind": "tf2-histogram",
+                    "buckets": [{"left": 0.0, "right": 1.0, "count": 2.0}],
+                },
+            }
+        ],
+    }
+    (root / "a" / "runevidence.json").write_text(json.dumps(histogram), encoding="utf-8")
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    capsys.readouterr()
+
+    assert main(["compare", str(root), "--metric", "weights", "--json"]) == 0
+    compared = json.loads(capsys.readouterr().out)
+    assert compared["rows"][0]["value"]["kind"] == "tf2-histogram"
+    assert compared["non_numeric"] == 1
+
+    assert main(["matrix", str(root), "--json"]) == 0
+    matrix = json.loads(capsys.readouterr().out)
+    cell = next(item for item in matrix["cells"] if item["metric"] == "weights")
+    assert cell["state"] == "non-numeric"
+    assert cell["value"]["buckets"][0]["count"] == 2.0
+
+
+def test_compare_follows_the_declared_manifest_filename(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    custom = dict(MANIFEST)
+    custom["results"] = [{"id": "acc", "run_id": "r", "name": "accuracy", "value": 0.25}]
+    (root / "a" / "custom.json").write_text(json.dumps(custom), encoding="utf-8")
+    document = {
+        "format": "rungraph-workspace",
+        "version": "0.1",
+        "id": "study",
+        "name": "Study",
+        "members": [
+            {"id": "a", "path": "a", "manifest": "custom.json"},
+            {"id": "b", "path": "b"},
+        ],
+    }
+    (root / "rungraph.json").write_text(json.dumps(document), encoding="utf-8")
+
+    assert main(["compare", str(root), "--metric", "accuracy", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    values = {row["member"]: row["value"] for row in data["rows"]}
+    assert values == {"a": 0.25, "b": 0.9}
+
+
+def test_report_text_renders_policy_and_baseline(tmp_path: Path, capsys):
+    root = make_root(tmp_path / "study")
+    baseline = make_root(tmp_path / "baseline")
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    assert main(["init", str(baseline), "--id", "study", "--name", "Study"]) == 0
+    capsys.readouterr()
+
+    assert main(["report", str(root), "--baseline", str(baseline)]) == 1
+    out = capsys.readouterr().out
+    assert "Policy: directory artifacts disabled" in out
+    assert f"Baseline ({baseline}):" in out
+    assert "prov-a: unchanged" in out
+    assert "prov-b: unchanged" in out
+
+    assert main(["report", str(root), "--baseline", str(baseline), "--directory-artifacts"]) == 1
+    out = capsys.readouterr().out
+    assert "Policy: directory artifacts enabled" in out
+
+
+def test_report_text_names_baseline_changes(tmp_path: Path, capsys):
+    root = make_root(tmp_path / "study")
+    baseline = make_root(tmp_path / "baseline")
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    assert main(["init", str(baseline), "--id", "study", "--name", "Study"]) == 0
+    document = json.loads((baseline / "rungraph.json").read_text(encoding="utf-8"))
+    document["members"] = document["members"][:1]
+    (baseline / "rungraph.json").write_text(json.dumps(document), encoding="utf-8")
+    capsys.readouterr()
+
+    assert main(["report", str(root), "--baseline", str(baseline)]) == 1
+    out = capsys.readouterr().out
+    assert "prov-b: added" in out

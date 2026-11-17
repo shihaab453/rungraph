@@ -24,6 +24,7 @@ class Code(str, Enum):
     manifest_not_found = "manifest-not-found"
     manifest_unreadable = "manifest-unreadable"
     schema_invalid = "schema-invalid"
+    member_check_failed = "member-check-failed"
     # local files
     missing_file = "missing-file"
     not_a_file = "not-a-file"

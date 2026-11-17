@@ -368,6 +368,7 @@ def test_existing_codes_keep_spelling_and_relative_order():
     assert set(order) == (
         set(LEGACY_CODES) | set(DIRECTORY_CODES) | set(CONDITION_CODES)
         | {
+            "member-check-failed",
             "directory-locator-unsupported", "locator-verifier-unavailable",
             "locator-kind-mismatch", "locator-mismatch", "locator-unreadable",
             "locator-unsupported-value", "artifact-changed", "locator-no-digest",

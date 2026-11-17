@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path, PurePosixPath
 
-from ..checks.files import _within, iter_files
+from ..checks.files import ScanLimitError, _within, iter_files
 from ..hashing import sha256_file
 from ..models import Artifact, Manifest, Project, Run, is_own_file
 from .base import Adapter, AdapterError, Discovery
@@ -46,7 +46,10 @@ class GenericAdapter(Adapter):
     description = "Any folder: hash every file, treat runs/<name>/ subfolders as runs."
 
     def discover(self, root: Path) -> Discovery:
-        files = [p for p in iter_files(root) if not is_own_file(p)]
+        try:
+            files = [p for p in iter_files(root) if not is_own_file(p)]
+        except ScanLimitError as exc:
+            raise AdapterError(f"{exc}; nothing was written") from None
         runs = sorted({PurePosixPath(p).parts[1] for p in files if _run_of(p)})
         return Discovery(root=root, files=files, details={"runs": runs})
 

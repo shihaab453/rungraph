@@ -27,8 +27,10 @@ with a JSON Pointer locator into `metrics.json`. Result names are `<metric> @ <s
 step was recorded, the array index is used, and repeated names get a stable `#2`, `#3` suffix.
 Non-scalar values and parseable non-finite values are skipped. A file that fails the strict
 JSON locator profile (duplicate keys, underflow/overflow, oversized integers, bare CR or excessive
-nesting) is retained as an artifact but listed under `metadata.sacred.unreadable`; no results are
-recorded from it. Configuration files use the same strict profile, and an external symlink is not
-read.
+nesting) is retained as an artifact but listed under `metadata.sacred.unreadable`; `inspect` shows
+the note. Content files are read through the protected descriptor walk with a 50 MiB cap, artifacts
+are stream-hashed through the same walk, and an unreadable file or directory refuses `init` with
+exit 2 and no manifest. Configuration files use the same strict profile, and an external symlink is
+not read.
 
 No Sacred installation is required, and nothing is read outside the folder.

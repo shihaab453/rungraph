@@ -44,16 +44,22 @@ def format_findings(report: Report, strict: bool = False, show_info: bool = True
 # Keep human-facing output bounded per run; machine-readable inspect JSON
 # retains every adapter-reported entry. These are display-only observations.
 _UNREADABLE_TEXT_LIMIT = 20
+_UNREADABLE_NAMESPACES = ("hydra", "mlflow", "sacred")
 
 
 def _adapter_unreadable(manifest: Manifest) -> list[tuple[int, dict[str, str]]]:
-    """Collect recognized adapter metadata without interpreting arbitrary shapes."""
+    """Collect recognized adapter metadata without interpreting arbitrary shapes.
+
+    The namespaces below are the adapters that record unreadable inputs. They
+    are listed in display order, so a manifest's own key order cannot change
+    the report.
+    """
     entries: list[tuple[int, dict[str, str]]] = []
     for run_index, run in enumerate(manifest.runs):
         metadata = run.metadata
         if not isinstance(metadata, dict):
             continue
-        for adapter in ("hydra", "mlflow"):
+        for adapter in _UNREADABLE_NAMESPACES:
             details = metadata.get(adapter)
             if not isinstance(details, dict):
                 continue

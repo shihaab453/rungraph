@@ -456,3 +456,19 @@ jobs:
           v/bin/rungraph discover smoke --json > /dev/null
           v/bin/rungraph init smoke --id ws --name ws
           v/bin/rungraph validate smoke --strict
+          # A multi-tool lifecycle from the installed wheels: Sacred and
+          # Lightning ingestion, then one workspace over both.
+          mkdir -p multi/sacred-run/1 multi/lightning-run/version_0
+          printf '{"experiment":{"name":"sacred","id":4},"status":"COMPLETED"}\n' \
+            > multi/sacred-run/1/run.json
+          printf '{"learning_rate":0.1}\n' > multi/sacred-run/1/config.json
+          printf '{"loss":{"values":[0.5],"steps":[1]}}\n' \
+            > multi/sacred-run/1/metrics.json
+          printf 'step,loss\n1,0.4\n' > multi/lightning-run/version_0/metrics.csv
+          v/bin/runevidence init multi/sacred-run --adapter sacred --id sacred --name sacred
+          v/bin/runevidence validate multi/sacred-run --strict
+          v/bin/runevidence init multi/lightning-run --adapter lightning --id lightning --name lightning
+          v/bin/runevidence validate multi/lightning-run --strict
+          v/bin/rungraph init multi --id multi --name multi
+          v/bin/rungraph validate multi --strict
+          v/bin/rungraph compare multi --metric 'loss @ 1' --json > /dev/null

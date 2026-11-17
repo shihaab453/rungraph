@@ -29,9 +29,13 @@ from typing import Any, Optional
 
 from runevidence.adapters import Adapter, AdapterError, Discovery, GenericAdapter
 from runevidence.adapters.generic import valid_slug
-from runevidence.checks.files import assert_tree_readable
-from runevidence.hashing import sha256_file
-from runevidence.locator_profiles import ProfileError, parse_json_document
+from runevidence.checks.files import (
+    _digest_protected,
+    _parts_for,
+    _read_snapshot_parts,
+    assert_tree_readable,
+)
+from runevidence.locator_profiles import MAX_FILE_BYTES, ProfileError, parse_json_document
 from runevidence.models import Artifact, Manifest, Project, Result, Run
 
 RUN_FILE = "run.json"
@@ -164,19 +168,13 @@ class SacredAdapter(Adapter):
         artifacts: list[Artifact] = []
         for rel in discovery.files:
             owner = next((d for d in by_depth if _is_under(rel, d)), None)
-            path = root / rel
-            target = _safe_target(root, path)
-            if target is None:
+            parts = _parts_for(root, rel)
+            hashed = _digest_protected(root, parts) if parts is not None else None
+            if hashed is None:
                 raise AdapterError(
-                    f"artifact {rel!r} resolves outside the selected root; nothing was written"
+                    f"artifact {rel!r} cannot be read inside the selected root; nothing was written"
                 )
-            try:
-                digest = sha256_file(target)
-                size = target.stat().st_size
-            except OSError:
-                raise AdapterError(
-                    f"artifact {rel!r} cannot be read; nothing was written"
-                ) from None
+            digest, size = hashed
             artifacts.append(
                 Artifact(
                     id=_unique(valid_slug(rel), used),
@@ -218,22 +216,18 @@ def _read_run(root: Path, run_dir: str) -> tuple[dict, dict, dict, dict]:
         path = root / rel
         if not path.is_file():
             return None
-        target = _safe_target(root, path)
-        if target is None:
+        limit = MAX_FILE_BYTES if cap is None else cap
+        parts = _parts_for(root, rel)
+        read = _read_snapshot_parts(root, parts, cap=limit)
+        if read.state == "over-cap":
             unreadable.append(rel)
-            reasons[rel] = "resolves outside the selected root"
+            reasons[rel] = f"larger than {limit} bytes"
             return None
-        try:
-            size = target.stat().st_size
-            if cap is not None and size > cap:
-                unreadable.append(rel)
-                reasons[rel] = f"larger than {cap} bytes"
-                return None
-            data = target.read_bytes()
-        except (OSError, UnicodeDecodeError) as exc:
+        if read.state != "ok" or read.snapshot is None or read.snapshot.data is None:
             unreadable.append(rel)
-            reasons[rel] = f"cannot be read as UTF-8 text ({type(exc).__name__})"
+            reasons[rel] = f"cannot be read safely inside the selected root ({read.state})"
             return None
+        data = bytes(read.snapshot.data)
         try:
             parsed = parse_json_document(data)
         except ProfileError as exc:
@@ -271,17 +265,6 @@ def _has_symlink_component(root: Path, rel: str) -> bool:
         if current.is_symlink():
             return True
     return False
-
-
-def _safe_target(root: Path, path: Path) -> Optional[Path]:
-    try:
-        base = root.resolve()
-        target = path.resolve()
-    except OSError:
-        return None
-    if target != base and base not in target.parents:
-        return None
-    return target
 
 
 def _finite_json(value: Any) -> bool:
