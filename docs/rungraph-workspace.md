@@ -125,6 +125,9 @@ cycles are reported per strongly connected component with a bounded example list
   text, and the claims affected by each error-level finding. `--markdown` emits the same
   report as a shareable Markdown document. `--directory-artifacts` opts into
   directory checks and is stated in the header when absent; `--strict` makes warnings fail.
+- `db-export` writes a derived SQLite cache of the workspace, members, claims, claim references
+  and relationships to `--output`; `--force` replaces an existing file and `--json` prints a
+  summary. JSON remains the authority; the cache is never read for validation.
 - `runs` lists every recorded run across members with its params, recorded conditions, start
   time and per-run artifact/result counts. Adapter metadata is opt-in with `--metadata`;
   `--summaries` adds whitelisted MLflow/Sacred/W&B fields without raw metadata;
@@ -161,7 +164,7 @@ cycles are reported per strongly connected component with a bounded example list
 
 ## JSON and exit codes
 
-`discover`, `init`, `validate`, `report` and `runs` print text by default and accept `--json`
+`discover`, `init`, `validate`, `report`, `runs` and `db-export` print text by default and accept `--json`
 for a `rungraph-<command>` envelope with `version: "0.1"` and `exit_code`. `compare`, `matrix`,
 `leaderboard` and `stats` always emit JSON; `--json` is accepted for symmetry, not required.
 `compare`, `matrix`, `leaderboard` and `stats` also accept `--text` for a compact human-readable table; without it they emit JSON. `graph` selects JSON or DOT with `--format` and adds recorded run/artifact/result/evidence/claim data to JSON nodes with `--detail`; `impact` always emits JSON. Errors use
