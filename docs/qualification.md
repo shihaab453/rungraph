@@ -39,7 +39,7 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,331 passed, 138 skipped on Python 3.12; 6,328 passed, 141 skipped on
+- **Full suite**: 6,345 passed, 138 skipped on Python 3.12; 6,342 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
