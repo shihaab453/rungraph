@@ -61,9 +61,8 @@ UNSUPPORTED_TARGET_TEXT = (
     "--to 0.6, --to 0.7, --to 0.8, --to 0.9, --to 0.10 or --to 0.11 is supported; downgrade and other "
     "versions are not available. Nothing was written."
 )
-LOCATOR_REFRESH_TEXT = (
-    "ERROR (LOCATOR_REFRESH_UNSUPPORTED): rehash cannot refresh a manifest that "
-    "contains an object locator. Nothing was written."
+LOCATOR_REFRESH_PREFIX = (
+    "ERROR (LOCATOR_REFRESH_UNSUPPORTED): rehash cannot accept new bytes for"
 )
 
 
@@ -603,7 +602,8 @@ def test_rehash_refuses_a_tensorboard_locator_before_read_or_write(
     code, out, err = run(["rehash", str(folder), "--all"])
 
     assert (code, err) == (2, "")
-    assert out == LOCATOR_REFRESH_TEXT + "\n"
+    assert out.startswith(LOCATOR_REFRESH_PREFIX)
+    assert out.endswith("Nothing was written.\n")
     assert path.read_bytes() == before[MANIFEST]
     assert_no_writes(folder, before)
 

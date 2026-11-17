@@ -970,17 +970,19 @@ def check_targeted_results(
             continue
         usable.append(result)
 
-    # ``edit.plan_rehash`` refuses the whole manifest when any object locator
-    # exists, not only one on this artifact, so both no-digest branches use the
-    # same manifest-wide predicate and wording.
-    object_anywhere = any(
-        result.locator is not None and _is_object_locator(result.locator)
+    # ``edit.plan_rehash`` refuses only an artifact read through an object
+    # locator. Both no-digest branches use the same artifact-scoped predicate.
+    object_here = any(
+        result.locator is not None
+        and _is_object_locator(result.locator)
+        and result.artifact_id == artifact.id
         for result in manifest.results
     )
     no_digest_hint = (
-        "rehash cannot record a digest while any object locator exists in the "
-        "manifest; record sha256 manually or regenerate the manifest."
-        if object_anywhere
+        "rehash cannot record a digest while a recorded value reads this "
+        "artifact through an object locator; record sha256 manually or "
+        "regenerate the manifest."
+        if object_here
         else "rehash can record the missing digest; only string locators target this artifact."
     )
     if not usable:

@@ -265,6 +265,15 @@ check now passes. Refresh requires the current digest to differ from the
 recorded digest (or no digest to have been kept while volatile). A wrong
 value next to an unchanged, hash-checked file stays an error.
 
+Structured `jsonl`, `csv-cell`, `tensorboard` and TF2 media locators have no
+rehash refresh rule. A manifest that contains them can still rehash any
+artifact those locators do not read. An artifact that a structured locator
+reads is refused with `LOCATOR_REFRESH_UNSUPPORTED`, because accepting its
+bytes while keeping the recorded value would be a false pass; restore the
+file or regenerate the manifest with the adapter. This also means a changed
+event file cannot be accepted with `rehash` while retaining its recorded
+scalars.
+
 **RE-10: MLflow metric summaries are verified and refreshed.** For MLflow
 text metric results on schema 0.1/0.2, `validate` re-reads the summary through
 the installed `mlflow` adapter and compares value, step and timestamp exactly;
@@ -342,7 +351,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence migrate PATH --to 0.2\|0.3\|0.4\|0.5\|0.6\|0.7\|0.8\|0.9\|0.10\|0.11 [--dry-run] [--json]` | Declare an existing valid manifest as the chosen schema without changing any recorded value. Exits `0` on success, no-op or dry run; `2` on refusal or failure. There is no inference and no downgrade. See [Migrating a manifest to 0.2](#migrating-a-manifest-to-02), [Schema 0.4 CSV cell locators](#schema-04-csv-cell-locators-slice-c) and [Schema 0.5 TensorBoard scalar locators](#schema-05-tensorboard-scalar-locators-slice-d). |
 | `runevidence conditions PATH --run RUN_ID [--patch FILE\|-] [--clear FIELD]... [--dry-run] [--json]` | Set or clear recorded run conditions on a schema 0.2 or later manifest from a local JSON patch; no condition values on the command line. Exits `0` on success, no-op or dry run; `2` on refusal or failure. See [Authoring run conditions](#authoring-run-conditions). |
 | `runevidence capture PATH --run RUN_ID [--dry-run] [--json]` | Record the run's git `HEAD` as `source_revision` and a small environment snapshot (Python, platform, machine, dirty state). Requires schema 0.2+ and a git repository. |
-| `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read values only for supported, resolvable scalar JSON-located results in changed files (`--volatile`, `--no-volatile`, `--dry-run`). `--directory` re-records one exact directory artifact ID. |
+| `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read values only for supported, resolvable scalar JSON-located results in changed files (`--volatile`, `--no-volatile`, `--dry-run`). An artifact read through a structured locator is refused; unrelated artifacts in the same manifest are accepted. `--directory` re-records one exact directory artifact ID. |
 | `runevidence add PATH FILE...` | Track new files or folders without re-running `init` (`--id`, `--kind`, `--run`, `--no-run`, `--volatile`, `--dry-run`). `add PATH DIR --directory --id ID` records one folder as a directory artifact. |
 | `runevidence result add\|edit\|remove PATH --file RESULT\|--id ID [--dry-run] [--json]` | Add, edit or remove a recorded result. References must resolve; the edited manifest is validated and written atomically with a stale-byte check. |
 | `runevidence evidence add\|edit\|remove PATH --file CLAIM\|--id ID [--dry-run] [--json]` | Add, edit or remove a claim/evidence entry and its `supports`/`contradicts` IDs. |

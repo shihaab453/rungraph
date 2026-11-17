@@ -45,7 +45,7 @@ class EditError(Exception):
 
 
 class LocatorRefreshUnsupported(EditError):
-    """A rehash cannot refresh a manifest that carries an object locator."""
+    """A rehash cannot accept bytes for an artifact read through an object locator."""
 
     code = "LOCATOR_REFRESH_UNSUPPORTED"
 
@@ -209,13 +209,26 @@ def plan_rehash(
     False makes them hash-checked again, None keeps each one as it is."""
     manifest, root = loaded.manifest, loaded.root
     plan = RehashPlan()
-    if any(
-        res.locator is not None and type(res.locator) is not str
+    selected = [manifest.artifacts[i] for i in indexes]
+    targeted = {
+        res.artifact_id
         for res in manifest.results
-    ):
-        # Structured locators have no refresh semantics yet. Refuse the whole
-        # operation before any file is read or any raw document is edited.
-        raise LocatorRefreshUnsupported()
+        if res.locator is not None and type(res.locator) is not str
+    }
+    blocked = sorted(
+        {artifact.id for artifact in selected if artifact.id in targeted}
+    )
+    if blocked:
+        # Structured locators have no refresh semantics yet, but only the
+        # artifact they read is unsafe to accept. An unrelated file in the
+        # same manifest can still be rehashed.
+        names = ", ".join(repr(item) for item in blocked)
+        verb = "them" if len(blocked) > 1 else "it"
+        raise LocatorRefreshUnsupported(
+            f"rehash cannot accept new bytes for {names}: recorded values read "
+            f"{verb} through a structured locator. Re-run the adapter that "
+            "produced the manifest, or restore the original file."
+        )
     unreadable: list[str] = []
     for i in indexes:
         art = manifest.artifacts[i]

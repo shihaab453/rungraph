@@ -340,9 +340,10 @@ control characters and backslash; the csv-cell display is numbers only, and leng
   artifacts** (a 0.2 warning becomes a 0.3 error regardless of the flag). Any of these
   refuses the **whole** migration before writing. Migration never lists result IDs. **If a
   downgrade path is added**, it must refuse object locators.
-- **Rehash:** any selected artifact/result with an object locator refuses the whole rehash
-  before writing (`locator-refresh-unsupported`). No escape hatch in the first experimental
-  0.3. String locators keep the existing re-read behavior; only object locators are refused,
+- **Rehash:** any selected artifact with an object locator refuses the rehash before
+  writing (`locator-refresh-unsupported`). **Update 2026-11-17:** the refusal is
+  artifact-scoped, so an unrelated artifact in the same manifest remains rehashable; no
+  escape hatch exists for the targeted artifact. String locators keep the existing re-read behavior; only object locators are refused,
   because their refresh semantics are new. A targeted artifact without a digest can be
   fixed by `rehash` when **only string locators** target it (rehash records the digest);
   when an **object locator** targets it, `rehash` refuses, and the fix is a manually

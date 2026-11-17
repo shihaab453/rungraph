@@ -263,10 +263,10 @@ Diagnostics do not print the locator at all; no human route shows the header.
 - `validate`, `inspect`, `validate-batch` and the other manifest-reading
   routes load 0.4 through the one dispatcher. `fingerprint`/`fingerprint-compare`
   keep fingerprint v1's 0.1-only guard; `comparability` refuses 0.3/0.4 with
-  `UNSUPPORTED_VERSION`; `conditions` remains 0.2-only; `rehash` refuses any
-  csv-cell and any object locator with `LOCATOR_REFRESH_UNSUPPORTED` (a
-  manifest with no object locator still rehashes normally); `add` accepts a
-  0.4 manifest.
+  `UNSUPPORTED_VERSION`; `conditions` remains 0.2-only; `rehash` refuses an
+  artifact read through a csv-cell or any other object locator with
+  `LOCATOR_REFRESH_UNSUPPORTED`, while an unrelated artifact in the same
+  manifest still rehashes normally; `add` accepts a 0.4 manifest.
 - The `schema` CLI route is unchanged (it prints 0.1). The 0.4 schema is
   available as a file and through `json_schema_0_4()`.
 

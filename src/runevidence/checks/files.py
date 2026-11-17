@@ -1147,13 +1147,16 @@ def check_artifact(
     *,
     targeted: bool = False,
     tensorboard_raised: bool = False,
+    structured: bool = False,
 ) -> TargetCheck:
     """The one artifact-level check. ``targeted`` chooses the protected
     snapshot instead of a streaming hash; every other rule is identical.
 
     ``tensorboard_raised`` selects the 128 MiB cap and the TensorBoard-only
     fstat sizing/race rules. It is set only when a kind-eligible 0.5
-    tensorboard locator targets this artifact."""
+    tensorboard locator targets this artifact. ``structured`` means a recorded
+    value reads this artifact through an object locator, so rehash cannot
+    accept its bytes."""
     target = _prepare_target(art, root, index, out, targeted=targeted)
     if target is None:
         return TargetCheck(art.id, "reference-failed")
@@ -1216,8 +1219,14 @@ def check_artifact(
                         f"sha256 {art.sha256[:12]}... recorded, {snapshot.digest[:12]}... on disk.{size_note}"
                     ),
                     hint=(
-                        f"If the change is intended, accept it with `runevidence rehash <folder> {art.id}`; "
-                        "otherwise restore the original file."
+                        "This artifact feeds recorded values read through a structured locator, "
+                        "so `runevidence rehash` cannot accept its bytes. Restore the original "
+                        "file, or regenerate the manifest with the adapter that produced it."
+                        if structured
+                        else (
+                            f"If the change is intended, accept it with `runevidence rehash <folder> {art.id}`; "
+                            "otherwise restore the original file."
+                        )
                     ),
                 )
             )
@@ -1598,6 +1607,11 @@ def check_files(
     covered: set[str] = set()
     targeted_ids = targeted_ids or set()
     tensorboard_snapshot_ids = tensorboard_snapshot_ids or set()
+    structured_ids = {
+        result.artifact_id
+        for result in loaded.manifest.results
+        if result.locator is not None and type(result.locator) is not str
+    }
     for art in loaded.manifest.artifacts:
         targeted = art.id in targeted_ids
         state: Optional[TargetCheck] = None
@@ -1619,6 +1633,7 @@ def check_files(
                 out,
                 targeted=targeted,
                 tensorboard_raised=targeted and art.id in tensorboard_snapshot_ids,
+                structured=art.id in structured_ids,
             )
         if targeted and on_targeted is not None:
             on_targeted(art, state, out)
