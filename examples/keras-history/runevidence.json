@@ -1,0 +1,267 @@
+{
+  "schema_version": "0.4",
+  "project": {
+    "id": "keras-history",
+    "name": "Keras history",
+    "description": null,
+    "tags": [],
+    "metadata": {}
+  },
+  "runs": [
+    {
+      "id": "run-1",
+      "name": "keras-history",
+      "started_at": null,
+      "params": {},
+      "metadata": {}
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "README.md",
+      "path": "README.md",
+      "sha256": "1009cd1c1cb8001d2966afb24079c9b9663e12abe65ac61598f0d6a73e69348b",
+      "size_bytes": 333,
+      "kind": null,
+      "run_id": "run-1",
+      "metadata": {}
+    },
+    {
+      "id": "history.csv",
+      "path": "history.csv",
+      "sha256": "18dbe53f26c49a33ed71445625dc128ceff6492d48f794d195aad33b8f59f263",
+      "size_bytes": 130,
+      "kind": null,
+      "run_id": "run-1",
+      "metadata": {}
+    }
+  ],
+  "results": [
+    {
+      "id": "keras-res-43484e424ecffee3",
+      "run_id": "run-1",
+      "name": "loss @ 0",
+      "value": 1.2,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 1,
+        "column": 2,
+        "header": "loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-f233a8313cc77607",
+      "run_id": "run-1",
+      "name": "accuracy @ 0",
+      "value": 0.45,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 1,
+        "column": 3,
+        "header": "accuracy"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-98305f7784b208f6",
+      "run_id": "run-1",
+      "name": "val_loss @ 0",
+      "value": 1.05,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 1,
+        "column": 4,
+        "header": "val_loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-5adbdc7cff717fcb",
+      "run_id": "run-1",
+      "name": "val_accuracy @ 0",
+      "value": 0.52,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 1,
+        "column": 5,
+        "header": "val_accuracy"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-10ec430025dabc4e",
+      "run_id": "run-1",
+      "name": "loss @ 1",
+      "value": 0.8,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 2,
+        "column": 2,
+        "header": "loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-840968e2919fe1a4",
+      "run_id": "run-1",
+      "name": "accuracy @ 1",
+      "value": 0.68,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 2,
+        "column": 3,
+        "header": "accuracy"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-0b6aceaf8a477117",
+      "run_id": "run-1",
+      "name": "val_loss @ 1",
+      "value": 0.9,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 2,
+        "column": 4,
+        "header": "val_loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-c40e48638435fb01",
+      "run_id": "run-1",
+      "name": "val_accuracy @ 1",
+      "value": 0.66,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 2,
+        "column": 5,
+        "header": "val_accuracy"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-21a4881e1ea9704d",
+      "run_id": "run-1",
+      "name": "loss @ 2",
+      "value": 0.55,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 3,
+        "column": 2,
+        "header": "loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-d14cf7e9a0f4d1b1",
+      "run_id": "run-1",
+      "name": "accuracy @ 2",
+      "value": 0.8,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 3,
+        "column": 3,
+        "header": "accuracy"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-7ed30acbe8ed741c",
+      "run_id": "run-1",
+      "name": "val_loss @ 2",
+      "value": 0.82,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 3,
+        "column": 4,
+        "header": "val_loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-e91ff0a74414104b",
+      "run_id": "run-1",
+      "name": "val_accuracy @ 2",
+      "value": 0.74,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 3,
+        "column": 5,
+        "header": "val_accuracy"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-24d9961515f05fb6",
+      "run_id": "run-1",
+      "name": "loss @ 3",
+      "value": 0.4,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 4,
+        "column": 2,
+        "header": "loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-41ea03c1c3b3042b",
+      "run_id": "run-1",
+      "name": "accuracy @ 3",
+      "value": 0.86,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 4,
+        "column": 3,
+        "header": "accuracy"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-e20d34a53394f5ba",
+      "run_id": "run-1",
+      "name": "val_loss @ 3",
+      "value": 0.8,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 4,
+        "column": 4,
+        "header": "val_loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "keras-res-5098ecfa0e04dea7",
+      "run_id": "run-1",
+      "name": "val_accuracy @ 3",
+      "value": 0.78,
+      "artifact_id": "history.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 4,
+        "column": 5,
+        "header": "val_accuracy"
+      },
+      "metadata": {}
+    }
+  ],
+  "evidence": [],
+  "relationships": []
+}
