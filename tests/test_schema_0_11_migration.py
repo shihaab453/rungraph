@@ -21,7 +21,7 @@ def write(folder: Path, version: str = "0.10") -> Path:
             {"id": "acc", "run_id": "run", "name": "accuracy", "value": 0.9}
         ],
     }
-    (folder / "data.json").write_text("{}\n", encoding="utf-8")
+    (folder / "data.json").write_bytes(b"{}\n")
     path = folder / "runevidence.json"
     path.write_text(json.dumps(document), encoding="utf-8")
     return path
