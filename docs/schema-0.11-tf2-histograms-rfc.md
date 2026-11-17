@@ -1,11 +1,11 @@
-# TF2 `[k,3]` histogram summaries — design RFC (v0.5)
+# TF2 `[k,3]` histogram summaries — design RFC (v0.6)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED.** The owner selected this P3 capability on
 2026-11-17. A design gate and the repository's admission review are required before code.
 Schemas 0.1–0.10, their readers, checkers and every delivered output stay frozen except the
 additive dispatch, model, migration, schema and text edits named here.
 
-## 0. Changes in v0.2–v0.5
+## 0. Changes in v0.2–v0.6
 
 v0.2 folds both design reviews:
 
@@ -41,6 +41,10 @@ malformed rank-2 second-dimension-3 double is a claimed shape; `unknown_rank` is
 v0.5 fixes the one v0.4 contradiction: delivered structural refusals take precedence, so a
 wrong wire on `float_val` refuses the file rather than only skipping the entry. It also names
 `resource_handle_val`/`variant_val` and fixes which claimed shapes use a tensor occurrence.
+
+v0.6 folds the accepted-review limitations without changing the design: occurrence use for
+`k > 1024` is bounded by the 0.9 element cap; a wrong-wire foreign scalar that 0.9 ignores is
+pinned as using an occurrence; the `[2000,3]` test needs exactly 6,000 values.
 
 ## 1. Problem and scope
 
@@ -205,8 +209,8 @@ avoids per-step kind flipping and makes the shape reservation unambiguous. A mal
 
 **Declared data loss.** With both flags, a hist-shaped double that was a valid 0.9/0.10 plain
 tensor but fails the histogram rules (NaN/Inf edge, negative count, `right < left`, a foreign
-field, or `k > 1024`) loses the plain-tensor digest that 0.9/0.10 recorded. This is the cost of
-the shape reservation and must be stated in the adapter guide.
+field, or `k > 1024` up to the 0.9 element cap) loses the plain-tensor digest that 0.9/0.10
+recorded. This is the cost of the shape reservation and must be stated in the adapter guide.
 
 ### 3.4 Selection precedence
 
@@ -236,8 +240,11 @@ Plain-tensor occurrence numbering is independent of output suppression:
   malformed entry consumes no histogram occurrence;
 - a skipped claim consumes a tensor occurrence exactly when it is a conforming numeric tensor.
   Most histogram failures (NaN/Inf edge, `right < left`, negative count, a non-empty foreign
-  field, `k > 1024`) are still valid 0.9 tensors, so they consume an occurrence; a malformed
-  wire that refuses the whole file never reaches counting. Tests cover each malformed reason;
+  field, `k > 1024`) are still valid 0.9 tensors up to the 0.9 element cap
+  (`3k <= 1,000,000`, so `k <= 333,333`), so they consume an occurrence; above that cap they
+  consume none. A wrong-wire foreign scalar that 0.9 ignores still leaves the entry valid and
+  consumes an occurrence. A malformed wire that refuses the whole file never reaches counting.
+  Tests cover each malformed reason;
 - verification uses the unchanged tensor ladder, so a migrated 0.9/0.10 `tensorboard-tensor`
   locator still selects the same entry after `migrate --to 0.11`.
 
@@ -363,10 +370,11 @@ Every site below must be updated or tested as part of the implementation:
   occurrence 1.
 - Wire: a wrong wire type on `float_val` refuses the whole file (structural precedence); a
   wrong wire type on `string_val`/`bool_val`/`half_val`/integer/complex/message fields skips
-  the entry without refusing the file; a structural refusal in a tensor occurrence later
-  overridden by `simple_value` still refuses the file. `[-1,3]`, `[400000,3]` and `[2000,3]`
-  are claimed malformed/oversized shapes; `[-1,3]` and `[400000,3]` use no tensor occurrence,
-  while `[2000,3]` uses one because it is still a valid 0.9 tensor.
+  the entry without refusing the file and, when 0.9 ignores that field, still uses a tensor
+  occurrence; a structural refusal in a tensor occurrence later overridden by `simple_value`
+  still refuses the file. `[-1,3]`, `[400000,3]` and `[2000,3]` are claimed
+  malformed/oversized shapes; `[-1,3]` and `[400000,3]` use no tensor occurrence, while
+  `[2000,3]` uses one because it is still a valid 0.9 tensor with exactly 6,000 values.
 - Occurrence, per malformed reason: a claimed `[k,3]` double with NaN/Inf, `right < left`, a
   negative count, a non-empty `string_val`/`bool_val`/`half_val`, or a foreign field alongside
   content still consumes a tensor occurrence when it is a valid 0.9 tensor; a B entry then
