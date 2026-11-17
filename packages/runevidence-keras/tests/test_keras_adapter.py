@@ -133,3 +133,20 @@ def test_the_adapter_refuses_without_protected_reads(tmp_path: Path, monkeypatch
         KerasAdapter().extract(
             tmp_path, KerasAdapter().discover(tmp_path), project_id="p", project_name="p"
         )
+
+
+def test_an_unreadable_subdirectory_refuses(tmp_path: Path):
+    import os
+
+    if os.name != "posix":
+        pytest.skip("permission bits are POSIX-only")
+    write_history(tmp_path, "epoch,loss\n1,0.5\n")
+    block = tmp_path / "checkpoints"
+    block.mkdir()
+    (block / "model.ckpt").write_text("x", encoding="utf-8")
+    block.chmod(0)
+    try:
+        assert main(["init", str(tmp_path), "--adapter", "keras"]) == 2
+        assert not (tmp_path / "runevidence.json").exists()
+    finally:
+        block.chmod(0o700)

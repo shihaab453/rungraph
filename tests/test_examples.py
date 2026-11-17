@@ -35,3 +35,9 @@ def test_keras_history_example_is_clean(capsys):
     root = REPO / "examples/keras-history"
     assert main(["validate", str(root), "--strict"]) == 0
     assert "0 errors, 0 warnings" in capsys.readouterr().out
+
+
+def test_lightning_logs_example_is_clean(capsys):
+    root = REPO / "examples/lightning-logs"
+    assert main(["validate", str(root), "--strict"]) == 0
+    assert "0 errors, 0 warnings" in capsys.readouterr().out

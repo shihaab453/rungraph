@@ -1616,3 +1616,41 @@ def check_files(
                     )
                 )
     return out
+
+
+def assert_tree_readable(root: Path) -> None:
+    """Raise OSError when any traversed directory under ``root`` cannot be listed.
+
+    ``iter_files`` deliberately suppresses directory read errors for the
+    delivered generic scan. Adapters that promise to hash every file use this
+    check so an unreadable folder cannot silently omit artifacts. Ignored
+    directories, outside links and cycles are skipped exactly as ``iter_files``
+    skips them.
+    """
+    base = Path(root)
+    base_real = _real(base)
+    if base_real is None:
+        raise OSError("root cannot be resolved")
+
+    def walk(current: Path, ancestors: set[str]) -> None:
+        entries = sorted(os.scandir(current), key=lambda entry: entry.name)
+        for entry in entries:
+            try:
+                is_dir = entry.is_dir(follow_symlinks=True)
+            except OSError:
+                # Match iter_files: an unreadable link target is not a directory.
+                is_dir = False
+            if is_dir:
+                if entry.name in IGNORED_DIRS or not _within(base, Path(entry.path)):
+                    continue
+                real = _real(Path(entry.path))
+                if real is None or real in ancestors:
+                    continue
+                walk(Path(entry.path), ancestors | {real})
+                continue
+            try:
+                entry.is_file(follow_symlinks=True)
+            except OSError:
+                continue
+
+    walk(base, {base_real})

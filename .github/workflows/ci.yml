@@ -64,7 +64,7 @@ jobs:
       # Adapter packages live in packages/. Installed after core, so pip
       # uses this checkout's runevidence instead of looking for one online.
       - name: Install adapter packages
-        run: python -m pip install ./packages/runevidence-hydra ./packages/runevidence-mlflow ./packages/runevidence-tensorboard ./packages/runevidence-sacred ./packages/runevidence-keras ${{ matrix.deps == 'minimum' && '-c .github/constraints-minimum.txt' || '' }}
+        run: python -m pip install ./packages/runevidence-hydra ./packages/runevidence-mlflow ./packages/runevidence-tensorboard ./packages/runevidence-sacred ./packages/runevidence-keras ./packages/runevidence-lightning ${{ matrix.deps == 'minimum' && '-c .github/constraints-minimum.txt' || '' }}
 
       - name: Show dependency versions
         run: python -c "import pydantic, yaml; print('pydantic', pydantic.VERSION, 'PyYAML', yaml.__version__)"
@@ -77,7 +77,7 @@ jobs:
       # The adapter's tests skip themselves when it is not installed. Fail
       # here instead, so a broken install cannot hide behind a green run.
       - name: Check adapters are registered
-        run: python -c "from runevidence.adapters import get_adapter; get_adapter('keras'); get_adapter('sacred'); get_adapter('hydra'); get_adapter('mlflow'); get_adapter('tensorboard')"
+        run: python -c "from runevidence.adapters import get_adapter; get_adapter('lightning'); get_adapter('keras'); get_adapter('sacred'); get_adapter('hydra'); get_adapter('mlflow'); get_adapter('tensorboard')"
 
       - name: Run tests
         run: python -m pytest
@@ -134,6 +134,7 @@ jobs:
               "tensorboard": ("packages/runevidence-tensorboard", "runevidence-tensorboard", "runevidence_tensorboard"),
               "sacred": ("packages/runevidence-sacred", "runevidence-sacred", "runevidence_sacred"),
               "keras": ("packages/runevidence-keras", "runevidence-keras", "runevidence_keras"),
+              "lightning": ("packages/runevidence-lightning", "runevidence-lightning", "runevidence_lightning"),
           }
           ENTRY = {
               "core": ("console_scripts", "runevidence", "runevidence.cli:main"),
@@ -142,6 +143,7 @@ jobs:
               "tensorboard": ("runevidence.adapters", "tensorboard", "runevidence_tensorboard:TensorboardAdapter"),
               "sacred": ("runevidence.adapters", "sacred", "runevidence_sacred:SacredAdapter"),
               "keras": ("runevidence.adapters", "keras", "runevidence_keras:KerasAdapter"),
+              "lightning": ("runevidence.adapters", "lightning", "runevidence_lightning:LightningAdapter"),
           }
           BAD_DIR = {".git", ".github", ".pytest_cache", "examples", "dist", "build", "multirun", "outputs", "runs", "checkpoints", "mlruns", ".hydra", "__pycache__"}
           BAD_SUFFIX = (".pkl", ".pickle", ".joblib", ".csv", ".bin", ".pt", ".pth", ".ckpt", ".npy", ".npz", ".parquet", ".feather", ".arrow", ".tfrecord", ".msgpack", ".h5", ".onnx", ".safetensors", ".zip", ".whl", ".tar", ".gz", ".pyc", ".pyo", ".pem", ".key")
@@ -394,12 +396,12 @@ jobs:
                   ensure(one_stable == two_stable, f"{key} tree-vs-sdist wheel payload/entry-point/license difference")
                   print(f"SDIST-TO-WHEEL {key}: normalized package and stable metadata payload PASS")
               paths = [one(OUT / kind / key, suffix) for kind, suffix in (("sdist", "*.tar.gz"), ("wheel-tree", "*.whl"), ("wheel-sdist", "*.whl")) for key in SPECS]
-              ensure(len(paths) == 18, "expected eighteen total archives")
+              ensure(len(paths) == 21, "expected twenty-one total archives")
               run(sys.executable, "-m", "twine", "check", "--strict", *paths)
-              print("PACKAGING ADVISORY: ALL EIGHTEEN ARCHIVES PASS")
+              print("PACKAGING ADVISORY: ALL TWENTY-ONE ARCHIVES PASS")
               summary = Path(os.environ.get("GITHUB_STEP_SUMMARY", str(OUT / "summary.md")))
               with summary.open("a", encoding="utf-8") as f:
-                  f.write("### Packaging advisory: PASS\nEighteen archives built and checked, including six sdist-derived wheels. See job log for SHA-256, members, metadata, and validators. No artifacts uploaded.\n")
+                  f.write("### Packaging advisory: PASS\nTwenty-one archives built and checked, including seven sdist-derived wheels. See job log for SHA-256, members, metadata, and validators. No artifacts uploaded.\n")
 
 
           if __name__ == "__main__":
@@ -413,7 +415,7 @@ jobs:
                   raise
           PY
 
-  # Advisory fresh-install smoke: build the six wheels, install them into a
+  # Advisory fresh-install smoke: build the seven wheels, install them into a
   # clean venv and run the installed console scripts. Not a required ruleset
   # context, but it catches a wheel that imports or dispatches differently from
   # the source tree.
@@ -436,7 +438,7 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip build
           python -m build --wheel --outdir dist .
-          for pkg in runevidence-tensorboard runevidence-mlflow runevidence-hydra runevidence-sacred runevidence-keras; do
+          for pkg in runevidence-tensorboard runevidence-mlflow runevidence-hydra runevidence-sacred runevidence-keras runevidence-lightning; do
             python -m build --wheel --outdir dist "packages/$pkg"
           done
           python -m venv v
