@@ -198,31 +198,59 @@ def check_sqlite(loaded: LoadedManifest, database: Path) -> dict[str, Any]:
             )
             for target in refs
         }
-        for table, expected_rows in (
-            ("relationships", expected_relationships),
-            ("evidence_refs", expected_refs),
-        ):
+        expected_rows = {
+            "project": {(manifest.project.id, manifest.project.name)},
+            "runs": {
+                (run.id, run.name, run.started_at.isoformat() if run.started_at else None,
+                 _json(run.params),
+                 _json(run.conditions.model_dump(mode="json")) if run.conditions else None,
+                 _json(run.metadata))
+                for run in manifest.runs
+            },
+            "artifacts": {
+                (artifact.id, artifact.path, artifact.sha256, artifact.size_bytes,
+                 artifact.kind, artifact.run_id, int(artifact.volatile),
+                 artifact.artifact_type, artifact.digest_format,
+                 getattr(artifact, "dataset_id", None), _json(artifact.metadata))
+                for artifact in manifest.artifacts
+            },
+            "results": {
+                (result.id, result.run_id, result.name, _json(result.value),
+                 result.artifact_id,
+                 _json(result.locator) if result.locator is not None else None,
+                 _json(result.metadata),
+                 _json(result.metric_definition) if getattr(result, "metric_definition", None) else None)
+                for result in manifest.results
+            },
+            "evidence": {
+                (evidence.id, evidence.claim, evidence.source, _json(evidence.metadata))
+                for evidence in manifest.evidence
+            },
+            "relationships": expected_relationships,
+            "evidence_refs": expected_refs,
+        }
+        queries = {
+            "project": "select id, name from project",
+            "runs": "select id, name, started_at, params, conditions, metadata from runs",
+            "artifacts": "select id, path, sha256, size_bytes, kind, run_id, volatile, artifact_type, digest_format, dataset_id, metadata from artifacts",
+            "results": "select id, run_id, name, value, artifact_id, locator, metadata, metric_definition from results",
+            "evidence": "select id, claim, source, metadata from evidence",
+            "relationships": "select source, target, type from relationships",
+            "evidence_refs": "select evidence_id, relation, target from evidence_refs",
+        }
+        for table, expected_table_rows in expected_rows.items():
             try:
-                if table == "relationships":
-                    actual_rows = {
-                        tuple(row) for row in connection.execute(
-                            "select source, target, type from relationships"
-                        )
-                    }
-                else:
-                    actual_rows = {
-                        tuple(row) for row in connection.execute(
-                            "select evidence_id, relation, target from evidence_refs"
-                        )
-                    }
+                actual_rows = {
+                    tuple(row) for row in connection.execute(queries[table])
+                }
             except sqlite3.Error:
                 mismatches.append({"table": table, "reason": "table-missing"})
                 continue
-            if actual_rows != expected_rows:
+            if actual_rows != expected_table_rows:
                 mismatches.append({
                     "table": table,
-                    "missing": sorted(expected_rows - actual_rows),
-                    "extra": sorted(actual_rows - expected_rows),
+                    "missing": sorted(expected_table_rows - actual_rows),
+                    "extra": sorted(actual_rows - expected_table_rows),
                 })
     finally:
         connection.close()
