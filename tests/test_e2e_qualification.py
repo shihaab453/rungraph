@@ -6,6 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from runevidence.cli import main
 from runevidence.rungraph_cli import main as rungraph_main
 
@@ -145,3 +147,91 @@ def test_negative_paths_refuse_without_writing(tmp_path: Path, capsys):
 
     assert main(["result", "remove", str(root / "tuned"), "--id", "tuned-accuracy"]) == 2
     assert "still cited" in capsys.readouterr().out
+
+
+def test_a_multi_adapter_workspace_verifies_and_propagates(tmp_path: Path, capsys):
+    pytest.importorskip("runevidence_sacred")
+    pytest.importorskip("runevidence_lightning")
+    from runevidence.checks.files import _dir_fd_supported
+
+    if not _dir_fd_supported():
+        pytest.skip("Lightning needs POSIX directory-descriptor reads")
+    root = tmp_path / "study"
+    sacred = root / "sacred-run"
+    lightning = root / "lightning-run"
+    sacred_run = sacred / "1"
+    sacred_run.mkdir(parents=True)
+    (sacred_run / "run.json").write_text(
+        json.dumps(
+            {
+                "experiment": {"name": "sacred", "id": 4},
+                "status": "COMPLETED",
+                "start_time": "2026-11-17T10:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (sacred_run / "config.json").write_text(
+        json.dumps({"learning_rate": 0.1}), encoding="utf-8"
+    )
+    (sacred_run / "metrics.json").write_text(
+        json.dumps({"loss": {"values": [0.5], "steps": [1], "timestamps": []}}),
+        encoding="utf-8",
+    )
+    version = lightning / "version_0"
+    version.mkdir(parents=True)
+    (version / "metrics.csv").write_text(
+        "step,loss,accuracy\n1,0.4,0.8\n", encoding="utf-8", newline=""
+    )
+
+    assert main(["init", str(sacred), "--adapter", "sacred", "--name", "sacred", "--id", "sacred"]) == 0
+    assert main(["init", str(lightning), "--adapter", "lightning", "--name", "lightning", "--id", "lightning"]) == 0
+    assert main(["validate", str(sacred), "--strict"]) == 0
+    assert main(["validate", str(lightning), "--strict"]) == 0
+
+    assert rungraph_main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    assert rungraph_main(["validate", str(root), "--strict"]) == 0
+    capsys.readouterr()
+
+    assert rungraph_main(["compare", str(root), "--metric", "loss @ 1", "--json"]) == 0
+    comparison = json.loads(capsys.readouterr().out)
+    assert len(comparison["rows"]) == 2
+    assert {row["value"] for row in comparison["rows"]} == {0.4, 0.5}
+
+    document = json.loads((root / "rungraph.json").read_text(encoding="utf-8"))
+    sacred_member = next(
+        member["id"] for member in document["members"] if member["path"] == "sacred-run"
+    )
+    sacred_manifest = json.loads((sacred / "runevidence.json").read_text(encoding="utf-8"))
+    sacred_result = next(
+        item["id"] for item in sacred_manifest["results"] if item["name"] == "loss @ 1"
+    )
+    claim = {
+        "id": "study-loss",
+        "claim": "Both tools report loss at step 1.",
+        "supports": [{"member": sacred_member, "id": sacred_result}],
+        "contradicts": [],
+    }
+    claim_file = tmp_path / "claim.json"
+    claim_file.write_text(json.dumps(claim), encoding="utf-8")
+    current = hashlib.sha256((root / "rungraph.json").read_bytes()).hexdigest()
+    assert rungraph_main(
+        ["claim", "add", str(root), "--file", str(claim_file), "--expected-sha256", current]
+    ) == 0
+    assert rungraph_main(["validate", str(root), "--strict"]) == 0
+    capsys.readouterr()
+
+    metrics_path = sacred_run / "metrics.json"
+    document = json.loads(metrics_path.read_text(encoding="utf-8"))
+    document["loss"]["values"][0] = 0.9
+    metrics_path.write_text(json.dumps(document), encoding="utf-8")
+
+    assert main(["validate", str(sacred)]) == 1
+    capsys.readouterr()
+    assert rungraph_main(["validate", str(root)]) == 1
+    capsys.readouterr()
+    assert rungraph_main(["report", str(root), "--json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    labels = {item["id"]: item["labels"] for item in report["claims"]}
+    assert "at-risk" in labels["study-loss"]
+    assert "supported" not in labels["study-loss"]

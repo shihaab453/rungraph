@@ -25,6 +25,16 @@ from ..models import Artifact, is_own_file
 # untracked files.
 IGNORED_DIRS = {".git", ".hg", ".svn", "__pycache__", ".venv", "venv", ".ipynb_checkpoints"}
 
+# Declared bounds for recursive scans. A partial list is never returned: the
+# caller gets ScanLimitError and refuses before writing anything.
+MAX_SCAN_DEPTH = 64
+MAX_SCAN_DIRECTORIES = 10_000
+MAX_SCAN_FILES = 1_000_000
+
+
+class ScanLimitError(OSError):
+    """A recursive file scan exceeded one of its declared caps."""
+
 
 @dataclass
 class FileCheckResult:
@@ -90,13 +100,24 @@ def iter_files(root: Path, folder: Optional[Path] = None):
     A directory link (symbolic link or Windows junction) is followed only when
     it resolves inside root; anything outside is pruned before traversal, so a
     scan never reads another folder's bytes. Resolved directories on the
-    current branch are remembered to stop link cycles deterministically."""
+    current branch are remembered to stop link cycles deterministically. A
+    scan is bounded by ``MAX_SCAN_DEPTH``, ``MAX_SCAN_DIRECTORIES`` and
+    ``MAX_SCAN_FILES``; exceeding one raises ``ScanLimitError`` instead of
+    silently returning a partial list."""
     base = folder if folder is not None else root
     base_real = _real(base)
     if base_real is None:
         return
+    state = {"directories": 0, "files": 0}
 
-    def walk(current: Path, ancestors: set[str]):
+    def walk(current: Path, ancestors: set[str], depth: int):
+        if depth > MAX_SCAN_DEPTH:
+            raise ScanLimitError(f"folder depth exceeds {MAX_SCAN_DEPTH}")
+        state["directories"] += 1
+        if state["directories"] > MAX_SCAN_DIRECTORIES:
+            raise ScanLimitError(
+                f"more than {MAX_SCAN_DIRECTORIES} folders were scanned"
+            )
         try:
             entries = sorted(os.scandir(current), key=lambda entry: entry.name)
         except OSError:
@@ -125,11 +146,14 @@ def iter_files(root: Path, folder: Optional[Path] = None):
             if _within(root, full):
                 files.append(full)
         for full in files:
+            state["files"] += 1
+            if state["files"] > MAX_SCAN_FILES:
+                raise ScanLimitError(f"more than {MAX_SCAN_FILES} files were scanned")
             yield full.relative_to(root).as_posix()
         for full, real in dirs:
-            yield from walk(full, ancestors | {real})
+            yield from walk(full, ancestors | {real}, depth + 1)
 
-    yield from walk(base, {base_real})
+    yield from walk(base, {base_real}, 0)
 
 
 # --- protected path reading -------------------------------------------------
@@ -596,7 +620,12 @@ class _TreeIndex:
     @property
     def files(self) -> list[str]:
         if self._files is None:
-            self._files = [p for p in iter_files(self.root) if not is_own_file(p)]
+            try:
+                self._files = [p for p in iter_files(self.root) if not is_own_file(p)]
+            except ScanLimitError:
+                # Hints are advisory and never change a finding. A tree over
+                # the declared scan caps simply gets no moved-file hints.
+                self._files = []
         return self._files
 
     def remember(self, raw: str, digest: str, size: int) -> None:
@@ -1631,8 +1660,14 @@ def assert_tree_readable(root: Path) -> None:
     base_real = _real(base)
     if base_real is None:
         raise OSError("root cannot be resolved")
+    state = {"directories": 0, "files": 0}
 
-    def walk(current: Path, ancestors: set[str]) -> None:
+    def walk(current: Path, ancestors: set[str], depth: int) -> None:
+        if depth > MAX_SCAN_DEPTH:
+            raise ScanLimitError(f"folder depth exceeds {MAX_SCAN_DEPTH}")
+        state["directories"] += 1
+        if state["directories"] > MAX_SCAN_DIRECTORIES:
+            raise ScanLimitError(f"more than {MAX_SCAN_DIRECTORIES} folders were scanned")
         entries = sorted(os.scandir(current), key=lambda entry: entry.name)
         for entry in entries:
             try:
@@ -1646,11 +1681,15 @@ def assert_tree_readable(root: Path) -> None:
                 real = _real(Path(entry.path))
                 if real is None or real in ancestors:
                     continue
-                walk(Path(entry.path), ancestors | {real})
+                walk(Path(entry.path), ancestors | {real}, depth + 1)
                 continue
             try:
-                entry.is_file(follow_symlinks=True)
+                is_file = entry.is_file(follow_symlinks=True)
             except OSError:
                 continue
+            if is_file:
+                state["files"] += 1
+                if state["files"] > MAX_SCAN_FILES:
+                    raise ScanLimitError(f"more than {MAX_SCAN_FILES} files were scanned")
 
-    walk(base, {base_real})
+    walk(base, {base_real}, 0)

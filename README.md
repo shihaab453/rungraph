@@ -346,7 +346,7 @@ documents the document format, claim states and exit codes.
 | Command | What it does |
 | --- | --- |
 | `rungraph discover ROOT` | List every manifest under a root with stable or provisional member IDs (`--check`, `--directory-artifacts`, `--json`). Exit `2` on empty discovery, duplicates, nested members, unreadable manifests or limits. |
-| `rungraph init ROOT` | Write `rungraph.json` from discovery (`--id`, `--name`, `--force`, `--dry-run`, `--json`). Refuses an empty discovery; `--force` keeps a backup. |
+| `rungraph init ROOT` | Write `rungraph.json` from discovery (`--id`, `--name`, `--force`, `--dry-run`, `--json`). Refuses an empty discovery or an invalid ID/name; writes under the workspace lock and an atomic replace; `--force` keeps a copy of the previous document even if the write fails. |
 | `rungraph validate ROOT` | Validate every member and the workspace layer (`--strict`, `--directory-artifacts`, `--json`). Exit `1` on evidence errors or strict warnings, `2` on load or usage failure. |
 | `rungraph graph ROOT` | Print the graph as JSON or DOT (`--format json\|dot`) and fail on unresolved references with `--fail-on-unresolved`. |
 | `rungraph report ROOT` | Consolidated evidence, claim states and impact (`--baseline`, `--strict`, `--directory-artifacts`, `--json`). |
@@ -1154,7 +1154,11 @@ rungraph impact path/to/project --from artifact:exp-a#test-data
 rungraph compare path/to/project --metric accuracy
 ```
 
-`rungraph.json` names the members and may carry cross-member claims and relationships.
+`rungraph.json` names the members and may carry cross-member claims and relationships. A member's
+optional `manifest` filename is used for loading, checking, graphing and comparison, and member
+folders may not be symlinked or resolve outside the workspace. A member that cannot be re-read,
+or whose manifest changed after it loaded, is an error, not a silent pass: every claim that
+depends on it becomes `at-risk` and the command exits `1`.
 `examples/workspace-study/` is a two-member workspace with a cross-member claim. See
 [docs/rungraph-workspace.md](https://github.com/shihaab453/rungraph/blob/main/docs/rungraph-workspace.md)
 for the document, claim states, graph, impact, comparison and limits.
@@ -1364,6 +1368,9 @@ Read these before relying on a green `validate` for anything important.
   behaviour: the stale-byte checks remain, but there is no serialization guarantee.
 - Directory artifacts are checked on Linux and authored on Linux/ext4 only; other
   filesystems fail closed. Windows is not claimed for either.
+- Keras, Lightning and Sacred need POSIX directory-descriptor reads. Hosts without them,
+  including Windows, refuse those adapters instead of using an unprotected fallback; the
+  generic, Hydra, MLflow and TensorBoard adapters remain available.
 - Everything is offline. No command reads a network, launches a job or loads model weights.
 - macOS and Python 3.11-3.13 are not directly verified; they are not declared unsupported.
 

@@ -201,3 +201,84 @@ def test_a_member_at_the_workspace_root_is_allowed(tmp_path: Path):
     write_workspace(tmp_path, members=[{"id": "root", "path": "."}])
     loaded = load_workspace(tmp_path)
     assert loaded.members["root"].manifest is not None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink semantics")
+def test_a_member_folder_outside_the_workspace_is_refused(tmp_path: Path):
+    outside = tmp_path / "outside"
+    make_manifest(outside)
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "a").symlink_to(outside, target_is_directory=True)
+    write_workspace(root)
+    with pytest.raises(WorkspaceError, match="outside the workspace"):
+        load_workspace(root)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink semantics")
+def test_a_member_folder_with_a_symlinked_parent_is_refused(tmp_path: Path):
+    root = tmp_path / "root"
+    real = root / "real"
+    make_manifest(real / "a")
+    (root / "link").symlink_to(real, target_is_directory=True)
+    write_workspace(root, members=[{"id": "a", "path": "link/a"}])
+    with pytest.raises(WorkspaceError, match="symbolic link"):
+        load_workspace(root)
+
+
+def test_the_declared_manifest_filename_is_the_authority(tmp_path: Path):
+    make_manifest(tmp_path / "a")
+    custom = {
+        "schema_version": "0.1",
+        "project": {"id": "p", "name": "p"},
+        "runs": [{"id": "r"}],
+        "results": [{"id": "m", "run_id": "r", "name": "score", "value": 99}],
+    }
+    (tmp_path / "a" / "custom.json").write_text(json.dumps(custom), encoding="utf-8")
+    write_workspace(
+        tmp_path, members=[{"id": "a", "path": "a", "manifest": "custom.json"}]
+    )
+    loaded = load_workspace(tmp_path)
+    assert loaded.members["a"].error is None
+    assert loaded.members["a"].manifest.results[0].value == 99
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink semantics")
+def test_a_member_folder_swapped_after_the_check_is_unreadable(
+    tmp_path: Path, monkeypatch
+):
+    import shutil
+
+    import runevidence.workspace as workspace_module
+
+    make_manifest(tmp_path / "a")
+    write_workspace(tmp_path)
+    outside = tmp_path / "outside"
+    make_manifest(outside)
+    real = workspace_module._member_folder
+
+    def swap(root: Path, member) -> Path:
+        folder = real(root, member)
+        if member.id == "a":
+            shutil.rmtree(folder)
+            folder.symlink_to(outside, target_is_directory=True)
+        return folder
+
+    monkeypatch.setattr(workspace_module, "_member_folder", swap)
+    loaded = load_workspace(tmp_path)
+
+    assert loaded.members["a"].manifest is None
+    assert loaded.members["a"].error
+    assert "symbolic link" in loaded.members["a"].error or "safely" in loaded.members["a"].error
+
+
+def test_discovery_refuses_too_many_folders(tmp_path: Path, monkeypatch):
+    import runevidence.workspace as workspace_module
+
+    monkeypatch.setattr(workspace_module, "MAX_DISCOVERY_FOLDERS", 2)
+    make_manifest(tmp_path / "a")
+    for name in ("b", "c"):
+        (tmp_path / name).mkdir()
+    result = discover(tmp_path)
+    assert result.exit_code == 2
+    assert any("folders" in error for error in result.errors)

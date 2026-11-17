@@ -50,6 +50,7 @@ from runevidence.adapters import Adapter, AdapterError, Discovery
 from runevidence.adapters.generic import valid_slug
 from runevidence.checks.files import (
     TENSORBOARD_MAX_FILE_BYTES,
+    ScanLimitError,
     _parts_for,
     _read_snapshot_parts,
     _within,
@@ -193,7 +194,10 @@ class TensorboardAdapter(Adapter):
 
     def discover(self, root: Path) -> Discovery:
         root = Path(root)
-        files = sorted(p for p in iter_files(root) if not is_own_file(p))
+        try:
+            files = sorted(p for p in iter_files(root) if not is_own_file(p))
+        except ScanLimitError as exc:
+            raise AdapterError(f"{exc}; nothing was written") from None
         return Discovery(root=root, files=files)
 
     def extract(

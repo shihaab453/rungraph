@@ -142,8 +142,13 @@ folder containing `run.json`, the configuration as params, every file as a hashe
 every scalar metric value as a schema 0.3 result with a JSON Pointer locator into
 `metrics.json`. Names are `<metric> @ <step>`, with a stable suffix for repeated steps;
 non-scalar and parseable non-finite values are skipped. A file that fails the strict JSON
-locator profile is retained as an artifact but listed under `metadata.sacred.unreadable`.
-No Sacred installation is required, and an external symlink is never read.
+locator profile is retained as an artifact but listed under `metadata.sacred.unreadable`, and
+`runevidence inspect` shows that note. Content files are read through the protected descriptor
+walk (never a resolve-then-read path pair) with a 50 MiB cap; artifacts are stream-hashed through
+the same walk, so a parent swapped after discovery cannot expose an outside file. An unreadable
+file or directory refuses `init` with exit 2 and no manifest, and a host without POSIX
+directory-descriptor support refuses `--adapter sacred` rather than using the unprotected
+fallback. No Sacred installation is required, and an external symlink is never read.
 
 ```bash
 pip install -e . -e ./packages/runevidence-sacred

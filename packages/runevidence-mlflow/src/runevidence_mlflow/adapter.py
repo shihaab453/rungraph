@@ -58,7 +58,13 @@ from typing import Any, Iterator, Optional
 import yaml
 from runevidence.adapters import Adapter, AdapterError, Discovery, Summary
 from runevidence.adapters.generic import slug
-from runevidence.checks.files import IGNORED_DIRS
+from runevidence.checks.files import (
+    IGNORED_DIRS,
+    MAX_SCAN_DEPTH,
+    MAX_SCAN_DIRECTORIES,
+    MAX_SCAN_FILES,
+    ScanLimitError,
+)
 from runevidence.summaries import MAX_SAFE_INT, MIN_SAFE_INT, read_bounded, summary_shape
 from runevidence.hashing import sha256_file
 from runevidence.models import Artifact, Manifest, Project, Result, Run, is_own_file
@@ -97,7 +103,10 @@ class MlflowAdapter(Adapter):
             raise AdapterError(f"{root} is not a folder")
         store = _store_dir(root)
         base = root / store if store else root
-        files = sorted(_walk_files(root))
+        try:
+            files = sorted(_walk_files(root))
+        except ScanLimitError as exc:
+            raise AdapterError(f"{exc}; nothing was written") from None
         experiments = _read_experiments(root, base)
         return Discovery(
             root=root,
@@ -282,7 +291,15 @@ def _walk_files(root: Path) -> Iterator[str]:
     root_identity = _dir_identity(root)
     if root_identity is not None:
         seen.add(root_identity)
+    directories = 0
+    file_count = 0
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        depth = len(Path(dirpath).relative_to(root).parts)
+        if depth > MAX_SCAN_DEPTH:
+            raise ScanLimitError(f"folder depth exceeds {MAX_SCAN_DEPTH}")
+        directories += 1
+        if directories > MAX_SCAN_DIRECTORIES:
+            raise ScanLimitError(f"more than {MAX_SCAN_DIRECTORIES} folders were scanned")
         kept: list[str] = []
         for name in sorted(dirnames):
             if name in IGNORED_DIRS:
@@ -298,6 +315,9 @@ def _walk_files(root: Path) -> Iterator[str]:
             kept.append(name)
         dirnames[:] = kept
         for name in sorted(filenames):
+            file_count += 1
+            if file_count > MAX_SCAN_FILES:
+                raise ScanLimitError(f"more than {MAX_SCAN_FILES} files were scanned")
             full = Path(dirpath) / name
             rel = full.relative_to(root).as_posix()
             # Only the generated manifest and its backups at the selected root

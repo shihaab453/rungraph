@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from typing import Any, Optional
 
+from pydantic import BaseModel
+
 from .findings import Severity
 from .models import Manifest
 from .workspace import LoadedWorkspace
@@ -133,6 +135,18 @@ def impact_data(
     }
 
 
+def _json_value(value: Any) -> Any:
+    """A result value as JSON data.
+
+    Scalar results pass through; structured 0.8-0.11 values are Pydantic
+    models and must be dumped before any consumer prints them.
+    """
+
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    return value
+
+
 def value_rows(loaded: LoadedWorkspace) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for member_id, item in loaded.members.items():
@@ -145,7 +159,7 @@ def value_rows(loaded: LoadedWorkspace) -> list[dict[str, Any]]:
                     "run": result.run_id,
                     "result": result.id,
                     "name": result.name,
-                    "value": result.value,
+                    "value": _json_value(result.value),
                     "numeric": isinstance(result.value, (int, float))
                     and not isinstance(result.value, bool)
                     and math.isfinite(result.value),
@@ -291,15 +305,17 @@ def _by_key(items: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]
 def baseline_diff(loaded: LoadedWorkspace, baseline_root) -> dict[str, Any]:
     from pathlib import Path
 
-    from .manifest import ManifestLoadError, load_manifest
     from .workspace import WORKSPACE_FILENAME, WorkspaceError, load_workspace
 
     baseline_root = Path(baseline_root)
+    base_loaded = None
     base_doc = None
     try:
         if (baseline_root / WORKSPACE_FILENAME).exists():
-            base_doc = load_workspace(baseline_root).document
+            base_loaded = load_workspace(baseline_root)
+            base_doc = base_loaded.document
     except WorkspaceError:
+        base_loaded = None
         base_doc = None
     base_by_id = {member.id: member for member in (base_doc.members if base_doc else [])}
     base_by_path = {member.path: member for member in (base_doc.members if base_doc else [])}
@@ -315,11 +331,13 @@ def baseline_diff(loaded: LoadedWorkspace, baseline_root) -> dict[str, Any]:
         elif baseline_member.path != item.member.path:
             status = "re-pathed"
         current = _projection(item.manifest) if item.manifest else []
-        try:
-            previous_manifest = load_manifest(baseline_root / baseline_member.path)
-        except (ManifestLoadError, OSError, ValueError):
+        previous_member = (
+            base_loaded.members.get(baseline_member.id) if base_loaded is not None else None
+        )
+        if previous_member is None or previous_member.manifest is None:
             members.append({"id": member_id, "status": "baseline-missing"})
             continue
+        previous_manifest = previous_member
         previous = _projection(previous_manifest.manifest)
         before = _by_key(previous)
         after = _by_key(current)

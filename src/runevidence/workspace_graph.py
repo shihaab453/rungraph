@@ -11,7 +11,7 @@ from .checks import run_checks
 from .checks.graph import ALLOWED_ENDPOINTS
 from .findings import Code, Finding, Severity
 from .models import Manifest, RelationshipType as T
-from .workspace import LoadedMember, LoadedWorkspace, Ref, WorkspaceError
+from .workspace import LoadedMember, LoadedWorkspace, Ref, WorkspaceError, read_member_manifest
 
 OBJECT_KINDS = ("project", "run", "artifact", "result", "evidence")
 NODE_KINDS = ("member", "project", "run", "artifact", "result", "evidence", "claim")
@@ -303,6 +303,19 @@ class ClaimState:
         return "uncited"
 
 
+def _node_belongs_to_failed_member(node: Node, failed_members: frozenset[str] | set[str]) -> bool:
+    """True only for objects owned by a member, never a workspace claim node.
+
+    A workspace claim's ``member`` field holds the workspace ID, which may
+    coincidentally equal a failed member ID. Claims are not member content, so
+    they are excluded; their own citations carry the failure state."""
+    return (
+        node.kind in OBJECT_KINDS
+        and node.member is not None
+        and node.member in failed_members
+    )
+
+
 def _finding_touches(findings: dict[str, list[Finding]], node: str) -> bool:
     return any(item.severity == Severity.error for item in findings.get(node, ()))
 
@@ -393,6 +406,7 @@ def claim_states(
     loaded: LoadedWorkspace,
     graph: Graph,
     findings_by_member: dict[str, list[Finding]],
+    failed_members: frozenset[str] | set[str] = frozenset(),
 ) -> list[ClaimState]:
     by_node: dict[str, list[Finding]] = {}
     for member_id, findings in findings_by_member.items():
@@ -414,64 +428,105 @@ def claim_states(
             continue
         index = _index(item.manifest)[0]
         for evidence in item.manifest.evidence:
-            state = _member_state(member_id, evidence, index, graph, by_node)
+            state = _member_state(
+                member_id,
+                evidence,
+                index,
+                graph,
+                by_node,
+                failed=member_id in failed_members,
+            )
             states.append(state)
             cache[node_id("evidence", member_id, evidence.id)] = state
+    claims_by_id = {item.id: item for item in loaded.document.claims}
     visiting: set[str] = set()
 
     def workspace_state(claim_id: str) -> ClaimState:
-        key = node_id("claim", loaded.document.id, claim_id)
-        if key in cache:
-            return cache[key]
-        claim = next(item for item in loaded.document.claims if item.id == claim_id)
-        if key in visiting:
-            return ClaimState(claim_id, None, claim.claim, ["unresolved", "at-risk"])
-        visiting.add(key)
-        labels: set[str] = set()
-        cited = False
-        for ref in claim.supports + claim.contradicts:
-            target = _claim_ref_target(graph, loaded, ref)
-            node = graph.nodes.get(target)
-            if node is None or node.status == "unresolved":
+        root_key = node_id("claim", loaded.document.id, claim_id)
+        if root_key in cache:
+            return cache[root_key]
+        # An explicit stack, not recursion: a valid chain of 10,000 claims is
+        # within the document limit but past Python's recursion limit.
+        # frame: [claim id, node key, refs or None, next ref, labels, cited]
+        stack: list[list[Any]] = [[claim_id, root_key, None, 0, set(), False]]
+        visiting.add(claim_id)
+        while stack:
+            frame = stack[-1]
+            claim_id, key, refs, index, labels, _cited = frame
+            claim = claims_by_id[claim_id]
+            if refs is None:
+                refs = list(claim.supports) + list(claim.contradicts)
+                frame[2] = refs
+            if index < len(refs):
+                ref = refs[index]
+                frame[3] = index + 1
+                target = _claim_ref_target(graph, loaded, ref)
+                node = graph.nodes.get(target)
+                if node is None or node.status == "unresolved":
+                    labels.add("unresolved")
+                    labels.add("at-risk")
+                    continue
+                if _node_belongs_to_failed_member(node, failed_members):
+                    labels.add("at-risk")
+                if node.kind in ("artifact", "run", "project"):
+                    continue
+                frame[5] = True
+                if node.kind == "claim":
+                    dependency = node.local or ""
+                    if dependency in claims_by_id:
+                        dependency_key = node_id("claim", loaded.document.id, dependency)
+                        if dependency_key in cache:
+                            labels |= set(cache[dependency_key].labels)
+                        elif dependency in visiting:
+                            labels.add("unresolved")
+                            labels.add("at-risk")
+                        else:
+                            visiting.add(dependency)
+                            stack.append([dependency, dependency_key, None, 0, set(), False])
+                    else:
+                        inherited = cache.get(target)
+                        if inherited is not None:
+                            labels |= set(inherited.labels)
+                if ref in claim.contradicts and node.status == "recorded":
+                    labels.add("contradiction-recorded")
+                continue
+            whole = claim_support_closure(graph, key, {"supports", "contradicts"})
+            if any(
+                graph.nodes.get(node) is not None and graph.nodes[node].status == "unresolved"
+                for node in whole
+            ):
                 labels.add("unresolved")
                 labels.add("at-risk")
-                continue
-            if node.kind in ("artifact", "run", "project"):
-                continue
-            cited = True
-            if node.kind == "claim":
-                inherited = workspace_state(node.local or "") if (node.local or "") in {c.id for c in loaded.document.claims} else cache.get(target)
-                if inherited is not None:
-                    labels |= set(inherited.labels)
-            if ref in claim.contradicts and node.status == "recorded":
-                labels.add("contradiction-recorded")
-        whole = claim_support_closure(graph, key, {"supports", "contradicts"})
-        if any(
-            graph.nodes.get(node) is not None and graph.nodes[node].status == "unresolved"
-            for node in whole
-        ):
-            labels.add("unresolved")
-            labels.add("at-risk")
-        if any(_finding_touches(by_node, item) for item in whole):
-            labels.add("at-risk")
-        if labels & {"unresolved", "at-risk"}:
-            labels.discard("supported")
-        if not cited:
-            labels.add("uncited")
-        if not labels:
-            labels.add("supported")
-        state = ClaimState(claim_id, None, claim.claim, sorted(labels))
-        cache[key] = state
-        visiting.discard(key)
-        return state
+            if any(_finding_touches(by_node, item) for item in whole):
+                labels.add("at-risk")
+            if any(
+                graph.nodes.get(node) is not None
+                and _node_belongs_to_failed_member(graph.nodes[node], failed_members)
+                for node in whole
+            ):
+                labels.add("at-risk")
+            if labels & {"unresolved", "at-risk"}:
+                labels.discard("supported")
+            if not frame[5]:
+                labels.add("uncited")
+            if not labels:
+                labels.add("supported")
+            cache[key] = ClaimState(claim_id, None, claim.claim, sorted(labels))
+            visiting.discard(claim_id)
+            stack.pop()
+            if stack:
+                stack[-1][4] |= labels
+        return cache[root_key]
 
     for claim in loaded.document.claims:
         states.append(workspace_state(claim.id))
     return states
 
 
-def _member_state(member_id, evidence, index, graph, by_node) -> ClaimState:
+def _member_state(member_id, evidence, index, graph, by_node, *, failed: bool = False) -> ClaimState:
     labels: set[str] = set()
+    if failed:
+        labels.add("at-risk")
     subjects = by_node.get(node_id("evidence", member_id, evidence.id), [])
     for finding in subjects:
         if finding.code is Code.dangling_reference:
@@ -505,18 +560,66 @@ def _member_state(member_id, evidence, index, graph, by_node) -> ClaimState:
     return ClaimState(evidence.id, member_id, evidence.claim, sorted(labels))
 
 
+def _failed_check_findings(member_id: str, item: LoadedMember, exc: Exception) -> list[Finding]:
+    """Findings for a member whose verification could not run.
+
+    A member that loaded once but cannot be re-read or checked is never
+    reported as intact. The failure itself is an error, and every evidence
+    claim the member recorded is marked at risk so no consumer can read
+    ``supported`` from a member the run did not actually verify.
+    """
+
+    from .manifest import ManifestLoadError
+
+    if isinstance(exc, ManifestLoadError):
+        findings = list(exc.findings)
+    else:
+        findings = [
+            Finding(
+                code=Code.member_check_failed,
+                severity=Severity.error,
+                message=f"member {member_id!r} could not be verified: {exc}",
+            )
+        ]
+    message = f"member {member_id!r} could not be verified; its claims are not supported"
+    for evidence in (item.manifest.evidence if item.manifest is not None else []):
+        findings.append(
+            Finding(
+                code=Code.claim_at_risk,
+                severity=Severity.error,
+                message=message,
+                subject=evidence.id,
+            )
+        )
+    return findings
+
+
 def run_member_checks(loaded: LoadedWorkspace, *, directory_artifacts: bool = False) -> dict[str, Any]:
     reports = {}
     findings = {}
-    from .manifest import load_manifest
+    failed: set[str] = set()
+    from .manifest import parse_manifest_source
 
     for member_id, item in loaded.members.items():
         if item.manifest is None:
+            # The initial load already failed; the member's load_error blocks
+            # its claims, and re-reading cannot produce a checkable manifest.
+            failed.add(member_id)
             continue
         try:
-            report = run_checks(load_manifest(item.manifest_path), enable_directory_artifacts=directory_artifacts)
-        except Exception:
+            source, digest = read_member_manifest(loaded.root, item)
+            if item.manifest_digest is None or digest != item.manifest_digest:
+                raise WorkspaceError(
+                    f"member {member_id!r} manifest changed after the workspace loaded; re-run"
+                )
+            report = run_checks(
+                parse_manifest_source(item.manifest_path, source),
+                enable_directory_artifacts=directory_artifacts,
+            )
+        except Exception as exc:
+            failed.add(member_id)
+            findings[member_id] = _failed_check_findings(member_id, item, exc)
             continue
         reports[member_id] = report
         findings[member_id] = list(report.findings)
-    return {"reports": reports, "findings": findings}
+    return {"reports": reports, "findings": findings, "failed": failed}
