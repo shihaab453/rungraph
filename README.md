@@ -1087,6 +1087,10 @@ read-only steps: `discover(root)` then `extract(root, discovery)`. The
 `generic` adapter is built in. Tool adapters are separate packages, so core
 stays free of tool dependencies:
 
+- **`sacred`** ([packages/runevidence-sacred](https://github.com/shihaab453/rungraph/tree/main/packages/runevidence-sacred)):
+  reads a Sacred `FileStorageObserver` base directory: one run per folder containing
+  `run.json`, the configuration as params, and scalar metric values with JSON Pointer
+  locators into `metrics.json`. See `examples/sacred-file-store/`.
 - **`hydra`** ([packages/runevidence-hydra](https://github.com/shihaab453/rungraph/tree/main/packages/runevidence-hydra)):
   every folder holding a `.hydra/` subfolder becomes a run, at any depth, with
   the job's composed config as `params` and its overrides in `metadata`.
@@ -1094,7 +1098,7 @@ stays free of tool dependencies:
 
   ```bash
   # From the repository root, install both local packages together.
-  pip install -e . -e ./packages/runevidence-hydra
+  pip install -e . -e ./packages/runevidence-hydra -e ./packages/runevidence-sacred
   runevidence init --adapter hydra path/to/project
   ```
 
@@ -1384,7 +1388,7 @@ capability status and completion criteria are recorded in
 [docs/product-completion.md](docs/product-completion.md).
 
 Delivered: versioned schemas 0.1–0.11 with frozen reading rules and migration;
-generic, Hydra, MLflow file-store and TensorBoard adapters; file, value and
+generic, Sacred, Hydra, MLflow file-store and TensorBoard adapters; file, value and
 claim verification; batch validation; single-manifest analysis (run and claim
 detail, lineage, impact, coverage, review gates, fingerprints, comparison,
 metric matrix and leaderboard); guarded artifact, result, evidence,
@@ -1406,7 +1410,7 @@ records why.
 ## Development
 
 ```bash
-pip install -e ".[dev]" -e ./packages/runevidence-hydra -e ./packages/runevidence-mlflow
+pip install -e ".[dev]" -e ./packages/runevidence-hydra -e ./packages/runevidence-mlflow -e ./packages/runevidence-sacred
 python -m pytest
 ```
 

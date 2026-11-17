@@ -1,0 +1,141 @@
+{
+  "schema_version": "0.3",
+  "project": {
+    "id": "sacred-diabetes",
+    "name": "Sacred diabetes SGD",
+    "description": null,
+    "tags": [],
+    "metadata": {}
+  },
+  "runs": [
+    {
+      "id": "run-1",
+      "name": "diabetes-sgd",
+      "started_at": "2026-11-17T10:00:00Z",
+      "params": {
+        "learning_rate": 0.001,
+        "epochs": 40
+      },
+      "metadata": {
+        "sacred": {
+          "run_dir": "1",
+          "name": "diabetes-sgd",
+          "id": 7,
+          "status": "COMPLETED",
+          "command": "train",
+          "start_time": "2026-11-17T10:00:00+00:00",
+          "stop_time": "2026-11-17T10:01:00+00:00",
+          "artifacts": [
+            "model.txt"
+          ],
+          "result_count": 6
+        }
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "1-config.json",
+      "path": "1/config.json",
+      "sha256": "837b017b408426764bf6beb9207f75876dd499a1f1bf05415d74f1775aa8bbad",
+      "size_bytes": 45,
+      "kind": null,
+      "run_id": "run-1",
+      "metadata": {}
+    },
+    {
+      "id": "1-cout.txt",
+      "path": "1/cout.txt",
+      "sha256": "22ff387055fa391303b270003f47685abf98f495c6d06cac8535e9c5c2323eec",
+      "size_bytes": 21,
+      "kind": null,
+      "run_id": "run-1",
+      "metadata": {}
+    },
+    {
+      "id": "1-metrics.json",
+      "path": "1/metrics.json",
+      "sha256": "033ff944fbca48e35b100ef61d63133c13d121fd68a2f6b435b920a61699e47f",
+      "size_bytes": 511,
+      "kind": null,
+      "run_id": "run-1",
+      "metadata": {}
+    },
+    {
+      "id": "1-model.txt",
+      "path": "1/model.txt",
+      "sha256": "2b68115c5606ef9a5aa8aa1ab9c3f67ed65a69d60a8c51a519021df8e5af9cb3",
+      "size_bytes": 16,
+      "kind": null,
+      "run_id": "run-1",
+      "metadata": {}
+    },
+    {
+      "id": "1-run.json",
+      "path": "1/run.json",
+      "sha256": "e2a31d31e86621f9710dd858be4db3461085ca0d6d72c7bf7fae7597b570eab6",
+      "size_bytes": 334,
+      "kind": null,
+      "run_id": "run-1",
+      "metadata": {}
+    }
+  ],
+  "results": [
+    {
+      "id": "sacred-res-f2e377c8b04fc0e1",
+      "run_id": "run-1",
+      "name": "loss @ 1",
+      "value": 1.0,
+      "artifact_id": "1-metrics.json",
+      "locator": "/loss/values/0",
+      "metadata": {}
+    },
+    {
+      "id": "sacred-res-e9ee9b362fb28ce3",
+      "run_id": "run-1",
+      "name": "loss @ 2",
+      "value": 0.5,
+      "artifact_id": "1-metrics.json",
+      "locator": "/loss/values/1",
+      "metadata": {}
+    },
+    {
+      "id": "sacred-res-1dde90103d7e35e1",
+      "run_id": "run-1",
+      "name": "loss @ 3",
+      "value": 0.25,
+      "artifact_id": "1-metrics.json",
+      "locator": "/loss/values/2",
+      "metadata": {}
+    },
+    {
+      "id": "sacred-res-4fa6213e89aea6a5",
+      "run_id": "run-1",
+      "name": "val_rmse @ 1",
+      "value": 51.2,
+      "artifact_id": "1-metrics.json",
+      "locator": "/val_rmse/values/0",
+      "metadata": {}
+    },
+    {
+      "id": "sacred-res-77584a398fe92a9a",
+      "run_id": "run-1",
+      "name": "val_rmse @ 2",
+      "value": 44.6,
+      "artifact_id": "1-metrics.json",
+      "locator": "/val_rmse/values/1",
+      "metadata": {}
+    },
+    {
+      "id": "sacred-res-9521f1089aac1cf6",
+      "run_id": "run-1",
+      "name": "val_rmse @ 3",
+      "value": 44.7,
+      "artifact_id": "1-metrics.json",
+      "locator": "/val_rmse/values/2",
+      "metadata": {}
+    }
+  ],
+  "evidence": [],
+  "relationships": []
+}
