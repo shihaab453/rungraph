@@ -52,8 +52,8 @@ rungraph report study/               -> explain the workspace
 
 Start with one folder and the built-in `generic` adapter. Add an adapter only when you point
 at a tool's own log layout. Analysis and validation commands are offline and read-only;
-authoring commands write only the manifest or workspace document you name. Neither tool
-trains, launches jobs or phones home.
+authoring commands write the manifest or workspace document you name (plus the documented
+backup generations). Neither tool trains, launches jobs or phones home.
 
 ---
 
@@ -1188,7 +1188,8 @@ write an adapter for your tool.
 ## RunGraph workspaces
 
 `rungraph` composes several `runevidence.json` manifests into one project-level view.
-It is read-only in this release: it never rewrites a member manifest.
+It never rewrites a member manifest; the authoring commands write the workspace document
+`rungraph.json`.
 
 ```bash
 rungraph discover path/to/project
