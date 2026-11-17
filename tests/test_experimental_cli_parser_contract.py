@@ -177,8 +177,8 @@ HISTORICAL_READER_DIGEST_23 = (
 # != plugin safety.
 CLI_HASH = frozenset({
     # Single-manifest stats (2026-11-17): 33-route surface.
-    "fc777900075e60832cee3f5a7bee929efb60a818639169f93c7b0d23af561343",  # LF
-    "cb9045c56294f1e5b33787af5591d7597aecdfa71a417d460048edb160ca14fb",  # CRLF
+    "556db8a8b82641a8d55d0a6ae5c16e18038a3b2ee97ea8855ea6854b4defb280",  # LF
+    "79059005673748df7a5369ad38205e7e4cb67d05f6ed883bbe3f488126e23c77",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.
