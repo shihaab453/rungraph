@@ -965,6 +965,7 @@ overwrites `source_revision`.
 runevidence result add path/to/experiment --file result.json
 runevidence evidence add path/to/experiment --file claim.json
 runevidence relationship add path/to/experiment --file relationship.json
+runevidence artifact edit path/to/experiment --file artifact.json
 ```
 
 Each command loads one validated manifest, applies one JSON object, checks that every

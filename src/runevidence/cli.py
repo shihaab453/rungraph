@@ -990,6 +990,20 @@ def cmd_evidence(args: argparse.Namespace) -> int:
     return _author_manifest(args, lambda raw: authoring.edit_evidence(raw, entry_id, entry), f"edit claim {entry.get('id')}")
 
 
+def cmd_artifact(args: argparse.Namespace) -> int:
+    entry = _read_authoring_entry(args)
+    if entry is None:
+        return EXIT_INVALID
+    entry_id = _authoring_entry_id(args, entry)
+    if entry_id is None:
+        return EXIT_INVALID
+    return _author_manifest(
+        args,
+        lambda raw: authoring.edit_artifact(raw, entry_id, entry),
+        f"edit artifact {entry_id}",
+    )
+
+
 def cmd_relationship(args: argparse.Namespace) -> int:
     if args.action == "remove":
         return _author_manifest(args, lambda raw: authoring.remove_relationship(raw, args.index), f"remove relationship {args.index}")
@@ -2861,6 +2875,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_evidence)
+
+    p = sub.add_parser("artifact", help="edit recorded artifact metadata")
+    p.add_argument("action", choices=("edit",))
+    p.add_argument("path", type=Path)
+    p.add_argument("--id")
+    p.add_argument("--file")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_artifact)
 
     p = sub.add_parser("relationship", help="add or remove a recorded relationship")
     p.add_argument("action", choices=("add", "remove"))

@@ -97,6 +97,41 @@ def edit_result(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
     _validate(raw)
 
 
+_ARTIFACT_EDITABLE = {"kind", "dataset_id", "run_id", "metadata", "volatile"}
+_ARTIFACT_IMMUTABLE = {
+    "id", "path", "sha256", "size_bytes", "artifact_type", "digest_format"
+}
+
+
+def edit_artifact(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
+    """Merge selected metadata fields into one recorded artifact.
+
+    Identity, path, digest, size and the directory-format fields stay with
+    ``add``/``rehash``; hand-editing them would let a manifest vouch for bytes
+    nobody read.
+    """
+    index = _find(raw, "artifacts", entry_id)
+    artifact = raw["artifacts"][index]
+    for key, value in patch.items():
+        if key == "id":
+            continue
+        if key in _ARTIFACT_IMMUTABLE:
+            raise AuthoringError(
+                f"{key!r} cannot be edited here; use 'add' or 'rehash' for identity, "
+                "path, bytes or directory format"
+            )
+        if key not in _ARTIFACT_EDITABLE:
+            raise AuthoringError(f"unknown artifact field {key!r}")
+        artifact[key] = value
+    run_id = artifact.get("run_id")
+    if run_id is not None:
+        if not isinstance(run_id, str) or run_id not in {
+            item["id"] for item in raw.get("runs", [])
+        }:
+            raise AuthoringError(f"run {run_id!r} does not exist")
+    _validate(raw)
+
+
 def _citations(raw: dict, target: str) -> list[str]:
     found: list[str] = []
     for evidence in raw.get("evidence", []):
