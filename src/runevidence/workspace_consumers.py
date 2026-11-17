@@ -419,13 +419,16 @@ def _safe_pstdev(values: list[Any]) -> Any:
         root = (
             Decimal(variance.numerator) / Decimal(variance.denominator)
         ).sqrt()
-    try:
-        value = float(root)
-    except OverflowError:
-        # The population standard deviation of finite binary64 values cannot
-        # exceed the largest finite float; Decimal can round a value within
-        # half an ulp above it, which float() reports as overflow.
+    if not root.is_finite():
         value = sys.float_info.max
+    else:
+        try:
+            value = float(root)
+        except OverflowError:
+            # The population standard deviation of finite binary64 values
+            # cannot exceed the largest finite float; Decimal can round a
+            # value within half an ulp above it.
+            value = sys.float_info.max
     return _json_number(value)
 
 
