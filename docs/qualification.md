@@ -211,7 +211,7 @@ cycles, over-cap readers, malformed hooks, stale documents, refused writes and e
 | 4. Guarantees fail when broken | 12 mutation probes for RE-10/ML-1; negative-path suites; the false-clean probe above |
 | 5. Known correctness problems resolved or bounded | RE-10 and ML-1 fixed; F3 and directory artifacts bounded as stated |
 | 6. Realistic multi-run, multi-tool experiment with corruption and propagation | `examples/dogfood-sklearn` (two real models), `examples/dogfood-mlp-sweep` (three-job Hydra sweep with two claims), `examples/workspace-study` (composition); the end-to-end harness corrupts a value and follows the claim-at-risk propagation |
-| 7. Clean install, packaging and platform matrix | `wheel-smoke` (clean venv, eight wheels, both console scripts); six required CI jobs on Ubuntu and Windows, Python 3.10 and 3.14, minimum dependencies on 3.10 |
+| 7. Clean install, packaging and platform matrix | `wheel-smoke` (clean venv, eight wheels, both console scripts); seven CI jobs on Ubuntu, Windows and macOS, Python 3.10/3.12/3.14, minimum dependencies on 3.10 |
 | 8. Evidence recorded and reproducible | this page, the exact commands below, and the full suite counts |
 | 9. Limitations distinguished | the Limitations section, the README platform section, and the experimental comparability verdict |
 | 10. No blocker contradicts the statuses | no unresolved blocker is recorded; the false-clean probe is closed |

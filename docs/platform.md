@@ -6,10 +6,10 @@ verified on each platform and why some adapters fail closed elsewhere.
 ## Verified environment
 
 - Python 3.10 or newer.
-- CI runs Ubuntu and Windows on Python 3.10 and 3.14, plus Python 3.10 with the
-  lowest declared dependency versions.
-- macOS and Python 3.11-3.13 are not directly verified. They are not declared
-  unsupported.
+- CI runs Ubuntu and Windows on Python 3.10 and 3.14, Python 3.10 with the lowest declared
+dependency versions, and macOS on Python 3.12 with the newest dependencies.
+- macOS is verified on Python 3.12 only. Python 3.11 and 3.13 are not directly verified; they
+  are not declared unsupported.
 - The wheel smoke job builds all eight wheels, installs them into a clean venv
   and runs both console scripts.
 
