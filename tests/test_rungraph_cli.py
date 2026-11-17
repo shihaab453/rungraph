@@ -384,3 +384,20 @@ def test_report_markdown_renders_members_claims_and_findings(tmp_path: Path, cap
     assert "`missing-file`" in out
     assert "| Claim | Owner | Labels | Text |" in out
     assert "data is intact" in out
+
+
+def test_markdown_report_escapes_active_content(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    capsys.readouterr()
+    manifest = json.loads((root / "a" / "runevidence.json").read_text(encoding="utf-8"))
+    manifest["evidence"][0]["claim"] = "bad | `[link](https://x) <script>\x1b[31m"
+    (root / "a" / "runevidence.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert main(["report", str(root), "--markdown"]) == 1
+    out = capsys.readouterr().out
+    assert "bad \\|" in out
+    assert "\\`\\[link" in out
+    assert "\\<script\\>" in out
+    assert "<script>" not in out
+    assert "\x1b" not in out
