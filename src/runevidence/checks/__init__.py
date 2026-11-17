@@ -176,10 +176,17 @@ def _tensorboard_cap(
         entries += 1
         tag_bytes += len(locator.tag.encode("utf-8"))
         value = result.value
-        if isinstance(value, (HistogramValue, Tf2HistogramValue)):
+        if isinstance(value, HistogramValue):
+            measured = value.model_dump(mode="json")
+        elif isinstance(value, Tf2HistogramValue):
+            # Extraction measures only the bucket list, not the value wrapper.
+            measured = [bucket.model_dump(mode="json") for bucket in value.buckets]
+        else:
+            measured = None
+        if measured is not None:
             histogram_bytes += len(
                 json.dumps(
-                    value.model_dump(mode="json"),
+                    measured,
                     ensure_ascii=True,
                     allow_nan=False,
                     separators=(",", ":"),
@@ -188,8 +195,7 @@ def _tensorboard_cap(
         with_entries.add(result.artifact_id)
     capped = (
         entries > TENSORBOARD_MAX_ENTRIES
-        or tag_bytes > TENSORBOARD_MAX_TAG_BYTES
-        or histogram_bytes > TENSORBOARD_MAX_TAG_BYTES
+        or tag_bytes + histogram_bytes > TENSORBOARD_MAX_TAG_BYTES
     )
     return capped, frozenset(with_entries)
 

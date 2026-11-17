@@ -207,3 +207,23 @@ def test_0_11_locators_raise_the_snapshot_cap(tmp_path: Path):
     ) == 0
     manifest = load_manifest(tmp_path).manifest
     assert _tensorboard_snapshot_ids(manifest) == {manifest.artifacts[0].id}
+
+
+def test_validation_measures_tf2_histogram_bytes_like_extraction(tmp_path: Path, monkeypatch):
+    from runevidence.checks import _tensorboard_cap
+    from runevidence.manifest import load_manifest
+
+    write_event(tmp_path, [hist_payload(b"t", [(0.0, 1.0, 2.0)])])
+    assert main(
+        ["init", str(tmp_path), "--adapter", "tensorboard", "--name", "h", "--id", "h",
+         "--include-tf2-histograms"]
+    ) == 0
+    manifest = load_manifest(tmp_path).manifest
+    result = manifest.results[0]
+    buckets = [bucket.model_dump(mode="json") for bucket in result.value.buckets]
+    measured = len(json.dumps(buckets, ensure_ascii=True, allow_nan=False, separators=(",", ":")))
+    tag_bytes = len(result.locator.tag.encode("utf-8"))
+    monkeypatch.setattr("runevidence.checks.TENSORBOARD_MAX_TAG_BYTES", measured + tag_bytes)
+    assert _tensorboard_cap(manifest)[0] is False
+    monkeypatch.setattr("runevidence.checks.TENSORBOARD_MAX_TAG_BYTES", measured + tag_bytes - 1)
+    assert _tensorboard_cap(manifest)[0] is True
