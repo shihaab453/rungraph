@@ -359,6 +359,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence schema [-o FILE\|--output FILE]` | Print the 0.1 manifest JSON Schema (also committed at `schema/runevidence.schema.json`). The separate 0.2 schema is `schema/runevidence-0.2.schema.json`. |
 | `runevidence db-export PATH --output FILE` | Export one validated manifest to a derived SQLite query cache (`--force`, `--json`); JSON remains the authority. |
 | `runevidence db-check PATH --db FILE` | Compare a derived SQLite cache with the manifest snapshot (`--json`); exit 1 on drift. |
+| `runevidence db-query --db FILE --sql SELECT` | Run one read-only SELECT/WITH query against the derived cache (`--limit`, JSON); writes are refused. |
 | `runevidence adapters` | List installed adapters (`--json` for names, descriptions and modules). The optional packages are Hydra, MLflow, TensorBoard, Sacred, Keras, Lightning and W&B summary. |
 
 ### Analysis and review commands

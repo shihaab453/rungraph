@@ -74,7 +74,7 @@ from .run_compare import ComparisonError, compare_runs, format_comparison
 from .run_leaderboard import LeaderboardError, rank_runs, format_leaderboard
 from .run_matrix import MatrixError, metric_matrix, format_metric_matrix
 from .run_stats import format_stats, stats_manifest
-from .db_export import check_sqlite, export_sqlite
+from .db_export import check_sqlite, export_sqlite, query_sqlite
 from .run_inventory import format_runs, runs_manifest
 from .run_details import RunDetailsError, run_details, format_run_details
 from .run_claim import ClaimDetailsError, claim_details, format_claim_details
@@ -601,6 +601,12 @@ def cmd_db_check(args: argparse.Namespace) -> int:
             for item in data["mismatches"]:
                 print(f"DRIFT {item['table']}: {item}")
             print("FAIL: database differs from the manifest (exit 1)")
+    return data["exit_code"]
+
+
+def cmd_db_query(args: argparse.Namespace) -> int:
+    data = query_sqlite(args.db, args.sql, limit=args.limit)
+    print(json.dumps(data, indent=2))
     return data["exit_code"]
 
 
@@ -2955,6 +2961,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", type=Path, required=True, help="SQLite cache to compare")
     p.add_argument("--json", action="store_true", help="machine-readable result")
     p.set_defaults(func=cmd_db_check)
+
+    p = sub.add_parser("db-query", help="run one read-only query against a derived SQLite cache")
+    p.add_argument("--db", type=Path, required=True, help="SQLite cache to query")
+    p.add_argument("--sql", required=True, help="SELECT or WITH statement")
+    p.add_argument("--limit", type=int, default=1000, help="maximum rows (default: 1000)")
+    p.set_defaults(func=cmd_db_query)
 
     p = sub.add_parser("runs", help="list recorded runs with params and conditions")
     p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")

@@ -262,3 +262,36 @@ def check_sqlite(loaded: LoadedManifest, database: Path) -> dict[str, Any]:
         "mismatches": mismatches,
         "exit_code": 0 if not mismatches else 1,
     }
+
+
+def query_sqlite(database: Path, sql: str, *, limit: int = 1000) -> dict[str, Any]:
+    """Run one read-only query against a derived cache."""
+    statement = sql.strip()
+    first = statement.split(None, 1)[0].upper() if statement else ""
+    if first not in ("SELECT", "WITH"):
+        return {"format": "runevidence-db-query-v1", "ok": False,
+                "error": "only SELECT/WITH queries are allowed", "exit_code": 2}
+    database = Path(database)
+    if not database.is_file():
+        return {"format": "runevidence-db-query-v1", "ok": False,
+                "error": "database-not-found", "exit_code": 2}
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        try:
+            cursor = connection.execute(statement)
+            columns = [item[0] for item in cursor.description or ()]
+            rows = cursor.fetchmany(limit + 1)
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        return {"format": "runevidence-db-query-v1", "ok": False,
+                "error": str(exc), "exit_code": 2}
+    truncated = len(rows) > limit
+    return {
+        "format": "runevidence-db-query-v1",
+        "ok": True,
+        "columns": columns,
+        "rows": [list(row) for row in rows[:limit]],
+        "truncated": truncated,
+        "exit_code": 0,
+    }
