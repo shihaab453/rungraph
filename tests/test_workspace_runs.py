@@ -113,3 +113,27 @@ def test_runs_text_and_unknown_member(tmp_path: Path, capsys):
     error = json.loads(capsys.readouterr().out)
     assert error["format"] == "rungraph-error"
     assert error["command"] == "runs"
+
+
+def test_runs_summaries_are_whitelisted(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    document = json.loads((root / "b" / "runevidence.json").read_text(encoding="utf-8"))
+    document["runs"][0]["metadata"] = {
+        "mlflow": {
+            "experiment_name": "demo",
+            "run_id": "abc",
+            "status": "FINISHED",
+            "private": "do not expose",
+        },
+        "other": {"secret": "no"},
+    }
+    (root / "b" / "runevidence.json").write_text(json.dumps(document), encoding="utf-8")
+    capsys.readouterr()
+
+    assert main(["runs", str(root), "--summaries", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    row = next(item for item in data["runs"] if item["run"] == "r2")
+    assert row["summaries"] == {
+        "mlflow": {"experiment_name": "demo", "run_id": "abc", "status": "FINISHED"}
+    }
+    assert "metadata" not in row

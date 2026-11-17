@@ -372,7 +372,7 @@ below accepts `--json` unless noted, and exits `2` on a load or usage failure.
 | `runevidence matrix PATH` | Show recorded metrics side by side for selected runs (`--run`, `--metric`); `--latest` collapses `<name> @ <step>` names to one column. |
 | `runevidence stats PATH` | Per-metric row/missing/non-numeric/ambiguous counts plus min, max, mean, median and population standard deviation (`--metric`, `--latest`, `--text`, `--json`). |
 | `runevidence run PATH --id RUN_ID` | Show one run's recorded results, artifacts and claims. Author one run with `--add`, `--edit`, `--remove` and `--file RUN.json` (with `--dry-run`/`--json`), merging only name, start time, params, metadata and conditions. |
-| `runevidence runs PATH` | List every recorded run with name, start time, params, conditions and per-run artifact/result counts (`--metadata`, `--json`). |
+| `runevidence runs PATH` | List every recorded run with name, start time, params, conditions and per-run artifact/result counts (`--metadata`, `--summaries`, `--json`). |
 | `runevidence claim PATH --id CLAIM_ID` | Show one claim's recorded support and contradiction targets. |
 | `runevidence lineage PATH --id CLAIM_ID` | Trace a claim's recorded upstream provenance, naming unresolved nodes and cycles. |
 | `runevidence impact PATH --id OBJECT_ID` | Find claims potentially affected by one recorded object, with the dependency path. |
@@ -399,7 +399,7 @@ documents the document format, claim states and exit codes.
 | `rungraph validate ROOT` | Validate every member and the workspace layer (`--strict`, `--directory-artifacts`, `--json`). Exit `1` on evidence errors or strict warnings, `2` on load or usage failure. |
 | `rungraph graph ROOT` | Print the graph as JSON or DOT (`--format json\|dot`), optionally with recorded object data on JSON nodes (`--detail`), and fail on unresolved references with `--fail-on-unresolved`. |
 | `rungraph report ROOT` | Consolidated evidence, claim states and impact (`--baseline`, `--strict`, `--directory-artifacts`, `--json`, `--markdown`). |
-| `rungraph runs ROOT` | Recorded runs across members with params, conditions and per-run artifact/result counts (`--member`, `--metadata`, `--json`). |
+| `rungraph runs ROOT` | Recorded runs across members with params, conditions and per-run artifact/result counts (`--member`, `--metadata`, `--summaries`, `--json`). |
 | `rungraph impact ROOT --from NODE` | Claims affected by one node, with the dependency path; JSON output. Exit `2` for an unknown node. |
 | `rungraph compare ROOT --metric NAME` | Recorded values for one metric across members with each pair's condition status (`--run`, `--latest`, `--text`, `--json`). |
 | `rungraph matrix ROOT` | Member-by-metric matrix of recorded values (`--latest`, `--text`, `--json`). |

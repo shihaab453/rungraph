@@ -571,6 +571,7 @@ def cmd_runs(args: argparse.Namespace) -> int:
         loaded.manifest,
         manifest_path=str(loaded.path),
         include_metadata=args.metadata,
+        include_summaries=args.summaries,
     )
     if args.json:
         print(json.dumps(data, indent=2, ensure_ascii=True, allow_nan=False))
@@ -2903,6 +2904,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("runs", help="list recorded runs with params and conditions")
     p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")
     p.add_argument("--metadata", action="store_true", help="include run metadata")
+    p.add_argument("--summaries", action="store_true", help="include whitelisted adapter summaries")
     p.add_argument("--json", action="store_true", help="machine-readable run inventory")
     p.set_defaults(func=cmd_runs)
 

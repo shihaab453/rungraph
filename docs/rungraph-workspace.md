@@ -127,6 +127,7 @@ cycles are reported per strongly connected component with a bounded example list
   directory checks and is stated in the header when absent; `--strict` makes warnings fail.
 - `runs` lists every recorded run across members with its params, recorded conditions, start
   time and per-run artifact/result counts. Adapter metadata is opt-in with `--metadata`;
+  `--summaries` adds whitelisted MLflow/Sacred/W&B fields without raw metadata;
   `--member` restricts the inventory. It reads the loaded manifest snapshot and no artifact.
 - `impact` returns the claims whose dependency closure contains the requested node.
 - `compare` prints recorded values for one metric; `matrix` lays members against metrics;

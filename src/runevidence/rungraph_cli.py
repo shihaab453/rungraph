@@ -542,6 +542,7 @@ def cmd_runs(args: argparse.Namespace) -> int:
         loaded,
         args.member,
         include_metadata=args.metadata,
+        include_summaries=args.summaries,
     )
     if args.json:
         _print_json(data)
@@ -561,6 +562,8 @@ def cmd_runs(args: argparse.Namespace) -> int:
             print(f"    started: {_report_text(row['started_at'], 80)}")
         if args.metadata:
             print(f"    metadata: {_report_text(row['metadata'], 240)}")
+        if args.summaries and row.get("summaries"):
+            print(f"    summaries: {_report_text(row['summaries'], 240)}")
     return EXIT_OK
 
 
@@ -747,6 +750,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("root", nargs="?", default=".")
     p.add_argument("--member")
     p.add_argument("--metadata", action="store_true")
+    p.add_argument("--summaries", action="store_true", help="include whitelisted adapter summaries")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_runs)
 
