@@ -1382,7 +1382,8 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
     volatile = sum(a.volatile for a in manifest.artifacts)
     print(
         f"Wrote {out}\n"
-        f"  {len(manifest.runs)} runs, {len(manifest.artifacts)} artifacts"
+        f"  {len(manifest.runs)} runs, {len(manifest.artifacts)} artifacts, "
+        f"{len(manifest.results)} results"
         + (f" ({volatile} volatile)" if volatile else "")
         + f" (adapter: {adapter.name})\n"
         "Next: add results and evidence claims, then run:\n"
@@ -2878,7 +2879,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("action", choices=("add", "edit", "remove"))
     p.add_argument("path", type=Path)
     p.add_argument("--id")
-    p.add_argument("--file")
+    p.add_argument("--file", help="one JSON object; see docs/authoring-files.md")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_result)
@@ -2887,7 +2888,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("action", choices=("add", "edit", "remove"))
     p.add_argument("path", type=Path)
     p.add_argument("--id")
-    p.add_argument("--file")
+    p.add_argument("--file", help="one JSON object; see docs/authoring-files.md")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_evidence)
@@ -2896,7 +2897,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("action", choices=("edit",))
     p.add_argument("path", type=Path)
     p.add_argument("--id")
-    p.add_argument("--file")
+    p.add_argument("--file", help="one JSON object; see docs/authoring-files.md")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_artifact)
@@ -2904,7 +2905,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("relationship", help="add or remove a recorded relationship")
     p.add_argument("action", choices=("add", "remove"))
     p.add_argument("path", type=Path)
-    p.add_argument("--file")
+    p.add_argument("--file", help="one JSON object; see docs/authoring-files.md")
     p.add_argument("--index", type=int)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
