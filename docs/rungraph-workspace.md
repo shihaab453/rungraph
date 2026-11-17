@@ -133,11 +133,12 @@ cycles are reported per strongly connected component with a bounded example list
   are null when a metric has no numeric value. `--metric` restricts it to one name.
   Every recorded finite value is converted to an exact `Fraction` (floats are taken at
   their exact binary value); mean, median and population variance are computed exactly, and
-  the standard deviation uses a high-precision `Decimal` square root so tiny variances do
-  not underflow before the final float conversion. Finite inputs at the float limits
-  therefore do not overflow or lose small differences; every emitted number is strict JSON
-  (never `Infinity` or `NaN`). The final result follows one IEEE-754 rounding to a Python
-  float.
+  the standard deviation uses an 80-digit `Decimal` square root so tiny variances do not
+  underflow, with a final float conversion that clamps a value within half an ulp above the
+  largest finite float. Finite inputs at the float limits therefore do not overflow or lose
+  small differences; every emitted number is strict JSON (never `Infinity` or `NaN`). The
+  final float is computed from the exact variance; the Decimal intermediate is not claimed
+  to be correctly rounded in every adversarial near-tie case.
 - `compare` reports each row pair's recorded-condition status (`comparable`,
   `not-comparable` or `unavailable`) through the experimental comparability surface.
   `leaderboard` shows `conditions: available`, meaning only that the route can carry a

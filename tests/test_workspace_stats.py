@@ -193,3 +193,17 @@ def test_subnormal_median_does_not_underflow(tmp_path: Path, capsys):
     assert entry["median"] == 5e-324
     assert entry["mean"] == 5e-324
     assert entry["stddev"] == 0.0
+
+
+def test_stddev_at_the_float_ceiling_stays_finite(tmp_path: Path, capsys):
+    import sys
+
+    edge = int(sys.float_info.max) + 2**970 - 1
+    entry = stats_for(capsys, tmp_path, [{"name": "m", "value": -edge}, {"name": "m", "value": edge}])
+    assert entry["stddev"] == sys.float_info.max
+
+
+def test_stddev_rounds_the_exact_variance_case(tmp_path: Path, capsys):
+    value = 2**180 + 2**127
+    entry = stats_for(capsys, tmp_path, [{"name": "m", "value": 0}, {"name": "m", "value": value}])
+    assert entry["stddev"] == 7.662477704329444e53

@@ -415,11 +415,18 @@ def _safe_pstdev(values: list[Any]) -> Any:
     # Decimal sqrt keeps the exponent range of the exact rational variance;
     # converting the tiny normalized variance to float first would underflow.
     with localcontext() as context:
-        context.prec = 50
+        context.prec = 80
         root = (
             Decimal(variance.numerator) / Decimal(variance.denominator)
         ).sqrt()
-    return _json_number(float(root))
+    try:
+        value = float(root)
+    except OverflowError:
+        # The population standard deviation of finite binary64 values cannot
+        # exceed the largest finite float; Decimal can round a value within
+        # half an ulp above it, which float() reports as overflow.
+        value = sys.float_info.max
+    return _json_number(value)
 
 
 def stats_data(loaded: LoadedWorkspace, metric: Optional[str] = None) -> dict[str, Any]:
