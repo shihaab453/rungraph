@@ -242,18 +242,7 @@ def _report_text(value: object, limit: int = _REPORT_TEXT_CLAIM) -> str:
     return escaped
 
 
-def _md(value: object, limit: int = 400) -> str:
-    text = "".join(
-        character if character.isprintable() else f"\\x{ord(character):02x}"
-        for character in str(value)
-    )
-    for character in ("\\", "|", "`", "[", "]", "<", ">"):
-        text = text.replace(character, "\\" + character)
-    text = text.replace("\r", " ").replace("\n", " ")
-    if len(text) > limit:
-        text = text[:limit] + "..."
-    return text
-
+from .markdown_text import md_text as _md
 
 def _markdown_report(data: dict, document) -> str:
     lines = [f"# {_md(document.name)} ({_md(document.id)})", ""]

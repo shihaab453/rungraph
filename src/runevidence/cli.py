@@ -68,7 +68,7 @@ from .models import (
     backup_generation,
     json_schema,
 )
-from .report import format_findings, format_overview, to_json
+from .report import format_findings, format_markdown, format_overview, to_json
 from .run_compare import ComparisonError, compare_runs, format_comparison
 from .run_leaderboard import LeaderboardError, rank_runs, format_leaderboard
 from .run_matrix import MatrixError, metric_matrix, format_metric_matrix
@@ -358,6 +358,8 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             data["manifest"] = "<redacted>"
             output = json.dumps(data, indent=2)
         print(output)
+    elif args.markdown:
+        print(format_markdown(loaded.path, loaded.manifest, report, args.strict))
     else:
         print(f"Manifest: {loaded.path}")
         print(format_overview(loaded.manifest))
@@ -2809,6 +2811,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("inspect", help="summarize the manifest, then run every check (incl. untracked files)")
     add_check_args(p)
+    p.add_argument("--markdown", action="store_true", help="print a shareable Markdown report")
     p.set_defaults(func=cmd_inspect)
 
     p = sub.add_parser("compare", help="compare recorded parameters and results of two runs (no artifact checks)")
