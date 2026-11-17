@@ -1,11 +1,11 @@
-# TF2 `[k,3]` histogram summaries — design RFC (v0.2)
+# TF2 `[k,3]` histogram summaries — design RFC (v0.4)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED.** The owner selected this P3 capability on
 2026-11-17. A design gate and the repository's admission review are required before code.
 Schemas 0.1–0.10, their readers, checkers and every delivered output stay frozen except the
 additive dispatch, model, migration, schema and text edits named here.
 
-## 0. Changes in v0.2
+## 0. Changes in v0.2–v0.4
 
 v0.2 folds both design reviews:
 
@@ -32,6 +32,11 @@ v0.3 folds the confirmation reviews:
   checks are explicit skip-one-entry rules with a pinned non-empty definition;
 - compare's row flag, data loss, raw budget measurement, 0.1–0.10 migration, `k > 1024` claims
   and the remaining pin/differential inventory items are stated.
+
+v0.4 folds the accepted-review notes without changing the design: losing tensor occurrences
+still pass the structural walk; foreign fields on the wrong wire type skip the entry; a
+malformed rank-2 second-dimension-3 double is a claimed shape; `unknown_rank` is named; the
+`k = 0` display is `num=0.0`.
 
 ## 1. Problem and scope
 
@@ -117,6 +122,9 @@ The new profile matches the delivered TensorProto walk for the fields it shares
 - a different `Summary.Value` oneof member resets tensor accumulation; only tensor
   occurrences after the last different member are merged (`tensor(A), simple_value, tensor(B)`
   yields only B);
+- every field-8 occurrence, including one later overridden by a different oneof member, still
+  passes through the structural tensor walk; a structural refusal in a losing occurrence
+  refuses the whole file;
 - dtype is last-wins;
 - shape dimension lists append across occurrences; `unknown_rank` is last-wins; the final
   shape is the accumulated list;
@@ -147,6 +155,10 @@ The new foreign-field checks below are **extra skip-one-entry rules** that apply
 A non-empty `float_val`, `int_val`, `int64_val`, `half_val`, `bool_val`, `uint32_val`,
 `uint64_val`, `string_val`, complex, variant, resource or `float8_val` makes the entry
 non-conforming, even if a non-empty `tensor_content` is also present. Empty forms are absent.
+A foreign field on the wrong wire type also makes the entry non-conforming without refusing
+the file: repeated bytes require wire 2; packed numeric fields require wire 2; unpacked
+numeric fields require their scalar wire (1 for double, 5 for float, 0 for integers/bool).
+This is an additional skip-one-entry rule, not a whole-file refusal.
 
 The final shape must be known, rank 2, exactly `[k, 3]`, with `0 <= k <= 1024`. `k = 0` is
 valid only with no values. The final dtype must be `DT_DOUBLE` (2).
@@ -176,10 +188,12 @@ by the histogram kind:
 - a `DT_FLOAT` `[k,3]` tensor, or any other dtype/shape, remains eligible for the delivered
   plain-tensor kind when that flag is set.
 
-`k > 1024` is still a claimed shape: a `[2000,3]` `DT_DOUBLE` is skipped as a non-conforming
-claim, not recorded as a plain tensor. This avoids per-step kind flipping and makes the shape
-reservation unambiguous. A malformed `[0,3]` cannot fall back to a plain tensor anyway,
-because 0.9 requires dimensions `>= 1`.
+A claimed shape is any known rank-2 `DT_DOUBLE` tensor whose second dimension is 3 and whose
+first dimension is any integer, including a negative value or a value above 1024. A `[2000,3]`
+or `[-1,3]` `DT_DOUBLE` is therefore skipped as a non-conforming claim, not recorded as a
+plain tensor. A rank other than 2 or a second dimension other than 3 is not claimed. This
+avoids per-step kind flipping and makes the shape reservation unambiguous. A malformed
+`[0,3]` cannot fall back to a plain tensor anyway, because 0.9 requires dimensions `>= 1`.
 
 **Declared data loss.** With both flags, a hist-shaped double that was a valid 0.9/0.10 plain
 tensor but fails the histogram rules (NaN/Inf edge, negative count, `right < left`, a foreign
@@ -237,8 +251,9 @@ Outcome ladder:
    difference is the fixed `does not match the recorded value` (no per-bucket prose);
 2. at least one conforming histogram exists at `(tag, step)` but the occurrence is out of range
    → `was not found` (this includes the H-alone and H-plus-malformed cases at occurrence 1);
-3. no conforming histogram exists, but at least one malformed claimed `[k,3]` double exists at
-   `(tag, step)` → `selects an unsupported tf2 histogram encoding`;
+3. no conforming histogram exists, but at least one claimed but non-conforming `[k,3]` double
+   exists at `(tag, step)` (negative `k`, `k > 1024`, NaN/Inf, a foreign field, and so on) →
+   `selects an unsupported tf2 histogram encoding`;
 4. otherwise, a tensor or another summary exists at `(tag, step)` → `selects an unsupported
    value` (this includes TF2 rank-0 scalars and string tensors);
 5. otherwise → `was not found`.
@@ -250,8 +265,9 @@ delivered scalar, string, legacy histogram and plain-tensor ladders are unchange
 
 Text: `tf2-histogram(k buckets, num=<sum>)`, distinct from the legacy `histogram(...)` form.
 `num` is `math.fsum` of the counts in recorded row order inside a `try` that catches
-`OverflowError`; on overflow print `num=overflow`. For `k = 0`, `num=0`. The number is rendered
-with `json.dumps(num)` to match the legacy display. Tests use `[1e308, 1e308]` and
+`OverflowError`; on overflow print `num=overflow`. For `k = 0`, `math.fsum([])` is `0.0`, so
+the text is `num=0.0`. The number is rendered with `json.dumps(num)` to match the legacy
+display. Tests use `[1e308, 1e308]` and
 `[sys.float_info.max, 2**970]`, both of which raise `OverflowError` in `math.fsum` rather than
 returning infinity. JSON: the exact value object; no recomputation, rounding or sampling.
 
@@ -334,12 +350,19 @@ Every site below must be updated or tested as part of the implementation:
   and 0.10 tensor results on a hist-shaped entry, no duplicate recording.
 - Adapter: flag selection, schema, claim/skip, unrelated flags, IDs/names, budgets, labels.
 - Checker: exact match, changed bucket, missing occurrence, unsupported encoding, unsupported
-  value, fixed texts, text/JSON output, overflow-safe `num` for both overflow inputs, and the
-  five-step ladder with H-alone and H-plus-malformed at occurrence 1.
+  value, fixed texts, text/JSON output, `num=0.0` for an empty histogram, overflow-safe `num`
+  for both overflow inputs, and the five-step ladder with H-alone and H-plus-malformed at
+  occurrence 1.
+- Wire: a foreign field on the wrong wire type skips the entry without refusing the file; a
+  structural refusal in a tensor occurrence later overridden by `simple_value` still refuses
+  the file; `[-1,3]` and `[400000,3]` are claimed malformed shapes, while `[400000,3]` uses no
+  tensor occurrence because it exceeds 0.9's element cap.
 - Occurrence, per malformed reason: a claimed `[k,3]` double with NaN/Inf, `right < left`, a
-  negative count, a non-empty foreign field, or `k > 1024` still consumes a tensor occurrence
-  when it is a valid 0.9 tensor; a B entry then takes the next index and the 0.11 manifest
-  validates. The differential test covers older-kind requests on the same mixed sequence.
+  negative count, a non-empty `string_val`/`bool_val`/`half_val`, or a foreign field alongside
+  content still consumes a tensor occurrence when it is a valid 0.9 tensor; a B entry then
+  takes the next index and the 0.11 manifest validates. A non-empty `float_val`/`int_val`/
+  `int64_val` with `double_val` and no content, a wrong value count, and `k = 400000` consume
+  no occurrence. The differential test covers older-kind requests on the same mixed sequence.
 - CLI/migration: init flag, help, targets and refusals, conditions, comparability, workspace
   load, parser/reader pins, unknown-version vectors moved to 0.12.
 - Docs: schema page, adapter guide, README flag/rows, completion contract, docs contract.
