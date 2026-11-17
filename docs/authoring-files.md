@@ -106,3 +106,20 @@ claim reference is one key, not `{"claim", "id"}`.
   relationship first.
 - Every command takes the manifest/workspace stale-byte check; a concurrent edit is refused
   rather than overwritten. `--json` returns a machine-readable success or error document.
+
+## Artifact metadata (`runevidence artifact edit --file ARTIFACT.json`)
+
+Required: `id`. Editable fields: `kind`, `dataset_id`, `run_id`, `metadata`, `volatile`.
+Supplied fields are merged; omitted fields are preserved.
+
+```json
+{
+  "id": "tuned-metrics",
+  "kind": "metrics",
+  "dataset_id": "ds-shared"
+}
+```
+
+`id`, `path`, `sha256`, `size_bytes`, `artifact_type` and `digest_format` are refused here:
+identity, path and bytes belong to `add`/`rehash`, and directory format belongs to
+`add --directory`. This is the CLI route for setting `dataset_id` on schema 0.2+.
