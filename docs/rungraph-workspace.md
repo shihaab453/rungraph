@@ -127,15 +127,19 @@ cycles are reported per strongly connected component with a bounded example list
   `(member, run, result ID)`, so duplicate result names are distinct rows and an ambiguous
   matrix cell is counted, never averaged.
 - `compare` reports each row pair's recorded-condition status (`comparable`,
-  `not-comparable` or `unavailable`) through the experimental comparability surface;
-  `matrix`/`leaderboard` show `conditions: available`. No ranking implies a fair comparison
-  or scientific validity. Pairwise comparison is bounded at 50 rows per metric.
+  `not-comparable` or `unavailable`) through the experimental comparability surface.
+  `leaderboard` shows `conditions: available`, meaning only that the route can carry a
+  recorded-condition verdict; it does not mean the runs have populated conditions, and
+  `matrix` has no conditions field. Use `compare` or `comparability` for the pair-level
+  answer. No ranking implies a fair comparison or scientific validity. Pairwise comparison is
+  bounded at 50 rows per metric.
 
 ## JSON and exit codes
 
-`discover`, `init`, `validate`, `report`, `compare`, `matrix` and `leaderboard` accept
-`--json` and emit a `rungraph-<command>` envelope with `version: "0.1"` and `exit_code`.
-`graph` selects JSON or DOT with `--format`; `impact` always emits JSON. Errors use
+`discover`, `init`, `validate` and `report` print text by default and accept `--json` for a
+`rungraph-<command>` envelope with `version: "0.1"` and `exit_code`. `compare`, `matrix` and
+`leaderboard` always emit JSON; `--json` is accepted for symmetry, not required. `graph`
+selects JSON or DOT with `--format`; `impact` always emits JSON. Errors use
 `{"format": "rungraph-error", "command": ...}`.
 
 | Command | 0 | 1 | 2 |

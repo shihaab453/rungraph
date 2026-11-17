@@ -28,6 +28,33 @@ has an experimental verdict CLI with a read-only readiness preflight. See the
 [product completion contract](docs/product-completion.md), the
 [qualification record](docs/qualification.md) and [Roadmap](#roadmap).
 
+### Which tool do I need?
+
+| You have | Use | What it answers |
+| --- | --- | --- |
+| One experiment folder | `runevidence` | Are my recorded files and values still the ones I recorded? |
+| Several experiment folders | `rungraph` | What do the experiments say together, and which claims depend on which evidence? |
+| TensorBoard / MLflow / Hydra / Sacred / Keras / Lightning data | the matching optional adapter | Can RunEvidence / RunGraph read the logs I already have? |
+
+A workspace is a small `rungraph.json` beside experiment folders:
+
+```text
+study/
+  rungraph.json           <- workspace: member IDs, cross-run claims and links
+  experiment-a/
+    runevidence.json      <- recorded evidence for experiment A
+  experiment-b/
+    runevidence.json      <- recorded evidence for experiment B
+
+runevidence validate experiment-a/   -> verify one experiment
+rungraph report study/               -> explain the workspace
+```
+
+Start with one folder and the built-in `generic` adapter. Add an adapter only when you point
+at a tool's own log layout. Analysis and validation commands are offline and read-only;
+authoring commands write the manifest or workspace document you name (plus the documented
+backup generations). Neither tool trains, launches jobs or phones home.
+
 ---
 
 ## 10-minute walkthrough
@@ -67,11 +94,22 @@ If you only want the command, install it straight from GitHub without cloning:
 pip install "git+https://github.com/shihaab453/rungraph.git"
 ```
 
-RunEvidence is licensed under [Apache-2.0](LICENSE). The optional Hydra and
-MLflow file-store adapters are separate packages. From the repository root,
-install core and an adapter together, for example
-`pip install -e . -e ./packages/runevidence-mlflow`;
-see [Adapters](#adapters) for both packages and usage.
+RunEvidence is licensed under [Apache-2.0](LICENSE). Optional adapters are separate packages
+in this repository. From the repository root, install core and one adapter together:
+
+```bash
+pip install -e . -e ./packages/runevidence-mlflow
+```
+
+Or install core and every adapter with the checked-in list:
+
+```bash
+pip install -r requirements-adapters.txt
+```
+
+See [Adapters](#adapters) for each package and its layout. There is deliberately no
+`all-adapters` extra: these packages live in this repository, not on a package index that could
+resolve them.
 
 ### 2. Inspect the example experiment (1 minute)
 
@@ -601,6 +639,12 @@ link currently names as `runevidence.json.bak` next to the link and replaces the
 link itself with the new manifest. The link target and its folder are never
 written.
 
+The schema-0.2+ refusal messages say to move the manifest aside before
+re-initializing. Move it **outside** the experiment folder, or rename it to the
+canonical backup names `runevidence.json.bak`, `runevidence.json.bak.2`, and so
+on: a copy with any other name inside the folder is ordinary content and will
+be hashed as an artifact by the next `init`.
+
 The backup is written and read back before the manifest is touched, and the
 new manifest is staged beside the old one before replacing it. If either
 step fails, `init` exits 2 and the existing manifest is left as it was; a
@@ -917,7 +961,8 @@ Each command loads one validated manifest, applies one JSON object, checks that 
 referenced run/artifact/result/claim exists, validates the whole edited manifest and writes it
 atomically with a stale-byte check. `--dry-run` prints the plan and writes nothing; a refusal
 writes nothing. Removing a result or claim needs `--id`; removing a relationship needs its
-zero-based `--index` in the recorded `relationships` array.
+zero-based `--index` in the recorded `relationships` array. The input shapes are listed in
+[Authoring JSON files](docs/authoring-files.md).
 
 ### Authoring run conditions
 
@@ -1156,7 +1201,8 @@ write an adapter for your tool.
 ## RunGraph workspaces
 
 `rungraph` composes several `runevidence.json` manifests into one project-level view.
-It is read-only in this release: it never rewrites a member manifest.
+It never rewrites a member manifest; the authoring commands write the workspace document
+`rungraph.json`.
 
 ```bash
 rungraph discover path/to/project
