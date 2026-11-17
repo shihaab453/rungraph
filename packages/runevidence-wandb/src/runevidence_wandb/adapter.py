@@ -166,7 +166,10 @@ class WandbAdapter(Adapter):
                     if not _numeric(value):
                         continue
                     pointer = "/" + key.replace("~", "~0").replace("/", "~1")
-                    result_id = _unique(f"wandb-res-{hashlib.sha256((run_id + '\0' + key).encode()).hexdigest()[:16]}", used)
+                    payload = (run_id + "\0" + key).encode("utf-8")
+                    result_id = _unique(
+                        f"wandb-res-{hashlib.sha256(payload).hexdigest()[:16]}", used
+                    )
                     results.append(
                         Result(
                             id=result_id,
