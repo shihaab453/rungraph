@@ -15,3 +15,7 @@ a schema 0.4 result with a `csv-cell` locator. Keras' default `to_csv` writes an
 header; save it with `index_label="epoch"` so the strict CSV profile can address the column. Names are `<metric> @ <epoch>`;
 non-numeric cells are skipped. The CSV is parsed with the same strict profile that verification
 uses, so a malformed file is refused rather than partially imported.
+
+The adapter uses the core protected descriptor walk. On hosts without POSIX directory-descriptor
+support it refuses with a clear error; use `--adapter generic` there. Nothing is read outside the
+selected folder.

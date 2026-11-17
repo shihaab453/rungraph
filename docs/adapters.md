@@ -110,7 +110,8 @@ adapter records every file as a hashed artifact and every numeric metric cell as
 result with a `csv-cell` locator; names are `<metric> @ <epoch>`. It uses the strict CSV profile
 that verification uses, so a malformed file is refused rather than partially imported. Keras'
 default `to_csv` writes an empty index header, which the strict profile cannot address; save with
-`index_label="epoch"`.
+`index_label="epoch"`. The adapter uses the protected descriptor walk and refuses on hosts
+without POSIX directory-descriptor support; use `--adapter generic` there.
 
 ```bash
 pip install -e . -e ./packages/runevidence-keras

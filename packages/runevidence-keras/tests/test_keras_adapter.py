@@ -9,7 +9,13 @@ import pytest
 
 pytest.importorskip("runevidence_keras")
 
+from runevidence.checks.files import _dir_fd_supported
 from runevidence.cli import main
+
+pytestmark = pytest.mark.skipif(
+    not _dir_fd_supported(),
+    reason="the Keras adapter requires POSIX directory-descriptor support",
+)
 
 
 def write_history(folder: Path, text: str, name: str = "history.csv") -> Path:
@@ -115,3 +121,15 @@ def test_a_file_deleted_after_discovery_is_an_adapter_error(tmp_path: Path):
     (tmp_path / "gone.bin").unlink()
     with pytest.raises(AdapterError):
         adapter.extract(tmp_path, discovery, project_id="p", project_name="p")
+
+
+def test_the_adapter_refuses_without_protected_reads(tmp_path: Path, monkeypatch):
+    from runevidence.adapters import AdapterError
+    from runevidence_keras import KerasAdapter
+
+    write_history(tmp_path, "epoch,loss\n1,0.5\n")
+    monkeypatch.setattr("runevidence_keras.adapter._dir_fd_supported", lambda: False)
+    with pytest.raises(AdapterError):
+        KerasAdapter().extract(
+            tmp_path, KerasAdapter().discover(tmp_path), project_id="p", project_name="p"
+        )

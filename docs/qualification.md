@@ -39,7 +39,7 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,271 passed, 138 skipped on Python 3.12; 6,268 passed, 141 skipped on
+- **Full suite**: 6,272 passed, 138 skipped on Python 3.12; 6,269 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
@@ -169,6 +169,9 @@ cycles, over-cap readers, malformed hooks, stale documents, refused writes and e
   reproducibility, statistical equivalence or scientific truth.
 - **Directory artifacts**: read-only checking is Linux-only and authoring is Linux/ext4 only;
   other filesystems fail closed, and Windows is not claimed.
+- **Keras adapter**: requires POSIX directory-descriptor support for protected reads; hosts
+  without it refuse `--adapter keras` rather than fall back to an unlocked read. The generic
+  adapter remains available.
 - **Adapters**: the MLflow adapter reads a local file store only; no tracking server, remote
   URI or network access.
 - **Accepted changes**: `rehash` records the new bytes and value; it does not re-adjudicate
