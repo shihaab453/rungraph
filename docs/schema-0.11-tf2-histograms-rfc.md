@@ -21,6 +21,18 @@ v0.2 folds both design reviews:
   serialization/version whitelists and the frozen unknown-version vectors;
 - adds the complete integration checklist and the mixed-occurrence/migration tests.
 
+v0.3 folds the confirmation reviews:
+
+- the verification ladder is restated in five ordered steps, with `was not found` before
+  unsupported encoding;
+- `math.fsum` is wrapped for `OverflowError` and the number format is pinned;
+- "conforming numeric tensor" is defined for occurrence counting, including malformed claims
+  that are still valid 0.9 tensors;
+- the whole-file refusals list is the union of the delivered walkers, and the new foreign-field
+  checks are explicit skip-one-entry rules with a pinned non-empty definition;
+- compare's row flag, data loss, raw budget measurement, 0.1–0.10 migration, `k > 1024` claims
+  and the remaining pin/differential inventory items are stated.
+
 ## 1. Problem and scope
 
 TensorFlow 2's `tf.summary.histogram` writes a `DT_DOUBLE` tensor of shape `[k, 3]` under
@@ -98,7 +110,7 @@ surrogate). `step` is the delivered signed 64-bit step. `occurrence` is an integ
 
 ### 3.1 Winning tensor and merge rules
 
-The new profile inherits the delivered TensorProto walk exactly
+The new profile matches the delivered TensorProto walk for the fields it shares
 (`tensorboard_events._parse_tensor`, `_merge_tensor_v09`, `_scan_tensor_region`,
 `_iter_winning_values`):
 
@@ -116,8 +128,25 @@ The new profile inherits the delivered TensorProto walk exactly
 - a non-empty `tensor_content` wins over `double_val`, as delivered; its length must be exactly
   `24 * k` and those bytes are the values;
 - if `tensor_content` is absent/empty, `double_val` must hold exactly `3 * k` values;
-- a packed `double_val` span whose byte length is not a multiple of 8 is a structural refusal
-  (whole file), as the delivered walker already does; a wrong value count is entry-local.
+- a wrong value count is entry-local.
+
+Whole-file refusals are the union of the delivered walkers: a packed `double_val` span whose
+byte length is not a multiple of 8; a packed `float_val` span whose byte length is not a
+multiple of 4; a truncated unpacked float or double; a wrong wire type on dtype, shape,
+content, float or double; and a malformed `Dim`. A one-byte packed `double_val` therefore
+refuses the file even when valid siblings exist.
+
+The new foreign-field checks below are **extra skip-one-entry rules** that apply even when
+`tensor_content` is present. A field is non-empty as follows:
+
+- a repeated bytes field (`string_val`) is non-empty when it has at least one element,
+  including a zero-length element;
+- a packed repeated field is non-empty when its payload length is greater than 0;
+- an unpacked repeated field is non-empty when it has any occurrence.
+
+A non-empty `float_val`, `int_val`, `int64_val`, `half_val`, `bool_val`, `uint32_val`,
+`uint64_val`, `string_val`, complex, variant, resource or `float8_val` makes the entry
+non-conforming, even if a non-empty `tensor_content` is also present. Empty forms are absent.
 
 The final shape must be known, rank 2, exactly `[k, 3]`, with `0 <= k <= 1024`. `k = 0` is
 valid only with no values. The final dtype must be `DT_DOUBLE` (2).
@@ -147,8 +176,15 @@ by the histogram kind:
 - a `DT_FLOAT` `[k,3]` tensor, or any other dtype/shape, remains eligible for the delivered
   plain-tensor kind when that flag is set.
 
-This avoids per-step kind flipping and makes the shape reservation unambiguous. A malformed
-`[0,3]` cannot fall back to a plain tensor anyway, because 0.9 requires dimensions `>= 1`.
+`k > 1024` is still a claimed shape: a `[2000,3]` `DT_DOUBLE` is skipped as a non-conforming
+claim, not recorded as a plain tensor. This avoids per-step kind flipping and makes the shape
+reservation unambiguous. A malformed `[0,3]` cannot fall back to a plain tensor anyway,
+because 0.9 requires dimensions `>= 1`.
+
+**Declared data loss.** With both flags, a hist-shaped double that was a valid 0.9/0.10 plain
+tensor but fails the histogram rules (NaN/Inf edge, negative count, `right < left`, a foreign
+field, or `k > 1024`) loses the plain-tensor digest that 0.9/0.10 recorded. This is the cost of
+the shape reservation and must be stated in the adapter guide.
 
 ### 3.4 Selection precedence
 
@@ -170,11 +206,16 @@ flags:
 Plain-tensor occurrence numbering is independent of output suppression:
 
 - the `tensor` ladder still counts **every conforming numeric tensor** at `(tag, step)`,
-  including a `[k,3]` double that is recorded as a histogram;
+  including a `[k,3]` double that is recorded as a histogram; "conforming numeric tensor" means
+  `_finalize_tensor_v09` returns a value and the entry is not a supported scalar or string;
 - the adapter increments the tensor occurrence counter for every such entry even when it emits
   no plain-tensor result; plain-tensor result occurrences may therefore have **gaps**;
 - histogram occurrence counts only recorded conforming `tf2-histogram` entries; a claimed but
   malformed entry consumes no histogram occurrence;
+- a skipped claim consumes a tensor occurrence exactly when it is a conforming numeric tensor.
+  Most histogram failures (NaN/Inf edge, `right < left`, negative count, a non-empty foreign
+  field, `k > 1024`) are still valid 0.9 tensors, so they consume an occurrence; a malformed
+  wire that refuses the whole file never reaches counting. Tests cover each malformed reason;
 - verification uses the unchanged tensor ladder, so a migrated 0.9/0.10 `tensorboard-tensor`
   locator still selects the same entry after `migrate --to 0.11`.
 
@@ -192,29 +233,33 @@ equals `0.0`). No tolerance and no rebucketing.
 
 Outcome ladder:
 
-1. a conforming histogram exists at the occurrence index → compare values; a difference is the
-   fixed `does not match the recorded value` (no per-bucket prose);
-2. no conforming histogram at that index but at least one claimed `[k,3]` double exists at
+1. the occurrence index is in range of the conforming histograms → compare values; a
+   difference is the fixed `does not match the recorded value` (no per-bucket prose);
+2. at least one conforming histogram exists at `(tag, step)` but the occurrence is out of range
+   → `was not found` (this includes the H-alone and H-plus-malformed cases at occurrence 1);
+3. no conforming histogram exists, but at least one malformed claimed `[k,3]` double exists at
    `(tag, step)` → `selects an unsupported tf2 histogram encoding`;
-3. otherwise, a tensor or another summary exists at `(tag, step)` → `selects an unsupported
+4. otherwise, a tensor or another summary exists at `(tag, step)` → `selects an unsupported
    value` (this includes TF2 rank-0 scalars and string tensors);
-4. otherwise → `was not found`.
+5. otherwise → `was not found`.
 
-A missing/out-of-range occurrence with a conforming histogram present uses outcome 1's
-"was not found" branch; the exact delivered missing text is reused. The delivered scalar,
-string, legacy histogram and plain-tensor ladders are unchanged.
+The exact delivered missing, unsupported-encoding and unsupported-value texts are reused. The
+delivered scalar, string, legacy histogram and plain-tensor ladders are unchanged.
 
 ## 5. Display and machine-readable output
 
 Text: `tf2-histogram(k buckets, num=<sum>)`, distinct from the legacy `histogram(...)` form.
-`num` is `math.fsum` of the counts in recorded row order; if the result is not finite, print
-`num=overflow` instead of `inf`. For `k = 0`, `num=0`. JSON: the exact value object; no
-recomputation, rounding or sampling.
+`num` is `math.fsum` of the counts in recorded row order inside a `try` that catches
+`OverflowError`; on overflow print `num=overflow`. For `k = 0`, `num=0`. The number is rendered
+with `json.dumps(num)` to match the legacy display. Tests use `[1e308, 1e308]` and
+`[sys.float_info.max, 2**970]`, both of which raise `OverflowError` in `math.fsum` rather than
+returning infinity. JSON: the exact value object; no recomputation, rounding or sampling.
 
-`compare` treats structured values as non-numeric, as delivered; its row flags name the value
-kind (`baseline_tf2-histogram`/`target_tf2-histogram` or the shared structured-value flag) and
-`leaderboard` excludes it as `non_numeric_or_nonfinite`. The `value_to_json` and
-`histogram_display` helpers must handle the new model, or compare crashes on `json.dumps`.
+`compare` treats structured values as non-numeric, as delivered; its row flag key is
+`baseline_tf2-histogram`/`target_tf2-histogram` (the `_structured_flag` `f"{side}_{kind}"`
+scheme, with `tf2-histogram` added to the whitelist and `_side_flag`). `leaderboard` excludes
+the value as `non_numeric_or_nonfinite`. The `value_to_json` and `histogram_display` helpers
+must handle the new model, or compare crashes on `json.dumps`.
 
 ## 6. Integration checklist
 
@@ -227,6 +272,11 @@ Every site below must be updated or tested as part of the implementation:
 - `checks/__init__.py`: eligibility sets, 10,000-entry and 16 MiB tag caps, and the 128 MiB
   event-file snapshot selection (0.11 must use the same TensorBoard cap, not the 50 MiB
   manifest cap).
+- `tests/test_experimental_cli_parser_contract.py` `CLI_HASH`; `tests/test_schema_freeze.py`
+  `SCHEMA_PINS`; the reader pin; `tests/tensorboard_builder.py`, whose writer must gain the
+  histogram dtype/shape/content/float/double forms; `docs/tensorboard-guide.md`; the
+  tensorboard package README and adapter tests; a differential test showing the 0.11 scan
+  returns the same 0.9/0.10 selections for older-kind requests on `[k,3]`-shaped entries.
 - `checks/results.py`: locator-kind dispatch, tensor-ladder requests, shared histogram budget.
 - `checks/graph.py`: locator-kind inventory.
 - `locator_profiles.py`: `display_locator` must not fall through to `.line`.
@@ -246,7 +296,7 @@ Every site below must be updated or tested as part of the implementation:
 
 ## 7. Migration, conditions and composition
 
-- `migrate --to 0.11` is a version-only rewrite from 0.3–0.10, with the 0.1/0.2 locator
+- `migrate --to 0.11` is a version-only rewrite from 0.1–0.10, with the 0.1/0.2 locator
   precheck unchanged; values, types and field presence are preserved.
 - Downgrade from 0.11 is `DOWNGRADE_UNSUPPORTED` for every older target.
 - `init --force` refuses a declared 0.11 manifest, including an invalid manifest that merely
@@ -263,9 +313,11 @@ Every site below must be updated or tested as part of the implementation:
 - at most 1,024 buckets per entry; retained values are bounded even for oversized malformed
   entries;
 - at most 10,000 selected results and 16 MiB of selected tag bytes per manifest;
-- one **shared** 16 MiB histogram-JSON budget across legacy 0.7 and TF2 histograms, using the
-  delivered compact serialization calculation; the budget message names histogram JSON, and
-  continues checking later files before raising the highest-precedence failure;
+- one **shared** 16 MiB histogram-JSON budget across legacy 0.7 and TF2 histograms, measured on
+  the raw reader value before model normalization (`-0.0` costs one byte more than `0.0`, as
+  the delivered budget does), using the delivered compact serialization calculation; the budget
+  message names histogram JSON, and continues checking later files before raising the
+  highest-precedence failure;
 - the frozen 16 MiB summary cap and 128 MiB event-file cap are unchanged.
 
 ## 9. Test and admission inventory
@@ -282,7 +334,12 @@ Every site below must be updated or tested as part of the implementation:
   and 0.10 tensor results on a hist-shaped entry, no duplicate recording.
 - Adapter: flag selection, schema, claim/skip, unrelated flags, IDs/names, budgets, labels.
 - Checker: exact match, changed bucket, missing occurrence, unsupported encoding, unsupported
-  value, fixed texts, text/JSON output, overflow-safe `num`.
+  value, fixed texts, text/JSON output, overflow-safe `num` for both overflow inputs, and the
+  five-step ladder with H-alone and H-plus-malformed at occurrence 1.
+- Occurrence, per malformed reason: a claimed `[k,3]` double with NaN/Inf, `right < left`, a
+  negative count, a non-empty foreign field, or `k > 1024` still consumes a tensor occurrence
+  when it is a valid 0.9 tensor; a B entry then takes the next index and the 0.11 manifest
+  validates. The differential test covers older-kind requests on the same mixed sequence.
 - CLI/migration: init flag, help, targets and refusals, conditions, comparability, workspace
   load, parser/reader pins, unknown-version vectors moved to 0.12.
 - Docs: schema page, adapter guide, README flag/rows, completion contract, docs contract.
