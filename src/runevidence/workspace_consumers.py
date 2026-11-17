@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Optional
 
 from pydantic import BaseModel
@@ -147,7 +148,52 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-def value_rows(loaded: LoadedWorkspace) -> list[dict[str, Any]]:
+_STEP_NAME = re.compile(r"^(?P<base>.+) @ (?P<step>-?\d+)(?: #\d+)?$")
+
+
+def _step_name(name: str) -> tuple[str, Optional[int]]:
+    match = _STEP_NAME.fullmatch(name)
+    if match is None:
+        return name, None
+    return match.group("base"), int(match.group("step"))
+
+
+def _latest_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the highest ``<name> @ <step>`` value per member, run and base name.
+
+    Rows without a step suffix are kept only when the group has no stepped row.
+    Ties at the highest step are all kept, so the matrix still reports them as
+    ambiguous instead of choosing silently.
+    """
+    grouped: dict[tuple[str, str, str], list[tuple[Optional[int], dict[str, Any]]]] = {}
+    for row in rows:
+        base, step = _step_name(row["name"])
+        grouped.setdefault((row["member"], row["run"], base), []).append((step, row))
+    keep: set[tuple[str, str, str, str]] = set()
+    for (member, run, base), items in grouped.items():
+        steps = [step for step, _ in items if step is not None]
+        if steps:
+            highest = max(steps)
+            chosen = [row for step, row in items if step == highest]
+        else:
+            chosen = [row for _, row in items]
+        for row in chosen:
+            keep.add((member, run, base, row["result"]))
+    selected: list[dict[str, Any]] = []
+    for row in rows:
+        base, step = _step_name(row["name"])
+        if (row["member"], row["run"], base, row["result"]) not in keep:
+            continue
+        latest = dict(row)
+        latest["name"] = base
+        latest["result_name"] = row["name"]
+        if step is not None:
+            latest["step"] = step
+        selected.append(latest)
+    return selected
+
+
+def value_rows(loaded: LoadedWorkspace, *, latest: bool = False) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for member_id, item in loaded.members.items():
         if item.manifest is None:
@@ -165,11 +211,17 @@ def value_rows(loaded: LoadedWorkspace) -> list[dict[str, Any]]:
                     and math.isfinite(result.value),
                 }
             )
-    return rows
+    return _latest_rows(rows) if latest else rows
 
 
-def compare_data(loaded: LoadedWorkspace, metric: str, run: Optional[str] = None) -> dict[str, Any]:
-    rows = [row for row in value_rows(loaded) if row["name"] == metric]
+def compare_data(
+    loaded: LoadedWorkspace,
+    metric: str,
+    run: Optional[str] = None,
+    *,
+    latest: bool = False,
+) -> dict[str, Any]:
+    rows = [row for row in value_rows(loaded, latest=latest) if row["name"] == metric]
     if run is not None:
         rows = [row for row in rows if f"{row['member']}#{row['run']}" == run]
     missing = 0
@@ -215,6 +267,7 @@ def compare_data(loaded: LoadedWorkspace, metric: str, run: Optional[str] = None
         "format": "rungraph-compare",
         "version": "0.1",
         "metric": metric,
+        "latest": latest,
         "rows": out,
         "missing": missing,
         "non_numeric": nonnumeric,
@@ -223,8 +276,8 @@ def compare_data(loaded: LoadedWorkspace, metric: str, run: Optional[str] = None
     }
 
 
-def matrix_data(loaded: LoadedWorkspace) -> dict[str, Any]:
-    rows = value_rows(loaded)
+def matrix_data(loaded: LoadedWorkspace, *, latest: bool = False) -> dict[str, Any]:
+    rows = value_rows(loaded, latest=latest)
     metrics = sorted({row["name"] for row in rows})
     cells = []
     missing = 0
@@ -232,7 +285,7 @@ def matrix_data(loaded: LoadedWorkspace) -> dict[str, Any]:
     ambiguous = 0
     grouped: dict[tuple[str, str], dict[str, list[Any]]] = {}
     for row in rows:
-        grouped.setdefault((row["member"], row["run"]), {}).setdefault(row["name"], []).append(row["value"])
+        grouped.setdefault((row["member"], row["run"]), {}).setdefault(row["name"], []).append(row)
     for (member, run), values in sorted(grouped.items()):
         for metric in metrics:
             entries = values.get(metric)
@@ -243,15 +296,20 @@ def matrix_data(loaded: LoadedWorkspace) -> dict[str, Any]:
                 ambiguous += 1
                 cells.append({"member": member, "run": run, "metric": metric, "state": "ambiguous"})
             else:
-                value = entries[0]
+                row = entries[0]
+                value = row["value"]
                 numeric = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
                 if not numeric:
                     nonnumeric += 1
-                cells.append({"member": member, "run": run, "metric": metric, "state": "value" if numeric else "non-numeric", "value": value})
+                cell = {"member": member, "run": run, "metric": metric, "state": "value" if numeric else "non-numeric", "value": value}
+                if latest and row.get("step") is not None:
+                    cell["step"] = row["step"]
+                cells.append(cell)
     return {
         "format": "rungraph-matrix",
         "version": "0.1",
         "metrics": metrics,
+        "latest": latest,
         "cells": cells,
         "missing": missing,
         "non_numeric": nonnumeric,
@@ -260,8 +318,15 @@ def matrix_data(loaded: LoadedWorkspace) -> dict[str, Any]:
     }
 
 
-def leaderboard_data(loaded: LoadedWorkspace, metric: str, direction: str, top: int = 10) -> dict[str, Any]:
-    rows = [row for row in value_rows(loaded) if row["name"] == metric]
+def leaderboard_data(
+    loaded: LoadedWorkspace,
+    metric: str,
+    direction: str,
+    top: int = 10,
+    *,
+    latest: bool = False,
+) -> dict[str, Any]:
+    rows = [row for row in value_rows(loaded, latest=latest) if row["name"] == metric]
     eligible = [row for row in rows if row["numeric"]]
     eligible.sort(key=lambda row: row["value"], reverse=direction == "max")
     ranked = []
@@ -279,6 +344,7 @@ def leaderboard_data(loaded: LoadedWorkspace, metric: str, direction: str, top: 
         "version": "0.1",
         "metric": metric,
         "direction": direction,
+        "latest": latest,
         "rows": ranked,
         "excluded": {"missing": sum(1 for row in rows if row["value"] is None), "non_numeric": sum(1 for row in rows if row["value"] is not None and not row["numeric"])},
         "conditions": "available",

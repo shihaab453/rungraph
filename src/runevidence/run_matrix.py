@@ -11,6 +11,7 @@ import math
 from typing import Any, Sequence
 
 from .histogram_display import value_display, value_to_json
+from .metric_steps import latest_names, split_step_name
 from .models import Manifest
 
 
@@ -39,6 +40,7 @@ def metric_matrix(
     manifest_path: str,
     selected_runs: Sequence[str] | None = None,
     selected_metrics: Sequence[str] | None = None,
+    latest: bool = False,
 ) -> dict[str, Any]:
     """Collect selected run/metric cells without reading or changing artifacts.
 
@@ -60,25 +62,41 @@ def metric_matrix(
         if run_id not in runs:
             raise MatrixError(f"run {run_id!r} not found")
     selected_set = set(run_ids)
-    metric_filter = None if requested_metrics is None else set(requested_metrics)
+    metric_filter = (
+        None
+        if requested_metrics is None
+        else {split_step_name(name)[0] for name in requested_metrics}
+        if latest
+        else set(requested_metrics)
+    )
+    by_run: dict[str, list[Any]] = {run_id: [] for run_id in run_ids}
+    for result in manifest.results:
+        if result.run_id in selected_set:
+            by_run[result.run_id].append(result)
     recorded: dict[str, dict[str, Any]] = {run_id: {} for run_id in run_ids}
     recorded_text: dict[str, set[str]] = {run_id: set() for run_id in run_ids}
-    for result in manifest.results:
-        if result.run_id not in selected_set:
-            continue
-        if metric_filter is not None and result.name not in metric_filter:
-            continue
-        bucket = recorded[result.run_id]
-        if result.name in bucket:
-            raise MatrixError(
-                f"run {result.run_id!r} has multiple results named {result.name!r}; refusing ambiguous matrix"
-            )
-        bucket[result.name] = value_to_json(result.value)
-        if getattr(getattr(result, "locator", None), "kind", None) == "tensorboard-string":
-            recorded_text[result.run_id].add(result.name)
+    for run_id, results in by_run.items():
+        if latest:
+            keep = latest_names(result.name for result in results)
+            results = [result for result in results if result.name in keep]
+        for result in results:
+            name = split_step_name(result.name)[0] if latest else result.name
+            if metric_filter is not None and name not in metric_filter:
+                continue
+            bucket = recorded[run_id]
+            if name in bucket:
+                raise MatrixError(
+                    f"run {run_id!r} has multiple results named {name!r}; refusing ambiguous matrix"
+                )
+            bucket[name] = value_to_json(result.value)
+            if getattr(getattr(result, "locator", None), "kind", None) == "tensorboard-string":
+                recorded_text[run_id].add(name)
 
-    metric_names = (sorted({name for bucket in recorded.values() for name in bucket})
-                    if requested_metrics is None else requested_metrics)
+    metric_names = (
+        sorted({name for bucket in recorded.values() for name in bucket})
+        if requested_metrics is None
+        else sorted(metric_filter) if latest else requested_metrics
+    )
     rows: list[dict[str, Any]] = []
     missing_count = nonfinite_count = 0
     for run_id in run_ids:
@@ -101,6 +119,7 @@ def metric_matrix(
 
     data = {
         "manifest": manifest_path,
+        "latest": latest,
         "metrics": metric_names,
         "runs": rows,
         "summary": {

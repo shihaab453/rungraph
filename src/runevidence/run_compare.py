@@ -12,6 +12,7 @@ from fractions import Fraction
 from typing import Any
 
 from .histogram_display import value_display, value_to_json
+from .metric_steps import latest_names, split_step_name
 from .models import Manifest
 
 
@@ -27,17 +28,26 @@ def _run(manifest: Manifest, identifier: str):
     return matches[0]
 
 
-def _results(manifest: Manifest, run_id: str) -> tuple[dict[str, Any], set[str]]:
+def _results(
+    manifest: Manifest, run_id: str, *, latest: bool = False
+) -> tuple[dict[str, Any], set[str]]:
     result_map: dict[str, Any] = {}
     text_names: set[str] = set()
-    for r in manifest.results:
-        if r.run_id != run_id:
-            continue
-        if r.name in result_map:
-            raise ComparisonError(f"run {run_id!r} has multiple results named {r.name!r}; refusing ambiguous comparison")
-        result_map[r.name] = value_to_json(r.value)
+    results = [r for r in manifest.results if r.run_id == run_id]
+    if latest:
+        keep = latest_names(r.name for r in results)
+        results = [r for r in results if r.name in keep]
+    for r in results:
+        name = split_step_name(r.name)[0] if latest else r.name
+        if name in result_map:
+            qualifier = "latest " if latest else ""
+            raise ComparisonError(
+                f"run {run_id!r} has multiple {qualifier}results named {name!r}; "
+                "refusing ambiguous comparison"
+            )
+        result_map[name] = value_to_json(r.value)
         if getattr(getattr(r, "locator", None), "kind", None) == "tensorboard-string":
-            text_names.add(r.name)
+            text_names.add(name)
     return result_map, text_names
 
 
@@ -140,15 +150,22 @@ def _items(
     return items
 
 
-def compare_runs(manifest: Manifest, baseline_id: str, target_id: str, *, manifest_path: str) -> dict[str, Any]:
+def compare_runs(
+    manifest: Manifest,
+    baseline_id: str,
+    target_id: str,
+    *,
+    manifest_path: str,
+    latest: bool = False,
+) -> dict[str, Any]:
     """Compare recorded values only. Never open artifact paths or run checks."""
     if baseline_id == target_id:
         raise ComparisonError("baseline and target must be different run IDs")
     b = _run(manifest, baseline_id)
     t = _run(manifest, target_id)
     parameters = _items(b.params, t.params, numeric_deltas=False)
-    baseline_results, baseline_text = _results(manifest, baseline_id)
-    target_results, target_text = _results(manifest, target_id)
+    baseline_results, baseline_text = _results(manifest, baseline_id, latest=latest)
+    target_results, target_text = _results(manifest, target_id, latest=latest)
     results = _items(
         baseline_results,
         target_results,
@@ -161,6 +178,7 @@ def compare_runs(manifest: Manifest, baseline_id: str, target_id: str, *, manife
         "manifest": manifest_path,
         "baseline": {"id": b.id, "name": b.name},
         "target": {"id": t.id, "name": t.name},
+        "latest": latest,
         "parameters": parameters,
         "results": results,
         "summary": {
