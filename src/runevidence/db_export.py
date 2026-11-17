@@ -122,7 +122,7 @@ def export_sqlite(loaded: LoadedManifest, output: Path, *, force: bool = False) 
             connection.commit()
         finally:
             connection.close()
-        with staging.open("rb") as handle:
+        with staging.open("rb+") as handle:
             os.fsync(handle.fileno())
         os.replace(staging, output)
     finally:
