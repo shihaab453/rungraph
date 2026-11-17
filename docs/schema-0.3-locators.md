@@ -248,7 +248,7 @@ the artifact-level state warning. A digestless targeted artifact with a
 mismatched extension therefore keeps `no-digest` exactly as it would without a
 locator. The `no-digest` suppression applies only when the replacement locator
 finding is actually emitted. That restored `no-digest` hint uses the same
-manifest-wide `rehash` predicate and wording as `locator-no-digest`, including
+artifact-scoped `rehash` predicate and wording as `locator-no-digest`, including
 when every locator on the artifact is kind-mismatched.
 
 `locator-verifier-unavailable` remains only as a defensive code for an

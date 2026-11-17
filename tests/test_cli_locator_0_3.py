@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from runevidence import cli
-from runevidence.manifest import _issue_location, dump_manifest
+from runevidence.manifest import _issue_location, dump_manifest, validate_manifest
 from runevidence.models import Manifest
 
 OBJECT_LOCATOR = {"kind": "jsonl", "line": 1, "pointer": "/val"}
@@ -358,3 +359,55 @@ def test_rehash_accepts_an_unrelated_artifact_despite_an_object_locator(
 
     code, out, err = _run(capsys, ["validate", str(root)])
     assert code == 0, out
+
+
+@pytest.mark.skipif(os.name != "posix", reason="directory authoring is POSIX-only")
+def test_directory_rehash_is_not_blocked_by_an_unrelated_object_locator(
+    tmp_path, capsys
+):
+    import os
+
+    root = tmp_path / "exp"
+    root.mkdir()
+    (root / "data").mkdir()
+    (root / "data" / "a.txt").write_bytes(b"hello\n")
+    data = b'{"val": 0.9}\n'
+    (root / "metrics.jsonl").write_bytes(data)
+    document = {
+        "schema_version": "0.6",
+        "project": {"id": "p", "name": "P"},
+        "runs": [{"id": "r"}],
+        "artifacts": [
+            {
+                "id": "data",
+                "path": "data",
+                "artifact_type": "directory",
+                "digest_format": "runevidence-directory-v1",
+                "sha256": "0" * 64,
+                "size_bytes": 6,
+            },
+            {
+                "id": "metrics",
+                "path": "metrics.jsonl",
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "size_bytes": len(data),
+            },
+        ],
+        "results": [
+            {
+                "id": "res",
+                "run_id": "r",
+                "name": "val",
+                "value": 0.9,
+                "artifact_id": "metrics",
+                "locator": {"kind": "jsonl", "line": 1, "pointer": "/val"},
+            }
+        ],
+    }
+    (root / "runevidence.json").write_text(
+        dump_manifest(validate_manifest(document)), encoding="utf-8"
+    )
+
+    code, out, err = _run(capsys, ["rehash", str(root), "data", "--directory", "--dry-run"])
+    assert "INTERNAL_ERROR" not in out
+    assert (code, err) in ((0, ""), (2, ""))

@@ -2273,12 +2273,6 @@ def _directory_rehash_checked(
     from . import directory_publication as dp
     from .directory_authoring import propose_rehash_directory
 
-    if any(
-        result.locator is not None and type(result.locator) is not str
-        for result in loaded.manifest.results
-    ):
-        return _locator_refresh_unsupported()
-
     artifact = next(
         (entry for entry in loaded.manifest.artifacts if entry.id == artifact_id), None
     )
