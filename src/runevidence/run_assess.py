@@ -87,7 +87,7 @@ def _result_state(manifest, result_id: str, findings) -> dict:
     if unverified is not None:
         return {"id": result_id, "state": "unverified", "reason": unverified.code.value}
     if errors:
-        return {"id": result_id, "state": "failed", "reason": errors[0].code.value}
+        return {"id": result_id, "state": "unverified", "reason": errors[0].code.value}
     if result.locator is None:
         if (
             manifest.schema_version in SUMMARY_SCHEMAS
@@ -156,17 +156,27 @@ def assess(
         outcome = None
         conditions_error = "INTERNAL_ERROR"
     conditions = "unavailable"
-    if outcome is not None:
+    if outcome is None:
+        conditions_error = "INTERNAL_ERROR"
+    else:
+        try:
+            exit_code = outcome.exit_code
+        except Exception:
+            exit_code = None
         conditions = {0: "comparable", 1: "not-comparable"}.get(
-            outcome.exit_code, "unavailable"
+            exit_code, "unavailable"
         )
         if conditions == "unavailable":
-            error = outcome.document.get("error")
+            try:
+                document = outcome.document
+            except Exception:
+                document = None
+            error = document.get("error") if isinstance(document, dict) else None
             code = error.get("code") if isinstance(error, dict) else None
             if isinstance(code, str):
                 conditions_error = code
             else:
-                core = outcome.document.get("core")
+                core = document.get("core") if isinstance(document, dict) else None
                 decision = core.get("decision") if isinstance(core, dict) else None
                 conditions_error = (
                     "INSUFFICIENT_EVIDENCE"

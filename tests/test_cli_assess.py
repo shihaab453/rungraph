@@ -360,3 +360,64 @@ def test_a_schema_0_3_unsupported_locator_is_unverified(tmp_path: Path, capsys):
     assert data["results"]["target"]["state"] == "unverified"
     assert data["results"]["target"]["reason"] == "locator-kind-mismatch"
     assert data["values_verified"] is False
+
+
+def test_a_dangling_artifact_reference_is_unverified(tmp_path: Path, capsys):
+    baseline = make_member(tmp_path, "base")
+    target = make_member(tmp_path, "target")
+    path = target / "runevidence.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["results"][0]["artifact_id"] = "absent"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    code, out = run_assess(baseline, target, capsys, "--json")
+    data = json.loads(out)
+    assert code == 1
+    assert data["results"]["target"]["state"] == "unverified"
+    assert data["results"]["target"]["reason"] == "dangling-reference"
+    assert data["values_verified"] is False
+
+
+def test_a_mock_comparability_none_is_internal_error(tmp_path: Path, monkeypatch):
+    from runevidence import run_assess
+
+    baseline = make_member(tmp_path, "base")
+    target = make_member(tmp_path, "target")
+    monkeypatch.setattr(
+        run_assess.run_comparability, "compare_paths", lambda *a, **k: None
+    )
+    outcome = run_assess.assess(
+        baseline,
+        target,
+        baseline_result_id="acc-base",
+        target_result_id="acc-target",
+    )
+    assert outcome.document["conditions"] == "unavailable"
+    assert outcome.document["conditions_error"] == "INTERNAL_ERROR"
+    assert outcome.document["permitted"] is False
+
+
+def test_a_mock_comparability_without_a_document_is_internal_error(
+    tmp_path: Path, monkeypatch
+):
+    from runevidence import run_assess
+
+    baseline = make_member(tmp_path, "base")
+    target = make_member(tmp_path, "target")
+
+    class Outcome:
+        exit_code = 2
+        document = None
+
+    monkeypatch.setattr(
+        run_assess.run_comparability, "compare_paths", lambda *a, **k: Outcome()
+    )
+    outcome = run_assess.assess(
+        baseline,
+        target,
+        baseline_result_id="acc-base",
+        target_result_id="acc-target",
+    )
+    assert outcome.document["conditions"] == "unavailable"
+    assert outcome.document["conditions_error"] == "INTERNAL_ERROR"
+    assert outcome.exit_code == 1
