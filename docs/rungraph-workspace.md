@@ -125,6 +125,9 @@ cycles are reported per strongly connected component with a bounded example list
   text, and the claims affected by each error-level finding. `--markdown` emits the same
   report as a shareable Markdown document. `--directory-artifacts` opts into
   directory checks and is stated in the header when absent; `--strict` makes warnings fail.
+- `db-export` writes a derived SQLite cache of the workspace, members, claims, claim references
+  and relationships to `--output`; `--force` replaces an existing file and `--json` prints a
+  summary. JSON remains the authority; the cache is never read for validation.
 - `runs` lists every recorded run across members with its params, recorded conditions, start
   time and per-run artifact/result counts. Adapter metadata is opt-in with `--metadata`;
   `--summaries` adds whitelisted MLflow/Sacred/W&B fields without raw metadata;
