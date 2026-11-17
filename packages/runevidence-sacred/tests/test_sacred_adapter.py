@@ -203,3 +203,24 @@ def test_an_external_symlink_is_not_read(tmp_path: Path):
     manifest = json.loads((tmp_path / "root" / "runevidence.json").read_text(encoding="utf-8"))
     assert manifest["runs"][0]["params"] == {}
     assert "1/config.json" in manifest["runs"][0]["metadata"]["sacred"]["unreadable"]
+
+
+def test_a_swap_after_discovery_cannot_read_outside(tmp_path: Path):
+    import os
+
+    from runevidence.adapters import AdapterError
+    from runevidence_sacred import SacredAdapter
+
+    root = tmp_path / "root"
+    folder = write_run(root)
+    adapter = SacredAdapter()
+    discovery = adapter.discover(root)
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    (folder / "metrics.json").unlink()
+    try:
+        os.symlink(outside, folder / "metrics.json")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available")
+    with pytest.raises(AdapterError):
+        adapter.extract(root, discovery, project_id="p", project_name="p")

@@ -394,7 +394,7 @@ jobs:
               paths = [one(OUT / kind / key, suffix) for kind, suffix in (("sdist", "*.tar.gz"), ("wheel-tree", "*.whl"), ("wheel-sdist", "*.whl")) for key in SPECS]
               ensure(len(paths) == 15, "expected fifteen total archives")
               run(sys.executable, "-m", "twine", "check", "--strict", *paths)
-              print("PACKAGING ADVISORY: ALL TWELVE ARCHIVES PASS")
+              print("PACKAGING ADVISORY: ALL FIFTEEN ARCHIVES PASS")
               summary = Path(os.environ.get("GITHUB_STEP_SUMMARY", str(OUT / "summary.md")))
               with summary.open("a", encoding="utf-8") as f:
                   f.write("### Packaging advisory: PASS\nFifteen archives built and checked, including five sdist-derived wheels. See job log for SHA-256, members, metadata, and validators. No artifacts uploaded.\n")

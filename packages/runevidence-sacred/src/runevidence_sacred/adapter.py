@@ -152,12 +152,17 @@ class SacredAdapter(Adapter):
         for rel in discovery.files:
             owner = next((d for d in by_depth if _is_under(rel, d)), None)
             path = root / rel
+            target = _safe_target(root, path)
+            if target is None:
+                raise AdapterError(
+                    f"artifact {rel!r} resolves outside the selected root; nothing was written"
+                )
             artifacts.append(
                 Artifact(
                     id=_unique(valid_slug(rel), used),
                     path=rel,
-                    sha256=sha256_file(path),
-                    size_bytes=path.stat().st_size,
+                    sha256=sha256_file(target),
+                    size_bytes=target.stat().st_size,
                     run_id=run_ids[owner] if owner is not None else None,
                 )
             )
