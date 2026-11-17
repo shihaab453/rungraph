@@ -86,3 +86,32 @@ def test_external_history_symlink_is_refused(tmp_path: Path):
         pytest.skip("symlinks are not available")
     assert main(["init", str(root), "--adapter", "keras"]) == 2
     assert not (root / "runevidence.json").exists()
+
+
+def test_an_unreadable_artifact_is_an_adapter_error(tmp_path: Path):
+    import os
+
+    if os.name != "posix":
+        pytest.skip("permission bits are POSIX-only")
+    write_history(tmp_path, "epoch,loss\n1,0.5\n")
+    secret = tmp_path / "secret.bin"
+    secret.write_bytes(b"x")
+    secret.chmod(0)
+    try:
+        assert main(["init", str(tmp_path), "--adapter", "keras"]) == 2
+        assert not (tmp_path / "runevidence.json").exists()
+    finally:
+        secret.chmod(0o600)
+
+
+def test_a_file_deleted_after_discovery_is_an_adapter_error(tmp_path: Path):
+    from runevidence.adapters import AdapterError
+    from runevidence_keras import KerasAdapter
+
+    write_history(tmp_path, "epoch,loss\n1,0.5\n")
+    (tmp_path / "gone.bin").write_bytes(b"x")
+    adapter = KerasAdapter()
+    discovery = adapter.discover(tmp_path)
+    (tmp_path / "gone.bin").unlink()
+    with pytest.raises(AdapterError):
+        adapter.extract(tmp_path, discovery, project_id="p", project_name="p")

@@ -17,7 +17,7 @@ from typing import Any
 from runevidence.adapters import Adapter, AdapterError, Discovery, GenericAdapter
 from runevidence.adapters.generic import valid_slug
 from runevidence.checks.csv import CsvProfile, CsvProfileError, parse_number
-from runevidence.hashing import sha256_file
+from runevidence.checks.files import _parts_for, _read_snapshot_parts
 from runevidence.models import Artifact, Manifest04, Project, Result04, Run
 
 HISTORY_NAME = "history.csv"
@@ -58,21 +58,15 @@ class KerasAdapter(Adapter):
                 "more than one CSV is present and none is named history.csv; "
                 "keep one history file or use --adapter generic. Nothing was written."
             )
-        path = root / history
-        target = _safe_target(root, path)
-        if target is None:
+        read = _read_snapshot_parts(
+            root, _parts_for(root, history), cap=MAX_CSV_BYTES
+        )
+        if read.state != "ok" or read.snapshot is None or read.snapshot.data is None:
             raise AdapterError(
-                f"history file {history!r} resolves outside the selected root; nothing was written"
+                f"history file {history!r} cannot be read ({read.state}); nothing was written"
             )
-        try:
-            size = target.stat().st_size
-            if size > MAX_CSV_BYTES:
-                raise AdapterError(
-                    f"history file is larger than {MAX_CSV_BYTES} bytes; nothing was written"
-                )
-            data = target.read_bytes()
-        except OSError as exc:
-            raise AdapterError(f"history file cannot be read ({type(exc).__name__})") from None
+        data = read.snapshot.data
+        history_snapshot = read.snapshot
         try:
             first = CsvProfile(data)
         except CsvProfileError as exc:
@@ -150,12 +144,21 @@ class KerasAdapter(Adapter):
         artifacts: list[Artifact] = []
         history_id: str | None = None
         for rel in discovery.files:
-            artifact_path = root / rel
-            artifact_target = _safe_target(root, artifact_path)
-            if artifact_target is None:
-                raise AdapterError(
-                    f"artifact {rel!r} resolves outside the selected root; nothing was written"
-                )
+            if rel == history:
+                digest = history_snapshot.digest
+                size = history_snapshot.size
+            else:
+                artifact_read = _read_snapshot_parts(root, _parts_for(root, rel))
+                if (
+                    artifact_read.state not in ("ok", "over-cap")
+                    or artifact_read.snapshot is None
+                ):
+                    raise AdapterError(
+                        f"artifact {rel!r} cannot be read ({artifact_read.state}); "
+                        "nothing was written"
+                    )
+                digest = artifact_read.snapshot.digest
+                size = artifact_read.snapshot.size
             artifact_id = _unique(valid_slug(rel), used)
             if rel == history:
                 history_id = artifact_id
@@ -163,8 +166,8 @@ class KerasAdapter(Adapter):
                 Artifact(
                     id=artifact_id,
                     path=rel,
-                    sha256=sha256_file(artifact_target),
-                    size_bytes=artifact_target.stat().st_size,
+                    sha256=digest,
+                    size_bytes=size,
                     run_id=run_id,
                 )
             )
@@ -184,17 +187,6 @@ def _epoch_index(header: tuple[str, ...]) -> int | None:
         if name.lower() == "epoch":
             return index
     return None
-
-
-def _safe_target(root: Path, path: Path) -> Path | None:
-    try:
-        base = root.resolve()
-        target = path.resolve()
-    except OSError:
-        return None
-    if target != base and base not in target.parents:
-        return None
-    return target
 
 
 def _unique(base: str, used: set[str]) -> str:

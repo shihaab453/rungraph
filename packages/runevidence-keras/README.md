@@ -1,7 +1,7 @@
 # runevidence-keras
 
 A [RunEvidence](../../README.md) adapter for a Keras training-history CSV, typically written by
-`pd.DataFrame(history.history).to_csv("history.csv")`.
+`pd.DataFrame(history.history).to_csv("history.csv", index_label="epoch")`.
 
 ```bash
 pip install -e . -e ./packages/runevidence-keras
