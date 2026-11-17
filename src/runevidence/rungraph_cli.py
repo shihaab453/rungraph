@@ -242,6 +242,96 @@ def _report_text(value: object, limit: int = _REPORT_TEXT_CLAIM) -> str:
     return escaped
 
 
+def _md(value: object, limit: int = 400) -> str:
+    text = str(value).replace("\\", "\\\\").replace("|", "\\|")
+    text = text.replace("\r", " ").replace("\n", " ")
+    if len(text) > limit:
+        text = text[:limit] + "..."
+    return text
+
+
+def _markdown_report(data: dict, document) -> str:
+    lines = [f"# {_md(document.name)} ({_md(document.id)})", ""]
+    policy = data["check_policy"]
+    lines.append(
+        "**Directory artifacts:** "
+        + ("enabled" if policy.get("directory_artifacts") else "disabled")
+    )
+    lines.append(f"**Exit:** {data['exit_code']}")
+    lines += ["", "## Members", ""]
+    if not data["members"]:
+        lines.append("None.")
+    for member in data["members"]:
+        lines.append(f"### {_md(member['id'])} ({_md(member['path'])})")
+        lines.append("")
+        schema = member["schema_version"] or "unreadable"
+        lines.append(f"- Schema: {_md(schema)}")
+        lines.append(
+            f"- {member['counts']['error']} errors, "
+            f"{member['counts']['warning']} warnings"
+        )
+        if member["load_error"]:
+            lines.append(f"- ERROR: {_md(member['load_error'])}")
+        for finding in member["findings"][:_REPORT_TEXT_FINDINGS]:
+            subject = f" [{_md(finding['subject'], 80)}]" if finding["subject"] else ""
+            lines.append(
+                f"- {finding['severity'].upper()} `{finding['code']}`{subject}: "
+                f"{_md(finding['message'])}"
+            )
+        hidden = len(member["findings"]) - _REPORT_TEXT_FINDINGS
+        if hidden > 0:
+            lines.append(f"- and {hidden} more findings (see `--json`)")
+        lines.append("")
+    lines += ["## Claims", ""]
+    if not data["claims"]:
+        lines.append("None.")
+    else:
+        lines.append("| Claim | Owner | Labels | Text |")
+        lines.append("| --- | --- | --- | --- |")
+        for claim in data["claims"]:
+            lines.append(
+                f"| `{_md(claim['id'])}` | {_md(claim['member'] or 'workspace')} | "
+                f"{_md(', '.join(claim['labels']))} | {_md(claim['text'])} |"
+            )
+    lines += ["", "## Impact", ""]
+    if not data["impact"]:
+        lines.append("None.")
+    else:
+        lines.append("| Finding | Node | Claims |")
+        lines.append("| --- | --- | --- |")
+        for item in data["impact"]:
+            lines.append(
+                f"| `{_md(item['code'])}` | `{_md(item['node'])}` | "
+                f"{_md(', '.join(item['claims']) or 'none')} |"
+            )
+    baseline = data.get("baseline")
+    if baseline is not None:
+        lines += ["", "## Baseline", ""]
+        for member in baseline["members"]:
+            detail = member["status"]
+            if any(member.get(key) for key in ("added", "removed", "changed")):
+                detail += (
+                    f" (+{len(member.get('added', []))} -{len(member.get('removed', []))}"
+                    f" ~{len(member.get('changed', []))})"
+                )
+            if member.get("schema_changed"):
+                detail += ", schema changed"
+            lines.append(f"- `{_md(member['id'])}`: {_md(detail)}")
+        if baseline["removed_members"]:
+            lines.append(
+                "- Removed members: " + _md(", ".join(baseline["removed_members"]))
+            )
+        for kind in ("claims", "relationships"):
+            changes = baseline[kind]
+            if any(changes.values()):
+                lines.append(
+                    f"- {kind}: +{len(changes['added'])} -{len(changes['removed'])}"
+                    f" ~{len(changes['changed'])}"
+                )
+    lines += ["", "> Recorded assertions only; this is not a scientific validity claim.", ""]
+    return "\n".join(lines)
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     try:
         loaded, graph, checks, states = _loaded(args)
@@ -258,6 +348,8 @@ def cmd_report(args: argparse.Namespace) -> int:
             data["exit_code"] = EXIT_EVIDENCE
     if args.json:
         _print_json(data)
+    elif args.markdown:
+        print(_markdown_report(data, loaded.document))
     else:
         policy = data["check_policy"]
         print(
@@ -649,7 +741,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("report", help="consolidated evidence and claim report")
     p.add_argument("root", nargs="?", default=".")
-    p.add_argument("--json", action="store_true")
+    output = p.add_mutually_exclusive_group()
+    output.add_argument("--json", action="store_true")
+    output.add_argument("--markdown", action="store_true", help="print a Markdown report")
     p.add_argument("--strict", action="store_true")
     p.add_argument("--directory-artifacts", action="store_true")
     p.add_argument("--baseline")
