@@ -1447,6 +1447,8 @@ Read these before relying on a green `validate` for anything important.
   generic, Hydra, MLflow and TensorBoard adapters remain available.
 - Everything is offline. No command reads a network, launches a job or loads model weights.
 - macOS and Python 3.11-3.13 are not directly verified; they are not declared unsupported.
+- The [platform page](docs/platform.md) records which adapters need POSIX directory-descriptor
+  reads and what to use on Windows instead.
 
 ## Machine-readable output
 
