@@ -123,3 +123,20 @@ Supplied fields are merged; omitted fields are preserved.
 `id`, `path`, `sha256`, `size_bytes`, `artifact_type` and `digest_format` are refused here:
 identity, path and bytes belong to `add`/`rehash`, and directory format belongs to
 `add --directory`. This is the CLI route for setting `dataset_id` on schema 0.2+.
+
+
+## Run (`runevidence run PATH --add|--edit --file RUN.json`)
+
+Required for `add`: `id`. Optional: `name`, `started_at` (ISO 8601), `params`, `metadata`,
+and schema-0.2+ `conditions` (the same six children as the `conditions` command). `edit` merges
+the supplied fields; `id` is immutable. `--remove --id RUN_ID` refuses while an artifact or
+result names the run, a relationship uses it, or a claim cites it.
+
+```json
+{
+  "id": "run-tuned",
+  "name": "Tuned",
+  "params": {"learning_rate": 0.01},
+  "conditions": {"evaluation_split": "test", "source_revision": "9f2c1ab"}
+}
+```

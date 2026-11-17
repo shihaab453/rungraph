@@ -132,6 +132,54 @@ def edit_artifact(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
     _validate(raw)
 
 
+_RUN_EDITABLE = {"name", "started_at", "params", "metadata", "conditions"}
+
+
+def add_run(raw: dict, entry: dict[str, Any]) -> None:
+    entry = dict(entry)
+    _text(entry, "id", "a run")
+    if entry["id"] in _ids(raw):
+        raise AuthoringError(f"ID {entry['id']!r} is already used")
+    raw.setdefault("runs", []).append(entry)
+    _validate(raw)
+
+
+def edit_run(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
+    index = _find(raw, "runs", entry_id)
+    run = raw["runs"][index]
+    for key, value in patch.items():
+        if key == "id":
+            continue
+        if key not in _RUN_EDITABLE:
+            raise AuthoringError(f"unknown run field {key!r}")
+        run[key] = value
+    _validate(raw)
+
+
+def remove_run(raw: dict, entry_id: str) -> None:
+    used: list[str] = []
+    for artifact in raw.get("artifacts", []):
+        if artifact.get("run_id") == entry_id:
+            used.append(f"artifact {artifact.get('id')!r}")
+    for result in raw.get("results", []):
+        if result.get("run_id") == entry_id:
+            used.append(f"result {result.get('id')!r}")
+    for relationship in raw.get("relationships", []):
+        if relationship.get("source") == entry_id or relationship.get("target") == entry_id:
+            used.append(f"relationship {relationship.get('source')!r} -> {relationship.get('target')!r}")
+    for evidence in raw.get("evidence", []):
+        for key in ("supports", "contradicts"):
+            if entry_id in (evidence.get(key) or []):
+                used.append(f"claim {evidence.get('id')!r}")
+    if used:
+        raise AuthoringError(
+            f"run {entry_id!r} is still used by " + ", ".join(used)
+            + "; remove or edit those references first"
+        )
+    raw["runs"].pop(_find(raw, "runs", entry_id))
+    _validate(raw)
+
+
 def _citations(raw: dict, target: str) -> list[str]:
     found: list[str] = []
     for evidence in raw.get("evidence", []):
