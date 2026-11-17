@@ -224,3 +224,20 @@ def test_a_swap_after_discovery_cannot_read_outside(tmp_path: Path):
         pytest.skip("symlinks are not available")
     with pytest.raises(AdapterError):
         adapter.extract(root, discovery, project_id="p", project_name="p")
+
+
+def test_an_unreadable_subdirectory_refuses(tmp_path: Path):
+    import os
+
+    if os.name != "posix":
+        pytest.skip("permission bits are POSIX-only")
+    folder = write_run(tmp_path)
+    block = folder / "checkpoints"
+    block.mkdir()
+    (block / "model.ckpt").write_text("x", encoding="utf-8")
+    block.chmod(0)
+    try:
+        assert main(["init", str(tmp_path), "--adapter", "sacred"]) == 2
+        assert not (tmp_path / "runevidence.json").exists()
+    finally:
+        block.chmod(0o700)

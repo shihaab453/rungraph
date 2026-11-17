@@ -29,6 +29,7 @@ from typing import Any, Optional
 
 from runevidence.adapters import Adapter, AdapterError, Discovery, GenericAdapter
 from runevidence.adapters.generic import valid_slug
+from runevidence.checks.files import assert_tree_readable
 from runevidence.hashing import sha256_file
 from runevidence.locator_profiles import ProfileError, parse_json_document
 from runevidence.models import Artifact, Manifest, Project, Result, Run
@@ -48,6 +49,12 @@ class SacredAdapter(Adapter):
     )
 
     def discover(self, root: Path) -> Discovery:
+        try:
+            assert_tree_readable(root)
+        except OSError:
+            raise AdapterError(
+                "a folder under the selected root cannot be listed; nothing was written"
+            ) from None
         discovery = GenericAdapter().discover(root)
         runs = sorted(
             {
@@ -62,6 +69,12 @@ class SacredAdapter(Adapter):
         self, root: Path, discovery: Discovery, *, project_id: str, project_name: str
     ) -> Manifest:
         root = Path(root)
+        try:
+            assert_tree_readable(root)
+        except OSError:
+            raise AdapterError(
+                "a folder under the selected root cannot be listed; nothing was written"
+            ) from None
         run_dirs: list[str] = [
             item
             for item in sorted(set(discovery.details.get("runs", [])))

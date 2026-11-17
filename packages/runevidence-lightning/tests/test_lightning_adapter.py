@@ -88,3 +88,46 @@ def test_refuses_without_protected_reads(tmp_path: Path, monkeypatch):
         LightningAdapter().extract(
             tmp_path, LightningAdapter().discover(tmp_path), project_id="p", project_name="p"
         )
+
+
+def test_root_level_metrics_is_a_run(tmp_path: Path):
+    (tmp_path / "metrics.csv").write_text("epoch,step,loss\n0,0,1.0\n", encoding="utf-8", newline="")
+    assert main(["init", str(tmp_path), "--adapter", "lightning", "--name", "Study", "--id", "study"]) == 0
+    manifest = json.loads((tmp_path / "runevidence.json").read_text(encoding="utf-8"))
+    assert manifest["runs"][0]["name"] == tmp_path.name
+    assert manifest["results"][0]["name"] == "loss @ 0"
+
+
+def test_artifacts_are_owned_by_the_nearest_run(tmp_path: Path):
+    folder = write_version(tmp_path, "0", "epoch,step,loss\n0,0,1.0\n")
+    (folder / "checkpoints").mkdir()
+    (folder / "checkpoints" / "model.ckpt").write_text("x", encoding="utf-8")
+    assert main(["init", str(tmp_path), "--adapter", "lightning", "--name", "Study", "--id", "study"]) == 0
+    manifest = json.loads((tmp_path / "runevidence.json").read_text(encoding="utf-8"))
+    run_id = manifest["runs"][0]["id"]
+    model = next(item for item in manifest["artifacts"] if item["path"].endswith("model.ckpt"))
+    assert model["run_id"] == run_id
+
+
+def test_row_index_fallback_when_no_step_or_epoch(tmp_path: Path):
+    write_version(tmp_path, "0", "loss,accuracy\n1.0,0.5\n")
+    assert main(["init", str(tmp_path), "--adapter", "lightning", "--name", "Study", "--id", "study"]) == 0
+    manifest = json.loads((tmp_path / "runevidence.json").read_text(encoding="utf-8"))
+    assert [item["name"] for item in manifest["results"]] == ["loss @ 0", "accuracy @ 0"]
+
+
+def test_an_unreadable_directory_refuses(tmp_path: Path):
+    import os
+
+    if os.name != "posix":
+        pytest.skip("permission bits are POSIX-only")
+    folder = write_version(tmp_path, "0", "epoch,step,loss\n0,0,1.0\n")
+    block = folder / "checkpoints"
+    block.mkdir()
+    (block / "model.ckpt").write_text("x", encoding="utf-8")
+    block.chmod(0)
+    try:
+        assert main(["init", str(tmp_path), "--adapter", "lightning"]) == 2
+        assert not (tmp_path / "runevidence.json").exists()
+    finally:
+        block.chmod(0o700)

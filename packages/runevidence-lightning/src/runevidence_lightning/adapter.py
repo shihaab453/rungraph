@@ -16,7 +16,7 @@ from runevidence.adapters import Adapter, AdapterError, Discovery, GenericAdapte
 from runevidence.adapters.generic import valid_slug
 from runevidence.checks import files as check_files
 from runevidence.checks.csv import CsvProfile, CsvProfileError, parse_number
-from runevidence.checks.files import _parts_for, _read_snapshot_parts
+from runevidence.checks.files import _parts_for, _read_snapshot_parts, assert_tree_readable
 from runevidence.models import Artifact, Manifest04, Project, Result04, Run
 
 METRICS_NAME = "metrics.csv"
@@ -32,6 +32,12 @@ class LightningAdapter(Adapter):
     )
 
     def discover(self, root: Path) -> Discovery:
+        try:
+            assert_tree_readable(root)
+        except OSError:
+            raise AdapterError(
+                "a folder under the selected root cannot be listed; nothing was written"
+            ) from None
         discovery = GenericAdapter().discover(root)
         runs = sorted(
             {
@@ -46,6 +52,12 @@ class LightningAdapter(Adapter):
         self, root: Path, discovery: Discovery, *, project_id: str, project_name: str
     ) -> Manifest04:
         root = Path(root)
+        try:
+            assert_tree_readable(root)
+        except OSError:
+            raise AdapterError(
+                "a folder under the selected root cannot be listed; nothing was written"
+            ) from None
         if not check_files._DIR_FD:
             raise AdapterError(
                 "the Lightning adapter needs POSIX directory-descriptor support for protected "

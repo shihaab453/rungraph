@@ -105,8 +105,9 @@ No params, results or claims.
 
 ### `lightning` (`packages/runevidence-lightning`)
 
-A PyTorch Lightning `CSVLogger` base directory holds `version_*/metrics.csv`. The adapter records
-one run per version folder, hashes every file, and turns every numeric cell into a schema 0.4
+A PyTorch Lightning `CSVLogger` base directory holds `version_*/metrics.csv`. Any folder containing
+`metrics.csv` is a run (the `version_*` layout is the common case). The adapter hashes every file
+and turns every numeric cell into a schema 0.4
 result with a `csv-cell` locator. Names are `<metric> @ <step>`; sparse/empty cells are skipped.
 It uses the protected descriptor walk and refuses where POSIX directory-descriptor support is
 unavailable.
