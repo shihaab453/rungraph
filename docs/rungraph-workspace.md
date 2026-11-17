@@ -161,7 +161,7 @@ cycles are reported per strongly connected component with a bounded example list
 
 ## JSON and exit codes
 
-`discover`, `init`, `validate`, `report` and `runs` print text by default and accept `--json`
+`discover`, `init`, `validate`, `report`, `runs` and `db-export` print text by default and accept `--json`
 for a `rungraph-<command>` envelope with `version: "0.1"` and `exit_code`. `compare`, `matrix`,
 `leaderboard` and `stats` always emit JSON; `--json` is accepted for symmetry, not required.
 `compare`, `matrix`, `leaderboard` and `stats` also accept `--text` for a compact human-readable table; without it they emit JSON. `graph` selects JSON or DOT with `--format` and adds recorded run/artifact/result/evidence/claim data to JSON nodes with `--detail`; `impact` always emits JSON. Errors use
