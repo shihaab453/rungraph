@@ -127,8 +127,10 @@ cycles are reported per strongly connected component with a bounded example list
   `(member, run, result ID)`, so duplicate result names are distinct rows and an ambiguous
   matrix cell is counted, never averaged.
 - `compare` reports each row pair's recorded-condition status (`comparable`,
-  `not-comparable` or `unavailable`) through the experimental comparability surface;
-  `matrix`/`leaderboard` show `conditions: available`. No ranking implies a fair comparison
+  `not-comparable` or `unavailable`) through the experimental comparability surface.
+  `matrix`/`leaderboard` show `conditions: available`, meaning only that the route can carry a
+  recorded-condition verdict; it does not mean the runs have populated conditions. Use
+  `compare` or `comparability` for the pair-level answer. No ranking implies a fair comparison
   or scientific validity. Pairwise comparison is bounded at 50 rows per metric.
 
 ## JSON and exit codes

@@ -1,0 +1,10 @@
+# Install core and every optional adapter from this checkout, in one command:
+#   pip install -r requirements-adapters.txt
+# These are local paths, not index packages; see README "Install".
+-e .
+-e ./packages/runevidence-hydra
+-e ./packages/runevidence-mlflow
+-e ./packages/runevidence-tensorboard
+-e ./packages/runevidence-sacred
+-e ./packages/runevidence-keras
+-e ./packages/runevidence-lightning
