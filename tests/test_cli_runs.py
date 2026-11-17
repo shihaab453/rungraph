@@ -59,3 +59,19 @@ def test_runs_metadata_and_text(tmp_path: Path, capsys):
     assert "r1 (Baseline): 1 artifacts, 1 results" in out
     assert '"lr": 0.1' in out
     assert "evaluation_split" in out
+
+
+def test_runs_summaries_are_whitelisted(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    document = json.loads((root / "runevidence.json").read_text(encoding="utf-8"))
+    document["runs"][0]["metadata"] = {
+        "sacred": {"status": "COMPLETED", "command": "train", "private": "no"},
+        "other": {"secret": "no"},
+    }
+    (root / "runevidence.json").write_text(json.dumps(document), encoding="utf-8")
+
+    assert main(["runs", str(root), "--summaries", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["runs"][0]["summaries"] == {
+        "sacred": {"status": "COMPLETED", "command": "train"}
+    }

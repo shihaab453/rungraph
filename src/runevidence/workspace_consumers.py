@@ -533,6 +533,7 @@ def runs_data(
     member: Optional[str] = None,
     *,
     include_metadata: bool = False,
+    include_summaries: bool = False,
 ) -> dict[str, Any]:
     """List recorded runs across members with their recorded settings.
 
@@ -553,6 +554,7 @@ def runs_data(
                 item.manifest,
                 member=member_id,
                 include_metadata=include_metadata,
+                include_summaries=include_summaries,
             )
         )
     rows.sort(key=lambda row: (row["member"], row["run"]))
@@ -561,6 +563,7 @@ def runs_data(
         "version": "0.1",
         "member": member,
         "metadata": include_metadata,
+        "summaries": include_summaries,
         "runs": rows,
         "exit_code": 0,
     }
