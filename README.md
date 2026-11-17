@@ -51,8 +51,9 @@ rungraph report study/               -> explain the workspace
 ```
 
 Start with one folder and the built-in `generic` adapter. Add an adapter only when you point
-at a tool's own log layout. Both tools are offline and read-only; they never train or launch
-jobs.
+at a tool's own log layout. Analysis and validation commands are offline and read-only;
+authoring commands write only the manifest or workspace document you name. Neither tool
+trains, launches jobs or phones home.
 
 ---
 
@@ -626,8 +627,9 @@ link itself with the new manifest. The link target and its folder are never
 written.
 
 The schema-0.2+ refusal messages say to move the manifest aside before
-re-initializing. Move it **outside** the experiment folder (or rename it to a
-`.bak` generation): a copy left inside the folder is ordinary content and will
+re-initializing. Move it **outside** the experiment folder, or rename it to the
+canonical backup names `runevidence.json.bak`, `runevidence.json.bak.2`, and so
+on: a copy with any other name inside the folder is ordinary content and will
 be hashed as an artifact by the next `init`.
 
 The backup is written and read back before the manifest is touched, and the

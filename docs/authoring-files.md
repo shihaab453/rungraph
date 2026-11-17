@@ -10,8 +10,10 @@ an array and not a patch envelope.
 
 ## Result (`runevidence result add|edit --file RESULT.json`)
 
-Required: `id`, `run_id`, `name`. Optional: `value` (default `null`), `artifact_id`, `locator`,
-`metadata`, and schema-0.2+ fields such as `metric_definition`.
+For `add`, required: `id`, `run_id`, `name`. Optional: `value` (default `null`),
+`artifact_id`, `locator`, `metadata`, and schema-0.2+ fields such as `metric_definition`.
+For `edit`, only `id` is required: the supplied fields are merged into the existing result, so
+omitted fields are preserved.
 
 ```json
 {
@@ -25,16 +27,18 @@ Required: `id`, `run_id`, `name`. Optional: `value` (default `null`), `artifact_
 ```
 
 `locator` is a JSON Pointer string for a `.json` artifact, or an object such as
-`{"kind": "jsonl", "line": 1, "pointer": "/accuracy"}` or
-`{"kind": "csv-cell", "row": 2, "column": 1, "header": "accuracy"}`. A locator needs
-`artifact_id`; a targeted artifact without a hash is an error in `validate`, not silently
-accepted. `edit` replaces the object with that ID; `remove --id ID` refuses while another
-result, claim or relationship cites it.
+`{"kind": "jsonl", "line": 1, "pointer": "/accuracy"}` (schema 0.3+) or
+`{"kind": "csv-cell", "row": 2, "column": 1, "header": "accuracy"}` (schema 0.4+). From
+schema 0.3 onward a locator needs `artifact_id`; 0.1/0.2 accept the legacy string form without
+one. A targeted artifact without a recorded digest is a warning in 0.1/0.2 and a
+`locator-no-digest` error from 0.3 onward. `remove --id ID` refuses while another result,
+claim or relationship cites it.
 
 ## Evidence / claim (`runevidence evidence add|edit --file CLAIM.json`)
 
-Required: `id`, `claim`. Optional: `supports` (default `[]`), `contradicts` (default `[]`),
-`source`, `metadata`. IDs name results, artifacts, runs or other evidence in the same manifest.
+For `add`, required: `id`, `claim`. Optional: `supports` (default `[]`), `contradicts`
+(default `[]`), `source`, `metadata`. For `edit`, only `id` is required and supplied fields are
+merged. IDs name results, artifacts, runs or other evidence in the same manifest.
 
 ```json
 {
@@ -60,13 +64,16 @@ its zero-based `--index` in the recorded array.
 }
 ```
 
-`type` is one of `derived_from`, `reported_in`, `result_of`, `produced_by` or `input_to`.
-`supports`/`contradicts` are refused because claims are the only claim-citation mechanism.
+`type` is one of the manifest relationship types (`supports`, `contradicts`, `derived_from`,
+`reported_in`, `result_of`, `produced_by`, `input_to`). Workspace relationships have the
+stricter rule: they refuse `supports`/`contradicts` because workspace claims are the only
+claim-citation mechanism.
 
 ## Workspace claim (`rungraph claim add|edit --file CLAIM.json`)
 
-Required: `id`, `claim`. Optional: `supports`, `contradicts`, `source`, `metadata`. A reference
-is either `{"member": "exp-a", "id": "acc-a"}` or `{"claim": "another-workspace-claim"}`.
+For `add`, required: `id`, `claim`. Optional: `supports`, `contradicts`, `source`,
+`metadata`. For `edit`, only `id` is required and supplied fields are merged. A reference is
+either `{"member": "exp-a", "id": "acc-a"}` or `{"claim": "another-workspace-claim"}`.
 
 ```json
 {
@@ -80,7 +87,8 @@ is either `{"member": "exp-a", "id": "acc-a"}` or `{"claim": "another-workspace-
 ## Workspace relationship (`rungraph relationship add --file RELATIONSHIP.json`)
 
 Required: `id`, `type`, `source`, `target`. Optional: `note`. Source and target use the same
-qualified `{"member", "id"}` or `{"claim", "id"}` forms.
+qualified `{"member": "id", "id": "local-id"}` or `{"claim": "workspace-claim-id"}` forms; a
+claim reference is one key, not `{"claim", "id"}`.
 
 ```json
 {
