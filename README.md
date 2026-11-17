@@ -372,6 +372,7 @@ below accepts `--json` unless noted, and exits `2` on a load or usage failure.
 | `runevidence matrix PATH` | Show recorded metrics side by side for selected runs (`--run`, `--metric`); `--latest` collapses `<name> @ <step>` names to one column. |
 | `runevidence stats PATH` | Per-metric row/missing/non-numeric/ambiguous counts plus min, max, mean, median and population standard deviation (`--metric`, `--json`). |
 | `runevidence run PATH --id RUN_ID` | Show one run's recorded results, artifacts and claims. Author one run with `--add`, `--edit`, `--remove` and `--file RUN.json` (with `--dry-run`/`--json`), merging only name, start time, params, metadata and conditions. |
+| `runevidence runs PATH` | List every recorded run with name, start time, params, conditions and per-run artifact/result counts (`--metadata`, `--json`). |
 | `runevidence claim PATH --id CLAIM_ID` | Show one claim's recorded support and contradiction targets. |
 | `runevidence lineage PATH --id CLAIM_ID` | Trace a claim's recorded upstream provenance, naming unresolved nodes and cycles. |
 | `runevidence impact PATH --id OBJECT_ID` | Find claims potentially affected by one recorded object, with the dependency path. |
@@ -1480,8 +1481,9 @@ detail, lineage, impact, coverage, review gates, fingerprints, comparison,
 metric matrix and leaderboard); guarded artifact, result, evidence,
 relationship and condition authoring; code and environment capture; directory
 artifacts; evidence-aware comparison; a workspace layer (`rungraph.json` and
-the `rungraph` CLI) for cross-member graphs, claims, reports, run inventory, impact,
-compare, matrix, leaderboard and per-metric statistics; and a stable comparability preflight with an
+single-manifest run inventory and statistics; and the `rungraph` CLI for cross-member
+graphs, claims, reports, run inventory, impact, compare, matrix, leaderboard and per-metric
+statistics; and a stable comparability preflight with an
 experimental comparison verdict.
 
 Every capability in the completion contract is complete except the declared

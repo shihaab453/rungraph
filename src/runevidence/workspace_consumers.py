@@ -476,45 +476,21 @@ def runs_data(
     of the default inventory. Counts are per run and come from the loaded
     manifest snapshot, not from re-reading artifacts.
     """
-    artifacts: dict[tuple[str, str], int] = {}
-    results: dict[tuple[str, str], int] = {}
-    for member_id, item in loaded.members.items():
-        if item.manifest is None:
-            continue
-        for artifact in item.manifest.artifacts:
-            if artifact.run_id is not None:
-                key = (member_id, artifact.run_id)
-                artifacts[key] = artifacts.get(key, 0) + 1
-        for result in item.manifest.results:
-            key = (member_id, result.run_id)
-            results[key] = results.get(key, 0) + 1
+    from .run_inventory import inventory_rows
+
     rows: list[dict[str, Any]] = []
     for member_id, item in loaded.members.items():
         if member is not None and member_id != member:
             continue
         if item.manifest is None:
             continue
-        for run in item.manifest.runs:
-            key = (member_id, run.id)
-            row: dict[str, Any] = {
-                "member": member_id,
-                "run": run.id,
-                "name": run.name,
-                "started_at": run.started_at.isoformat() if run.started_at else None,
-                "params": run.params,
-                "conditions": (
-                    run.conditions.model_dump(mode="json")
-                    if run.conditions is not None
-                    else None
-                ),
-                "counts": {
-                    "artifacts": artifacts.get(key, 0),
-                    "results": results.get(key, 0),
-                },
-            }
-            if include_metadata:
-                row["metadata"] = run.metadata
-            rows.append(row)
+        rows.extend(
+            inventory_rows(
+                item.manifest,
+                member=member_id,
+                include_metadata=include_metadata,
+            )
+        )
     rows.sort(key=lambda row: (row["member"], row["run"]))
     return {
         "format": "rungraph-runs",
