@@ -137,15 +137,9 @@ def impact_data(
 
 
 def _json_value(value: Any) -> Any:
-    """A result value as JSON data.
+    from .metric_stats import json_value
 
-    Scalar results pass through; structured 0.8-0.11 values are Pydantic
-    models and must be dumped before any consumer prints them.
-    """
-
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    return value
+    return json_value(value)
 
 
 _STEP_NAME = re.compile(r"^(?P<base>.+) @ (?P<step>-?\d+)(?: #\d+)?$")
@@ -447,109 +441,25 @@ def baseline_diff(loaded: LoadedWorkspace, baseline_root) -> dict[str, Any]:
     }
 
 
-def _json_number(value: Any) -> Any:
-    if isinstance(value, float) and not math.isfinite(value):
-        return None
-    return value
-
-
-def _safe_mean(values: list[Any]) -> Any:
-    from fractions import Fraction
-
-    return _json_number(float(sum(Fraction(value) for value in values) / len(values)))
-
-
-def _safe_median(values: list[Any]) -> Any:
-    from fractions import Fraction
-
-    ordered = sorted(values)
-    middle = len(ordered) // 2
-    if len(ordered) % 2:
-        return ordered[middle]
-    return _json_number(float((Fraction(ordered[middle - 1]) + Fraction(ordered[middle])) / 2))
-
-
-def _safe_pstdev(values: list[Any]) -> Any:
-    from decimal import Decimal, localcontext
-    from fractions import Fraction
-
-    exact = [Fraction(value) for value in values]
-    mean = sum(exact) / len(exact)
-    variance = sum((item - mean) ** 2 for item in exact) / len(exact)
-    if variance == 0:
-        return 0.0
-    # Decimal sqrt keeps the exponent range of the exact rational variance;
-    # converting the tiny normalized variance to float first would underflow.
-    with localcontext() as context:
-        context.prec = 80
-        root = (
-            Decimal(variance.numerator) / Decimal(variance.denominator)
-        ).sqrt()
-    if not root.is_finite():
-        value = sys.float_info.max
-    else:
-        try:
-            value = float(root)
-        except OverflowError:
-            # The population standard deviation of finite binary64 values
-            # cannot exceed the largest finite float; Decimal can round a
-            # value within half an ulp above it.
-            value = sys.float_info.max
-    return _json_number(value)
-
-
 def stats_data(loaded: LoadedWorkspace, metric: Optional[str] = None) -> dict[str, Any]:
-    """Per-metric count and distribution statistics.
+    """Per-metric count and distribution statistics across workspace members.
 
-    Every recorded result contributes one row. ``numeric`` counts finite
-    numbers; ``missing`` counts recorded nulls; ``non_numeric`` counts strings,
-    booleans and structured values; ``ambiguous`` counts a ``(member, run)``
-    pair that recorded the same metric more than once, because one aggregate
-    cannot represent it. Distribution fields cover the numeric rows and are
-    null when there are none. ``stddev`` is the population standard deviation.
+    ``ambiguous`` counts a ``(member, run)`` pair that recorded the same metric
+    more than once, because one aggregate cannot represent it. Distribution
+    fields cover the numeric rows and are null when there are none. ``stddev``
+    is the population standard deviation.
     """
+
+    from .metric_stats import stats_from_rows
 
     rows = value_rows(loaded)
     if metric is not None:
         rows = [row for row in rows if row["name"] == metric]
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        grouped.setdefault(row["name"], []).append(row)
-    metrics: list[dict[str, Any]] = []
-    for name in sorted(grouped):
-        items = grouped[name]
-        numeric_values = [row["value"] for row in items if row["numeric"]]
-        cells: dict[tuple[str, str], int] = {}
-        for row in items:
-            key = (row["member"], row["run"])
-            cells[key] = cells.get(key, 0) + 1
-        entry: dict[str, Any] = {
-            "name": name,
-            "rows": len(items),
-            "numeric": len(numeric_values),
-            "missing": sum(1 for row in items if row["value"] is None),
-            "non_numeric": sum(
-                1 for row in items if row["value"] is not None and not row["numeric"]
-            ),
-            "ambiguous": sum(1 for count in cells.values() if count > 1),
-            "min": None,
-            "max": None,
-            "mean": None,
-            "median": None,
-            "stddev": None,
-        }
-        if numeric_values:
-            entry["min"] = min(numeric_values)
-            entry["max"] = max(numeric_values)
-            entry["mean"] = _safe_mean(numeric_values)
-            entry["median"] = _safe_median(numeric_values)
-            entry["stddev"] = _safe_pstdev(numeric_values)
-        metrics.append(entry)
     return {
         "format": "rungraph-stats",
         "version": "0.1",
         "metric": metric,
-        "metrics": metrics,
+        "metrics": stats_from_rows(rows),
         "exit_code": 0,
     }
 

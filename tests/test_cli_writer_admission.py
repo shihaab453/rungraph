@@ -1523,7 +1523,7 @@ def test_directory_authoring_flag_is_only_on_add_and_rehash():
         for action in parser._actions
         if action.__class__.__name__ == "_SubParsersAction"
     )
-    assert len(sub.choices) == 32
+    assert len(sub.choices) == 33
     assert "--directory" not in parser.format_help()
     for route in ("init", "migrate", "conditions", "add", "rehash", "validate", "inspect"):
         options = {
