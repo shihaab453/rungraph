@@ -1420,10 +1420,10 @@ Read these before relying on a green `validate` for anything important.
   levels as `locator-unreadable`. Other JSON readers outside those paths are not
   separately depth-limited. Hydra's `config.json` and `overrides.json` are
   guarded as described above.
-- **Supported versions.** Python 3.10 or newer. CI has six jobs: Ubuntu and
+- **Supported versions.** Python 3.10 or newer. CI has seven jobs: Ubuntu and
   Windows, each on Python 3.10 with the newest dependencies, Python 3.14 with
   the newest dependencies, and Python 3.10 with the lowest declared versions
-  (`pydantic` 2.6.0, `PyYAML` 6.0). Python 3.14 with the pinned minimum
+  (`pydantic` 2.6.0, `PyYAML` 6.0), plus macOS on Python 3.12. Python 3.14 with the pinned minimum
   dependencies is not directly verified. Python 3.11 to 3.13 and macOS are not
   directly verified either; they are not declared unsupported. `runevidence
   schema` output is spelled slightly differently before Pydantic 2.11 (it

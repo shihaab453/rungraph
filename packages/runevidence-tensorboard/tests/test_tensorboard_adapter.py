@@ -1290,7 +1290,10 @@ def test_cli_refuses_a_posix_event_path_with_a_backslash(tmp_path, capsys):
     assert not (root / MANIFEST_FILENAME).exists()
 
 
-@pytest.mark.skipif(adapter_module.os.name == "nt", reason="POSIX-only surrogate path")
+@pytest.mark.skipif(
+    adapter_module.os.name == "nt" or sys.platform == "darwin",
+    reason="surrogate file names are not portable to this filesystem",
+)
 def test_cli_refuses_a_surrogate_path(tmp_path, capsys):
     root = tmp_path / "experiment"
     (root / "logs").mkdir(parents=True)
