@@ -1087,6 +1087,9 @@ read-only steps: `discover(root)` then `extract(root, discovery)`. The
 `generic` adapter is built in. Tool adapters are separate packages, so core
 stays free of tool dependencies:
 
+- **`lightning`** ([packages/runevidence-lightning](https://github.com/shihaab453/rungraph/tree/main/packages/runevidence-lightning)):
+  reads PyTorch Lightning `CSVLogger` `version_*/metrics.csv`, recording numeric cells as
+  `csv-cell` results. See `examples/lightning-logs/`.
 - **`keras`** ([packages/runevidence-keras](https://github.com/shihaab453/rungraph/tree/main/packages/runevidence-keras)):
   reads a Keras history CSV (`index_label="epoch"`), recording numeric metric cells as
   `csv-cell` results. See `examples/keras-history/`.
@@ -1101,7 +1104,7 @@ stays free of tool dependencies:
 
   ```bash
   # From the repository root, install both local packages together.
-  pip install -e . -e ./packages/runevidence-hydra -e ./packages/runevidence-sacred -e ./packages/runevidence-keras
+  pip install -e . -e ./packages/runevidence-hydra -e ./packages/runevidence-sacred -e ./packages/runevidence-keras -e ./packages/runevidence-lightning
   runevidence init --adapter hydra path/to/project
   ```
 
@@ -1391,7 +1394,7 @@ capability status and completion criteria are recorded in
 [docs/product-completion.md](docs/product-completion.md).
 
 Delivered: versioned schemas 0.1–0.11 with frozen reading rules and migration;
-generic, Keras, Sacred, Hydra, MLflow file-store and TensorBoard adapters; file, value and
+generic, Lightning, Keras, Sacred, Hydra, MLflow file-store and TensorBoard adapters; file, value and
 claim verification; batch validation; single-manifest analysis (run and claim
 detail, lineage, impact, coverage, review gates, fingerprints, comparison,
 metric matrix and leaderboard); guarded artifact, result, evidence,
@@ -1413,7 +1416,7 @@ records why.
 ## Development
 
 ```bash
-pip install -e ".[dev]" -e ./packages/runevidence-hydra -e ./packages/runevidence-mlflow -e ./packages/runevidence-sacred -e ./packages/runevidence-keras
+pip install -e ".[dev]" -e ./packages/runevidence-hydra -e ./packages/runevidence-mlflow -e ./packages/runevidence-sacred -e ./packages/runevidence-keras -e ./packages/runevidence-lightning
 python -m pytest
 ```
 

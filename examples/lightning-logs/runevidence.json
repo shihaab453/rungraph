@@ -1,0 +1,127 @@
+{
+  "schema_version": "0.4",
+  "project": {
+    "id": "lightning-metrics",
+    "name": "Lightning metrics",
+    "description": null,
+    "tags": [],
+    "metadata": {}
+  },
+  "runs": [
+    {
+      "id": "run-lightning_logs-version_0",
+      "name": "lightning_logs/version_0",
+      "started_at": null,
+      "params": {},
+      "metadata": {}
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "README.md",
+      "path": "README.md",
+      "sha256": "b557f7953caae242d64275bba8ef7a4c1b30c917a22884fd59c83c7531fc87a3",
+      "size_bytes": 368,
+      "kind": null,
+      "run_id": null,
+      "metadata": {}
+    },
+    {
+      "id": "lightning_logs-version_0-metrics.csv",
+      "path": "lightning_logs/version_0/metrics.csv",
+      "sha256": "dd33522800a295c0370c0ce61b7dcdbd6d7ee02a0e2144158afebfdc5a602487",
+      "size_bytes": 91,
+      "kind": null,
+      "run_id": "run-lightning_logs-version_0",
+      "metadata": {}
+    }
+  ],
+  "results": [
+    {
+      "id": "lightning-res-4ba1e8c4287355b9",
+      "run_id": "run-lightning_logs-version_0",
+      "name": "train_loss @ 0",
+      "value": 1.2,
+      "artifact_id": "lightning_logs-version_0-metrics.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 1,
+        "column": 3,
+        "header": "train_loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "lightning-res-d95649cbe3595e81",
+      "run_id": "run-lightning_logs-version_0",
+      "name": "val_loss @ 1",
+      "value": 1.05,
+      "artifact_id": "lightning_logs-version_0-metrics.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 2,
+        "column": 4,
+        "header": "val_loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "lightning-res-a63a015f0cbbff5a",
+      "run_id": "run-lightning_logs-version_0",
+      "name": "train_loss @ 2",
+      "value": 0.8,
+      "artifact_id": "lightning_logs-version_0-metrics.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 3,
+        "column": 3,
+        "header": "train_loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "lightning-res-0c37db69ab2ad2a7",
+      "run_id": "run-lightning_logs-version_0",
+      "name": "val_loss @ 3",
+      "value": 0.9,
+      "artifact_id": "lightning_logs-version_0-metrics.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 4,
+        "column": 4,
+        "header": "val_loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "lightning-res-8adc68ae02dbdca2",
+      "run_id": "run-lightning_logs-version_0",
+      "name": "train_loss @ 4",
+      "value": 0.55,
+      "artifact_id": "lightning_logs-version_0-metrics.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 5,
+        "column": 3,
+        "header": "train_loss"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "lightning-res-b1b142adc95295f9",
+      "run_id": "run-lightning_logs-version_0",
+      "name": "val_loss @ 5",
+      "value": 0.82,
+      "artifact_id": "lightning_logs-version_0-metrics.csv",
+      "locator": {
+        "kind": "csv-cell",
+        "row": 6,
+        "column": 4,
+        "header": "val_loss"
+      },
+      "metadata": {}
+    }
+  ],
+  "evidence": [],
+  "relationships": []
+}

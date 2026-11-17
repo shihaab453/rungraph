@@ -103,6 +103,20 @@ package stops installing.
 Any folder. Hashes every file; each `runs/<name>/` subfolder becomes a run.
 No params, results or claims.
 
+### `lightning` (`packages/runevidence-lightning`)
+
+A PyTorch Lightning `CSVLogger` base directory holds `version_*/metrics.csv`. The adapter records
+one run per version folder, hashes every file, and turns every numeric cell into a schema 0.4
+result with a `csv-cell` locator. Names are `<metric> @ <step>`; sparse/empty cells are skipped.
+It uses the protected descriptor walk and refuses where POSIX directory-descriptor support is
+unavailable.
+
+```bash
+pip install -e . -e ./packages/runevidence-lightning
+runevidence init lightning_logs/ --adapter lightning
+runevidence validate lightning_logs/ --strict
+```
+
 ### `keras` (`packages/runevidence-keras`)
 
 A Keras history CSV saved with `index_label="epoch"` holds one run's per-epoch metrics. The

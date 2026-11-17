@@ -55,5 +55,5 @@ only-include = [
 [tool.pytest.ini_options]
 # Adapter packages keep their tests next to them; they skip themselves
 # unless that package is installed.
-testpaths = ["tests", "packages/runevidence-hydra/tests", "packages/runevidence-mlflow/tests", "packages/runevidence-tensorboard/tests", "packages/runevidence-sacred/tests", "packages/runevidence-keras/tests"]
+testpaths = ["tests", "packages/runevidence-hydra/tests", "packages/runevidence-mlflow/tests", "packages/runevidence-tensorboard/tests", "packages/runevidence-sacred/tests", "packages/runevidence-keras/tests", "packages/runevidence-lightning/tests"]
 addopts = "-ra"
