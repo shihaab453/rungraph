@@ -39,7 +39,7 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,307 passed, 138 skipped on Python 3.12; 6,304 passed, 141 skipped on
+- **Full suite**: 6,314 passed, 138 skipped on Python 3.12; 6,311 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
@@ -121,25 +121,30 @@ The probe found and fixed these defects, each with a regression test:
   covers the workspace parser (`tests/test_docs_contract.py`).
 - Workspace verification could report success after a member changed: a member manifest that
   loaded once but could not be re-read or checked was skipped, so `validate` exited `0` and
-  the member claim stayed `supported`. A check failure is now an error finding plus
-  `claim-at-risk` on every claim that member recorded, and `report`/`validate` exit `1`
-  (`tests/test_workspace_graph.py`).
+  the member claim stayed `supported`. A manifest replaced with a different valid document
+  passed the same way. A check failure or a snapshot-digest change is now an error, and every
+  dependent claim — the member's evidence and workspace claims citing its results, artifacts
+  or runs — is `at-risk`; `report`/`validate` exit `1` (`tests/test_workspace_graph.py`).
 - Workspace creation renamed the previous document before an unlocked, non-atomic write, and
   accepted IDs the reader rejects. `init` now validates first, holds the workspace lock,
   replaces atomically and keeps a backup copy, so a failed `--force` leaves the document
   intact (`tests/test_rungraph_cli.py`).
-- A member folder could be a symlink outside the workspace, `compare`/`matrix` raised
-  `TypeError` on structured 0.8-0.11 values, a declared `manifest` filename was ignored by
-  some readers, and Sacred resolved a path and then read it through a separate call. Member
-  folders must now be physical and in-root, structured values are serialized, the declared
-  filename is the authority everywhere, and Sacred reads through the protected descriptor
-  walk (`tests/test_workspace.py`, `tests/test_rungraph_cli.py`,
+- A member folder could be a symlink outside the workspace or be swapped for one after the
+  containment check, `compare`/`matrix` raised `TypeError` on structured 0.8-0.11 values, a
+  declared `manifest` filename was ignored by some readers and dropped by `init --force`, and
+  Sacred resolved a path and then read it through a separate call. Member folders must now be
+  physical and in-root, manifests are read through the protected walk with a digest check,
+  structured values are serialized, the declared filename survives forced init and is the
+  authority everywhere, and Sacred refuses hosts without protected descriptor reads
+  (`tests/test_workspace.py`, `tests/test_rungraph_cli.py`,
   `packages/runevidence-sacred/tests`).
 - Recursive scans and workspace claims were not all bounded: a deep folder could omit a file,
-  a 1,100-claim chain raised `RecursionError`, and Sacred allocated an oversized document
-  before its cap. Scans now stop at depth 64, 10,000 folders and 1,000,000 files, claim states
-  are evaluated iteratively, and Sacred reads through the capped reader (`tests/test_files.py`,
-  `tests/test_workspace_graph.py`).
+  workspace discovery accepted more folders than its stated cap, the MLflow walk had no depth
+  bound, a 1,100-claim chain raised `RecursionError`, and Sacred allocated an oversized
+  document before its cap. Scans now stop at depth 64, 10,000 folders and 1,000,000 files,
+  claim states are evaluated iteratively, and Sacred reads through the capped reader
+  (`tests/test_files.py`, `tests/test_workspace.py`, `tests/test_workspace_graph.py`,
+  `packages/runevidence-mlflow/tests`).
 
 No command reported a false success: every failing condition either changed the exit code or
 was named in the output as a state or warning. Where a route deliberately compares recorded

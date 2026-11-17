@@ -460,3 +460,52 @@ def test_a_long_workspace_claim_chain_is_evaluated_iteratively(tmp_path: Path):
     # The tail cites a member evidence claim whose artifact is missing, so
     # every link in the chain inherits at-risk without a RecursionError.
     assert all("at-risk" in item.labels for item in workspace)
+
+
+def test_a_valid_manifest_replaced_after_load_cannot_pass(tmp_path: Path):
+    root = make_workspace(tmp_path)
+    loaded = load_workspace(root)
+    graph = build_graph(loaded)
+    replacement = {
+        "schema_version": "0.1",
+        "project": {"id": "p", "name": "p"},
+    }
+    (root / "a" / "runevidence.json").write_text(json.dumps(replacement), encoding="utf-8")
+
+    checks = run_member_checks(loaded)
+
+    assert checks["reports"] == {}
+    assert checks["failed"] == {"a"}
+    assert checks["findings"]["a"][0].severity is Severity.error
+    states = claim_states(loaded, graph, checks["findings"], checks["failed"])
+    member_claim = next(item for item in states if item.member == "a")
+    assert "at-risk" in member_claim.labels
+    assert "supported" not in member_claim.labels
+    assert report_data(loaded, graph, states, checks)["exit_code"] == 1
+
+
+def test_a_workspace_claim_citing_a_failed_member_result_is_at_risk(tmp_path: Path):
+    root = make_workspace(tmp_path)
+    manifest = dict(MANIFEST)
+    manifest["results"] = [{"id": "score", "run_id": "r", "name": "score", "value": 1}]
+    (root / "a" / "runevidence.json").write_text(json.dumps(manifest), encoding="utf-8")
+    document = json.loads((root / WORKSPACE_FILENAME).read_text(encoding="utf-8"))
+    document["claims"] = [
+        {
+            "id": "w1",
+            "claim": "a's score is recorded",
+            "supports": [{"member": "a", "id": "score"}],
+            "contradicts": [],
+        }
+    ]
+    (root / WORKSPACE_FILENAME).write_text(json.dumps(document), encoding="utf-8")
+    loaded = load_workspace(root)
+    graph = build_graph(loaded)
+    (root / "a" / "runevidence.json").write_text("{not json", encoding="utf-8")
+
+    checks = run_member_checks(loaded)
+    states = claim_states(loaded, graph, checks["findings"], checks["failed"])
+
+    workspace_claim = next(item for item in states if item.member is None)
+    assert "at-risk" in workspace_claim.labels
+    assert "supported" not in workspace_claim.labels

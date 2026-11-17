@@ -277,3 +277,10 @@ def test_malformed_metrics_are_visible_in_inspect(tmp_path: Path, capsys):
         item["adapter"] == "sacred" and item["path"] == "1/metrics.json"
         for item in entries
     )
+
+
+def test_unsupported_protected_reads_refuse(tmp_path: Path, capsys, monkeypatch):
+    write_run(tmp_path)
+    monkeypatch.setattr("runevidence.checks.files._DIR_FD", False)
+    assert main(["init", str(tmp_path), "--adapter", "sacred"]) == 2
+    assert not (tmp_path / "runevidence.json").exists()

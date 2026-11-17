@@ -19,6 +19,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .adapters.generic import valid_slug
+from .findings import Code, Finding, Severity
 from .manifest import ManifestLoadError, load_manifest
 from .models import ID_PATTERN, MANIFEST_FILENAME, Manifest, RelationshipType
 
@@ -31,6 +32,7 @@ MAX_CLAIMS = 10_000
 MAX_RELATIONSHIPS = 10_000
 MAX_REFS = 1_024
 MAX_DISCOVERY_MANIFESTS = 10_000
+MAX_DISCOVERY_FOLDERS = 10_000
 MAX_DEPTH = 64
 MEMBER_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
 
@@ -268,6 +270,7 @@ class LoadedMember:
     folder: Path
     manifest_path: Path
     manifest: Optional[Manifest] = None
+    manifest_digest: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -277,6 +280,63 @@ class LoadedWorkspace:
     path: Path
     document: Workspace
     members: dict[str, LoadedMember] = field(default_factory=dict)
+
+
+def read_member_manifest(root: Path, item: LoadedMember) -> tuple[bytes, str]:
+    """Read one member manifest through the protected descriptor walk.
+
+    The folder and file checks that run before this call cannot stop a folder
+    or parent from being swapped for an outside link afterwards. The walk opens
+    every component relative to its verified parent with O_NOFOLLOW, so the
+    read either stays inside the workspace or fails. The digest is over the
+    exact bytes that are parsed, so a later check can prove it saw the same
+    snapshot the workspace graph was built from.
+    """
+    from .checks.files import _read_snapshot_parts
+
+    parts = tuple(part for part in PurePosixPath(item.member.path).parts if part != ".")
+    parts = parts + (item.member.manifest,)
+    read = _read_snapshot_parts(root, parts)
+    if read.state == "missing":
+        raise ManifestLoadError(
+            [
+                Finding(
+                    code=Code.manifest_not_found,
+                    severity=Severity.error,
+                    message=f"No manifest at {item.manifest_path}",
+                    path=str(item.manifest_path),
+                )
+            ]
+        )
+    if read.state == "over-cap":
+        raise ManifestLoadError(
+            [
+                Finding(
+                    code=Code.manifest_unreadable,
+                    severity=Severity.error,
+                    message=(
+                        f"member {item.member.id!r}: manifest {item.member.manifest!r} "
+                        "is too large"
+                    ),
+                    path=str(item.manifest_path),
+                )
+            ]
+        )
+    if read.state != "ok" or read.snapshot is None or read.snapshot.data is None:
+        raise ManifestLoadError(
+            [
+                Finding(
+                    code=Code.manifest_unreadable,
+                    severity=Severity.error,
+                    message=(
+                        f"member {item.member.id!r}: manifest {item.member.manifest!r} "
+                        f"cannot be read safely inside the workspace ({read.state})"
+                    ),
+                    path=str(item.manifest_path),
+                )
+            ]
+        )
+    return bytes(read.snapshot.data), read.snapshot.digest
 
 
 def _member_folder(root: Path, member: Member) -> Path:
@@ -376,9 +436,13 @@ def load_workspace(target: Path) -> LoadedWorkspace:
     except Exception as exc:
         raise WorkspaceError(f"invalid workspace document: {exc}") from None
     loaded = _resolve_members(root, document)
+    from .manifest import parse_manifest_source
+
     for item in loaded.values():
         try:
-            item.manifest = load_manifest(item.manifest_path).manifest
+            source, digest = read_member_manifest(root, item)
+            item.manifest = parse_manifest_source(item.manifest_path, source).manifest
+            item.manifest_digest = digest
         except (ManifestLoadError, OSError, ValueError) as exc:
             item.error = str(exc)
     return LoadedWorkspace(root=root, path=path, document=document, members=loaded)
@@ -410,10 +474,17 @@ class Discovery:
 def _iter_manifest_folders(root: Path) -> list[Path]:
     found: list[Path] = []
     stack: list[tuple[Path, int]] = [(root, 0)]
+    scanned = 0
     while stack:
         folder, depth = stack.pop()
         if depth > MAX_DEPTH:
             raise WorkspaceError(f"discovery depth exceeds {MAX_DEPTH}")
+        if folder != root:
+            scanned += 1
+            if scanned > MAX_DISCOVERY_FOLDERS:
+                raise WorkspaceError(
+                    f"more than {MAX_DISCOVERY_FOLDERS} folders were scanned"
+                )
         try:
             entries = sorted(os.scandir(folder), key=lambda entry: entry.name)
         except OSError:
@@ -757,11 +828,12 @@ def apply_patch(
     except Exception as exc:
         raise _patch_error(f"invalid workspace after patch: {exc}") from None
     members = _resolve_members(loaded.root, document)
-    from .manifest import ManifestLoadError, load_manifest
+    from .manifest import parse_manifest_source
 
     for member_id, item in members.items():
         try:
-            item.manifest = load_manifest(item.manifest_path).manifest
+            source, _ = read_member_manifest(loaded.root, item)
+            item.manifest = parse_manifest_source(item.manifest_path, source).manifest
         except (ManifestLoadError, OSError, ValueError) as exc:
             raise _patch_error(f"member {member_id!r}: {exc}") from None
     _validate_refs(members, document)

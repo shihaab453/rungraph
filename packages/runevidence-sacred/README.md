@@ -29,8 +29,9 @@ Non-scalar values and parseable non-finite values are skipped. A file that fails
 JSON locator profile (duplicate keys, underflow/overflow, oversized integers, bare CR or excessive
 nesting) is retained as an artifact but listed under `metadata.sacred.unreadable`; `inspect` shows
 the note. Content files are read through the protected descriptor walk with a 50 MiB cap, artifacts
-are stream-hashed through the same walk, and an unreadable file or directory refuses `init` with
-exit 2 and no manifest. Configuration files use the same strict profile, and an external symlink is
+are stream-hashed through the same walk, an unreadable file or directory refuses `init` with exit
+2 and no manifest, and a host without POSIX directory-descriptor support refuses the adapter
+rather than using an unprotected fallback. Configuration files use the same strict profile, and an external symlink is
 not read.
 
 No Sacred installation is required, and nothing is read outside the folder.

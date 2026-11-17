@@ -765,3 +765,14 @@ def test_extract_is_read_only_and_the_manifest_survives_moving_the_folder(tmp_pa
     final = tmp_path / "final-location"
     shutil.move(str(moved), str(final))
     assert main(["validate", str(final), "--strict"]) == 0
+
+
+def test_discovery_refuses_a_tree_over_the_depth_cap(tmp_path: Path, capsys):
+    deepest = tmp_path
+    for _ in range(adapter_module.MAX_SCAN_DEPTH + 1):
+        deepest = deepest / "d"
+    deepest.mkdir(parents=True)
+    with pytest.raises(AdapterError, match="depth"):
+        MlflowAdapter().discover(tmp_path)
+    assert main(["init", str(tmp_path), "--adapter", "mlflow"]) == 2
+    assert not (tmp_path / "runevidence.json").exists()

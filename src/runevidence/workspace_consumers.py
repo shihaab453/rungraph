@@ -305,7 +305,6 @@ def _by_key(items: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]
 def baseline_diff(loaded: LoadedWorkspace, baseline_root) -> dict[str, Any]:
     from pathlib import Path
 
-    from .manifest import ManifestLoadError, load_manifest
     from .workspace import WORKSPACE_FILENAME, WorkspaceError, load_workspace
 
     baseline_root = Path(baseline_root)
@@ -335,13 +334,10 @@ def baseline_diff(loaded: LoadedWorkspace, baseline_root) -> dict[str, Any]:
         previous_member = (
             base_loaded.members.get(baseline_member.id) if base_loaded is not None else None
         )
-        try:
-            if previous_member is None:
-                raise ValueError("baseline member was not loaded")
-            previous_manifest = load_manifest(previous_member.manifest_path)
-        except (ManifestLoadError, OSError, ValueError):
+        if previous_member is None or previous_member.manifest is None:
             members.append({"id": member_id, "status": "baseline-missing"})
             continue
+        previous_manifest = previous_member
         previous = _projection(previous_manifest.manifest)
         before = _by_key(previous)
         after = _by_key(current)

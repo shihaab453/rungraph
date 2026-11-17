@@ -11,7 +11,7 @@ from .checks import run_checks
 from .checks.graph import ALLOWED_ENDPOINTS
 from .findings import Code, Finding, Severity
 from .models import Manifest, RelationshipType as T
-from .workspace import LoadedMember, LoadedWorkspace, Ref, WorkspaceError
+from .workspace import LoadedMember, LoadedWorkspace, Ref, WorkspaceError, read_member_manifest
 
 OBJECT_KINDS = ("project", "run", "artifact", "result", "evidence")
 NODE_KINDS = ("member", "project", "run", "artifact", "result", "evidence", "claim")
@@ -393,6 +393,7 @@ def claim_states(
     loaded: LoadedWorkspace,
     graph: Graph,
     findings_by_member: dict[str, list[Finding]],
+    failed_members: frozenset[str] | set[str] = frozenset(),
 ) -> list[ClaimState]:
     by_node: dict[str, list[Finding]] = {}
     for member_id, findings in findings_by_member.items():
@@ -414,7 +415,14 @@ def claim_states(
             continue
         index = _index(item.manifest)[0]
         for evidence in item.manifest.evidence:
-            state = _member_state(member_id, evidence, index, graph, by_node)
+            state = _member_state(
+                member_id,
+                evidence,
+                index,
+                graph,
+                by_node,
+                failed=member_id in failed_members,
+            )
             states.append(state)
             cache[node_id("evidence", member_id, evidence.id)] = state
     claims_by_id = {item.id: item for item in loaded.document.claims}
@@ -445,6 +453,8 @@ def claim_states(
                     labels.add("unresolved")
                     labels.add("at-risk")
                     continue
+                if node.member is not None and node.member in failed_members:
+                    labels.add("at-risk")
                 if node.kind in ("artifact", "run", "project"):
                     continue
                 frame[5] = True
@@ -476,6 +486,12 @@ def claim_states(
                 labels.add("at-risk")
             if any(_finding_touches(by_node, item) for item in whole):
                 labels.add("at-risk")
+            if any(
+                graph.nodes.get(node) is not None
+                and graph.nodes[node].member in failed_members
+                for node in whole
+            ):
+                labels.add("at-risk")
             if labels & {"unresolved", "at-risk"}:
                 labels.discard("supported")
             if not frame[5]:
@@ -494,8 +510,10 @@ def claim_states(
     return states
 
 
-def _member_state(member_id, evidence, index, graph, by_node) -> ClaimState:
+def _member_state(member_id, evidence, index, graph, by_node, *, failed: bool = False) -> ClaimState:
     labels: set[str] = set()
+    if failed:
+        labels.add("at-risk")
     subjects = by_node.get(node_id("evidence", member_id, evidence.id), [])
     for finding in subjects:
         if finding.code is Code.dangling_reference:
@@ -566,18 +584,29 @@ def _failed_check_findings(member_id: str, item: LoadedMember, exc: Exception) -
 def run_member_checks(loaded: LoadedWorkspace, *, directory_artifacts: bool = False) -> dict[str, Any]:
     reports = {}
     findings = {}
-    from .manifest import load_manifest
+    failed: set[str] = set()
+    from .manifest import parse_manifest_source
 
     for member_id, item in loaded.members.items():
         if item.manifest is None:
             # The initial load already failed; the member's load_error blocks
             # its claims, and re-reading cannot produce a checkable manifest.
+            failed.add(member_id)
             continue
         try:
-            report = run_checks(load_manifest(item.manifest_path), enable_directory_artifacts=directory_artifacts)
+            source, digest = read_member_manifest(loaded.root, item)
+            if item.manifest_digest is None or digest != item.manifest_digest:
+                raise WorkspaceError(
+                    f"member {member_id!r} manifest changed after the workspace loaded; re-run"
+                )
+            report = run_checks(
+                parse_manifest_source(item.manifest_path, source),
+                enable_directory_artifacts=directory_artifacts,
+            )
         except Exception as exc:
+            failed.add(member_id)
             findings[member_id] = _failed_check_findings(member_id, item, exc)
             continue
         reports[member_id] = report
         findings[member_id] = list(report.findings)
-    return {"reports": reports, "findings": findings}
+    return {"reports": reports, "findings": findings, "failed": failed}

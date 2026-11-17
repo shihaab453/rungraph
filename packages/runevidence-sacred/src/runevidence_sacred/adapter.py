@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+import runevidence.checks.files as check_files
 from runevidence.adapters import Adapter, AdapterError, Discovery, GenericAdapter
 from runevidence.adapters.generic import valid_slug
 from runevidence.checks.files import (
@@ -79,6 +80,11 @@ class SacredAdapter(Adapter):
             raise AdapterError(
                 "a folder under the selected root cannot be listed; nothing was written"
             ) from None
+        if not check_files._DIR_FD:
+            raise AdapterError(
+                "the Sacred adapter needs POSIX directory-descriptor support for protected "
+                "reads; use --adapter generic on this host. Nothing was written."
+            )
         run_dirs: list[str] = [
             item
             for item in sorted(set(discovery.details.get("runs", [])))

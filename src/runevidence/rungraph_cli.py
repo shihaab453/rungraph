@@ -120,7 +120,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         "id": args.id or _slug(root.name) or "workspace",
         "name": args.name or root.name or "workspace",
         "members": [
-            {"id": item.id, "path": item.path}
+            {"id": item.id, "path": item.path, "manifest": item.manifest}
             for item in result.members
             if not item.duplicate
         ],
@@ -177,7 +177,7 @@ def _loaded(args: argparse.Namespace):
     loaded = load_workspace(Path(args.root))
     graph = build_graph(loaded)
     checks = run_member_checks(loaded, directory_artifacts=getattr(args, "directory_artifacts", False))
-    states = claim_states(loaded, graph, checks["findings"])
+    states = claim_states(loaded, graph, checks["findings"], checks.get("failed", frozenset()))
     return loaded, graph, checks, states
 
 

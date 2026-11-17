@@ -11,6 +11,7 @@ import os
 import pytest
 
 from runevidence.rungraph_cli import main
+from runevidence.workspace import load_workspace
 
 MANIFEST = {
     "schema_version": "0.1",
@@ -283,3 +284,35 @@ def test_report_text_names_baseline_changes(tmp_path: Path, capsys):
     assert main(["report", str(root), "--baseline", str(baseline)]) == 1
     out = capsys.readouterr().out
     assert "prov-b: added" in out
+
+
+def test_force_init_preserves_a_declared_manifest_filename(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    custom = {
+        "schema_version": "0.1",
+        "project": {"id": "p", "name": "p"},
+        "runs": [{"id": "r"}],
+        "results": [{"id": "m", "run_id": "r", "name": "score", "value": 7}],
+    }
+    (root / "a" / "custom.json").write_text(json.dumps(custom), encoding="utf-8")
+    (root / "a" / "runevidence.json").write_text("{not json", encoding="utf-8")
+    document = {
+        "format": "rungraph-workspace",
+        "version": "0.1",
+        "id": "study",
+        "name": "Study",
+        "members": [
+            {"id": "a", "path": "a", "manifest": "custom.json"},
+            {"id": "b", "path": "b"},
+        ],
+    }
+    (root / "rungraph.json").write_text(json.dumps(document), encoding="utf-8")
+    capsys.readouterr()
+
+    assert main(["init", str(root), "--force", "--id", "study", "--name", "Study"]) == 0
+
+    regenerated = json.loads((root / "rungraph.json").read_text(encoding="utf-8"))
+    member = next(item for item in regenerated["members"] if item["id"] == "a")
+    assert member["manifest"] == "custom.json"
+    loaded = load_workspace(root)
+    assert loaded.members["a"].manifest.results[0].value == 7

@@ -29,7 +29,7 @@ rungraph leaderboard path/to/project --metric accuracy --direction max
 ```
 
 `discover` exits `2` when it finds no manifests, a duplicate or nested member, an unreadable
-manifest, or hits the 10,000-manifest or depth-64 cap. `init` refuses an empty discovery and
+manifest, or hits the 10,000-manifest, 10,000-folder or depth-64 cap. `init` refuses an empty discovery and
 writes nothing; it validates the ID and name before writing, holds the workspace lock, writes
 one canonical document through an atomic replace, and only then reports success. A failed
 `--force` leaves the previous document intact; the backup is a byte copy, so a write failure
@@ -65,7 +65,13 @@ one run, and `leaderboard --top N` limits the ranking (default 10).
   same manifest (including hardlinks) and nested members are refused.
 - A member's optional `manifest` filename is the authority for loading, checking, graphing,
   comparing and reporting that member. The default is `runevidence.json`; a declared
-  `custom.json` is used everywhere instead of falling back to the default.
+  `custom.json` is used everywhere instead of falling back to the default, and `init --force`
+  preserves the declaration.
+- Member manifests are read through the protected descriptor walk, so a folder or parent
+  swapped for an outside link after the containment check cannot be read. The exact bytes
+  parsed for the graph become the member's snapshot: verification re-reads through the same
+  walk and fails if the digest changed, so checks can never pass against a replacement
+  manifest while the graph still describes the original.
 - A claim cites member results/evidence, another workspace claim (`{"claim": "id"}`), or
   context objects (artifact/run/project). Only result/evidence/claim citations count as
   support.
@@ -85,10 +91,11 @@ A claim is classified from its recorded structure and the member checks:
 | `unresolved` | a cited member, local ID or claim does not resolve |
 | `uncited` | no result/evidence/claim support target |
 
-A member whose manifest cannot be re-read or checked after it first loaded is an error, never a
-silent pass: its findings include the load failure (or `member-check-failed` for an unexpected
-check error) and a `claim-at-risk` finding for every evidence claim it recorded. `validate` and
-`report` then exit `1`, and no member or workspace claim can remain `supported`.
+A member whose manifest cannot be re-read, changed since it loaded, or checked is an error,
+never a silent pass: its findings include the load failure (or `member-check-failed`) and every
+claim that depends on that member is `at-risk` — its own evidence claims and any workspace claim
+that cites its results, artifacts or runs. `validate` and `report` then exit `1`, and no member
+or workspace claim can remain `supported`.
 
 A claim can carry several labels. `supported` never appears with `at-risk` or `unresolved`;
 `contradiction-recorded` may accompany `supported`. A member claim keeps its delivered
@@ -175,6 +182,6 @@ directory-check policy and the baseline diff; `--json` carries the same data in
 No manifest schema, locator or reader change; no network, server, database or GUI; no
 manifest rewrite. The workspace document is limited to 16 MiB, 10,000 members, 10,000 claims
 and 10,000 relationships. Workspace claim states are evaluated with an explicit stack, so a
-valid 10,000-claim chain does not hit Python's recursion limit. Recursive file scans are
-bounded at depth 64, 10,000 folders and 1,000,000 files; exceeding a cap refuses the scan
-instead of returning a partial list.
+valid 10,000-claim chain does not hit Python's recursion limit. Recursive file scans, including
+workspace discovery and the MLflow file-store walk, are bounded at depth 64, 10,000 folders and
+1,000,000 files; exceeding a cap refuses the scan instead of returning a partial list.

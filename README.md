@@ -1156,8 +1156,9 @@ rungraph compare path/to/project --metric accuracy
 
 `rungraph.json` names the members and may carry cross-member claims and relationships. A member's
 optional `manifest` filename is used for loading, checking, graphing and comparison, and member
-folders may not be symlinked or resolve outside the workspace. A member that cannot be re-read
-is an error, not a silent pass: its claims become `at-risk` and the command exits `1`.
+folders may not be symlinked or resolve outside the workspace. A member that cannot be re-read,
+or whose manifest changed after it loaded, is an error, not a silent pass: every claim that
+depends on it becomes `at-risk` and the command exits `1`.
 `examples/workspace-study/` is a two-member workspace with a cross-member claim. See
 [docs/rungraph-workspace.md](https://github.com/shihaab453/rungraph/blob/main/docs/rungraph-workspace.md)
 for the document, claim states, graph, impact, comparison and limits.
