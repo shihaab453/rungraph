@@ -1,11 +1,11 @@
-# TF2 `[k,3]` histogram summaries — design RFC (v0.4)
+# TF2 `[k,3]` histogram summaries — design RFC (v0.5)
 
 Status: **DESIGN PROPOSAL. NOTHING IMPLEMENTED.** The owner selected this P3 capability on
 2026-11-17. A design gate and the repository's admission review are required before code.
 Schemas 0.1–0.10, their readers, checkers and every delivered output stay frozen except the
 additive dispatch, model, migration, schema and text edits named here.
 
-## 0. Changes in v0.2–v0.4
+## 0. Changes in v0.2–v0.5
 
 v0.2 folds both design reviews:
 
@@ -37,6 +37,10 @@ v0.4 folds the accepted-review notes without changing the design: losing tensor 
 still pass the structural walk; foreign fields on the wrong wire type skip the entry; a
 malformed rank-2 second-dimension-3 double is a claimed shape; `unknown_rank` is named; the
 `k = 0` display is `num=0.0`.
+
+v0.5 fixes the one v0.4 contradiction: delivered structural refusals take precedence, so a
+wrong wire on `float_val` refuses the file rather than only skipping the entry. It also names
+`resource_handle_val`/`variant_val` and fixes which claimed shapes use a tensor occurrence.
 
 ## 1. Problem and scope
 
@@ -155,10 +159,14 @@ The new foreign-field checks below are **extra skip-one-entry rules** that apply
 A non-empty `float_val`, `int_val`, `int64_val`, `half_val`, `bool_val`, `uint32_val`,
 `uint64_val`, `string_val`, complex, variant, resource or `float8_val` makes the entry
 non-conforming, even if a non-empty `tensor_content` is also present. Empty forms are absent.
-A foreign field on the wrong wire type also makes the entry non-conforming without refusing
-the file: repeated bytes require wire 2; packed numeric fields require wire 2; unpacked
-numeric fields require their scalar wire (1 for double, 5 for float, 0 for integers/bool).
-This is an additional skip-one-entry rule, not a whole-file refusal.
+Existing structural refusals take precedence. In particular, `float_val` on a wrong wire type
+refuses the whole file as delivered; it is never only a skipped entry. Outside those
+structural refusals, a foreign field on a wire type other than its valid form makes the entry
+non-conforming without refusing the file: repeated bytes and message fields
+(`string_val`, `resource_handle_val`, `variant_val`) require wire 2; packed numeric fields
+require wire 2; unpacked numeric fields require their scalar wire (5 for float, 1 for
+`dcomplex_val`, 0 for integers/bool). `double_val` is not a foreign field. This is an
+additional skip-one-entry rule, not a whole-file refusal.
 
 The final shape must be known, rank 2, exactly `[k, 3]`, with `0 <= k <= 1024`. `k = 0` is
 valid only with no values. The final dtype must be `DT_DOUBLE` (2).
@@ -353,10 +361,12 @@ Every site below must be updated or tested as part of the implementation:
   value, fixed texts, text/JSON output, `num=0.0` for an empty histogram, overflow-safe `num`
   for both overflow inputs, and the five-step ladder with H-alone and H-plus-malformed at
   occurrence 1.
-- Wire: a foreign field on the wrong wire type skips the entry without refusing the file; a
-  structural refusal in a tensor occurrence later overridden by `simple_value` still refuses
-  the file; `[-1,3]` and `[400000,3]` are claimed malformed shapes, while `[400000,3]` uses no
-  tensor occurrence because it exceeds 0.9's element cap.
+- Wire: a wrong wire type on `float_val` refuses the whole file (structural precedence); a
+  wrong wire type on `string_val`/`bool_val`/`half_val`/integer/complex/message fields skips
+  the entry without refusing the file; a structural refusal in a tensor occurrence later
+  overridden by `simple_value` still refuses the file. `[-1,3]`, `[400000,3]` and `[2000,3]`
+  are claimed malformed/oversized shapes; `[-1,3]` and `[400000,3]` use no tensor occurrence,
+  while `[2000,3]` uses one because it is still a valid 0.9 tensor.
 - Occurrence, per malformed reason: a claimed `[k,3]` double with NaN/Inf, `right < left`, a
   negative count, a non-empty `string_val`/`bool_val`/`half_val`, or a foreign field alongside
   content still consumes a tensor occurrence when it is a valid 0.9 tensor; a B entry then
