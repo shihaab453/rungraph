@@ -357,7 +357,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence evidence add\|edit\|remove PATH --file CLAIM\|--id ID [--dry-run] [--json]` | Add, edit or remove a claim/evidence entry and its `supports`/`contradicts` IDs. |
 | `runevidence relationship add\|remove PATH --file REL\|--index N [--dry-run] [--json]` | Add or remove a recorded relationship. |
 | `runevidence schema [-o FILE\|--output FILE]` | Print the 0.1 manifest JSON Schema (also committed at `schema/runevidence.schema.json`). The separate 0.2 schema is `schema/runevidence-0.2.schema.json`. |
-| `runevidence adapters` | List installed adapters (`--json` for names, descriptions and modules). |
+| `runevidence adapters` | List installed adapters (`--json` for names, descriptions and modules). The optional packages are Hydra, MLflow, TensorBoard, Sacred, Keras, Lightning and W&B summary. |
 
 ### Analysis and review commands
 
@@ -1477,7 +1477,7 @@ capability status and completion criteria are recorded in
 [docs/product-completion.md](docs/product-completion.md).
 
 Delivered: versioned schemas 0.1–0.11 with frozen reading rules and migration;
-generic, Lightning, Keras, Sacred, Hydra, MLflow file-store and TensorBoard adapters; file, value and
+generic, Lightning, Keras, Sacred, Hydra, MLflow file-store, TensorBoard and W&B summary adapters; file, value and
 claim verification; batch validation; single-manifest analysis (run and claim
 detail, lineage, impact, coverage, review gates, fingerprints, comparison,
 metric matrix and leaderboard); guarded artifact, result, evidence,

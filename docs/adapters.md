@@ -156,6 +156,23 @@ runevidence init runs/ --adapter sacred
 runevidence validate runs/ --strict
 ```
 
+### `wandb` (`packages/runevidence-wandb`)
+
+A local W&B run folder holds `wandb-summary.json` (or `files/wandb-summary.json`), the
+configuration in `files/config.yaml`, and `files/wandb-metadata.json`. The adapter records one
+run per such folder, the YAML configuration as params, every file as a hashed artifact, and
+every finite numeric summary value as a schema 0.3 result with a JSON Pointer locator. Keys
+beginning with `_` (W&B bookkeeping such as `_runtime`) and non-numeric/non-finite values are
+skipped. It uses the protected descriptor walk and refuses hosts without POSIX
+directory-descriptor support; no W&B package is required. See
+`examples/wandb-summary/`.
+
+```bash
+pip install -e . -e ./packages/runevidence-wandb
+runevidence init wandb/ --adapter wandb
+runevidence validate wandb/
+```
+
 ### `hydra` (`packages/runevidence-hydra`)
 
 For projects run with [Hydra](https://hydra.cc). Install it next to

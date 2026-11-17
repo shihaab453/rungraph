@@ -14,7 +14,7 @@ platform bounds, F3 and B6, listed under Limitations.
 | --- | --- | --- |
 | A1 frozen versioned schemas, migration | COMPLETE | schemas 0.1–0.11; `tests/test_schema_freeze.py`, `test_cli_migrate.py` |
 | A2 generic ingestion | COMPLETE | generic adapter; empty scans refuse with exit 2 |
-| A3 Lightning/Keras/Sacred/Hydra/MLflow/TensorBoard adapters | COMPLETE | adapter packages and tests; Sacred JSON-pointer metrics, TF2 media 0.10 |
+| A3 Lightning/Keras/Sacred/W&B/Hydra/MLflow/TensorBoard adapters | COMPLETE | adapter packages and tests; W&B local summaries, Sacred JSON-pointer metrics, TF2 media 0.10 |
 | A4 result/claim/evidence/relationship/run/artifact authoring | COMPLETE | `runevidence result/evidence/relationship/run/artifact`; `tests/test_authoring.py`, `tests/test_run_authoring.py`, `tests/test_artifact_authoring.py` |
 | A5 condition authoring 0.2–0.11 | COMPLETE | `conditions`; `tests/test_cli_conditions.py` |
 | A6 source/environment capture | COMPLETE | `capture`; `tests/test_cli_capture.py` |
@@ -27,7 +27,7 @@ platform bounds, F3 and B6, listed under Limitations.
 | C8 change analysis between snapshots | COMPLETE | fingerprint/diff/review-gate routes |
 | D0–D6 workspace composition | COMPLETE | `rungraph` CLI; workspace tests, examples, `stats`, `runs` |
 | E1 every route documented | COMPLETE | README reference; docs-contract route test |
-| E2 TensorBoard and workspace examples | COMPLETE | `examples/tensorboard-scalars`, `examples/workspace-study` |
+| E2 TensorBoard, W&B and workspace examples | COMPLETE | `examples/tensorboard-scalars`, `examples/wandb-summary`, `examples/workspace-study` |
 | E3 packaging and fresh install | COMPLETE | packaging advisory + `wheel-smoke` job |
 | E4 platform behaviour stated | COMPLETE | README Platform behaviour |
 | E5 machine-readable output documented | COMPLETE | README Machine-readable output |
@@ -39,11 +39,11 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,382 passed, 138 skipped on Python 3.12; 6,379 passed, 141 skipped on
+- **Full suite**: 6,386 passed, 138 skipped on Python 3.12; 6,383 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
-- **Wheel smoke**: all seven wheels build, install into a clean venv, and run
+- **Wheel smoke**: all eight wheels build, install into a clean venv, and run
   `runevidence init/validate` and `rungraph discover/init/validate`.
 - **Schema 0.11 (P3)**: structured TF2 `[k,3]` histograms, covered by
   `tests/test_schema_0_11.py`, `test_schema_0_11_migration.py`, `test_cli_tf2_histograms.py`
@@ -211,7 +211,7 @@ cycles, over-cap readers, malformed hooks, stale documents, refused writes and e
 | 4. Guarantees fail when broken | 12 mutation probes for RE-10/ML-1; negative-path suites; the false-clean probe above |
 | 5. Known correctness problems resolved or bounded | RE-10 and ML-1 fixed; F3 and directory artifacts bounded as stated |
 | 6. Realistic multi-run, multi-tool experiment with corruption and propagation | `examples/dogfood-sklearn` (two real models), `examples/dogfood-mlp-sweep` (three-job Hydra sweep with two claims), `examples/workspace-study` (composition); the end-to-end harness corrupts a value and follows the claim-at-risk propagation |
-| 7. Clean install, packaging and platform matrix | `wheel-smoke` (clean venv, seven wheels, both console scripts); six required CI jobs on Ubuntu and Windows, Python 3.10 and 3.14, minimum dependencies on 3.10 |
+| 7. Clean install, packaging and platform matrix | `wheel-smoke` (clean venv, eight wheels, both console scripts); six required CI jobs on Ubuntu and Windows, Python 3.10 and 3.14, minimum dependencies on 3.10 |
 | 8. Evidence recorded and reproducible | this page, the exact commands below, and the full suite counts |
 | 9. Limitations distinguished | the Limitations section, the README platform section, and the experimental comparability verdict |
 | 10. No blocker contradicts the statuses | no unresolved blocker is recorded; the false-clean probe is closed |
