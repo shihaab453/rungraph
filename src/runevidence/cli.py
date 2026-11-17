@@ -72,6 +72,7 @@ from .report import format_findings, format_overview, to_json
 from .run_compare import ComparisonError, compare_runs, format_comparison
 from .run_leaderboard import LeaderboardError, rank_runs, format_leaderboard
 from .run_matrix import MatrixError, metric_matrix, format_metric_matrix
+from .run_stats import format_stats, stats_manifest
 from .run_details import RunDetailsError, run_details, format_run_details
 from .run_claim import ClaimDetailsError, claim_details, format_claim_details
 from .run_lineage import LineageError, claim_lineage, format_claim_lineage
@@ -470,6 +471,23 @@ def cmd_leaderboard(args: argparse.Namespace) -> int:
         print(format_leaderboard(ranked))
     return EXIT_OK
 
+
+
+def cmd_stats(args: argparse.Namespace) -> int:
+    """Summarize recorded metric rows without reading any artifact."""
+    loaded = _load_or_report(args.path, args.json)
+    if loaded is None:
+        return EXIT_INVALID
+    data = stats_manifest(
+        loaded.manifest,
+        manifest_path=str(loaded.path),
+        metric=args.metric,
+    )
+    if args.json:
+        print(json.dumps(data, indent=2, ensure_ascii=True, allow_nan=False))
+    else:
+        print(format_stats(data))
+    return EXIT_OK
 
 
 def cmd_matrix(args: argparse.Namespace) -> int:
@@ -2779,6 +2797,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--json", action="store_true", help="machine-readable leaderboard")
     p.set_defaults(func=cmd_leaderboard)
+
+    p = sub.add_parser("stats", help="summarize recorded metrics with counts and distribution statistics")
+    p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")
+    p.add_argument("--metric", metavar="NAME", help="include only this metric")
+    p.add_argument("--json", action="store_true", help="machine-readable statistics")
+    p.set_defaults(func=cmd_stats)
 
     p = sub.add_parser("matrix", help="view recorded metrics side by side for selected runs (no artifact checks)")
     p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")
