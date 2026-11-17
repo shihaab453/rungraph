@@ -392,6 +392,7 @@ documents the document format, claim states and exit codes.
 | `rungraph compare ROOT --metric NAME` | Recorded values for one metric across members with each pair's condition status (`--run`, `--json`). |
 | `rungraph matrix ROOT` | Member-by-metric matrix of recorded values (`--json`). |
 | `rungraph leaderboard ROOT --metric NAME --direction max\|min` | Rank finite numeric values with ties sharing a rank (`--top`, `--json`). |
+| `rungraph stats ROOT` | Per-metric counts and distribution statistics: rows, numeric, missing, non-numeric, ambiguous, min, max, mean, median and population standard deviation (`--metric`, `--json`). |
 | `rungraph patch ROOT --file PATCH` | Apply an all-or-nothing `rungraph-patch` 0.1 document (`--expected-sha256`, `--dry-run`, `--json`). |
 | `rungraph member add\|remove\|move\|rename ROOT ...` | Edit membership without regenerating the document (`--id`, `--path`, `--expected-sha256`, `--dry-run`, `--json`). |
 | `rungraph claim add\|edit\|remove ROOT ...` | Edit workspace claims (`--file`, `--id`, `--expected-sha256`, `--dry-run`, `--json`). |
@@ -1441,7 +1442,7 @@ Two envelope families are stable:
   documents, the `assess` document, fingerprints and the review/diff routes. `--json` is
   available on every analysis route; `comparability --preflight` is deliberately text-only.
 - `rungraph-*`: `discover`, `init`, `validate`, `report`, `compare`, `matrix`, `leaderboard`,
-  `member`, `claim`, `relationship` and `patch` accept `--json`; `graph` selects JSON or DOT
+  `stats`, `member`, `claim`, `relationship` and `patch` accept `--json`; `graph` selects JSON or DOT
   with `--format`; `impact` always emits JSON. Errors use the shared `rungraph-error`
   document.
 
@@ -1467,7 +1468,7 @@ metric matrix and leaderboard); guarded artifact, result, evidence,
 relationship and condition authoring; code and environment capture; directory
 artifacts; evidence-aware comparison; a workspace layer (`rungraph.json` and
 the `rungraph` CLI) for cross-member graphs, claims, reports, impact, compare,
-matrix and leaderboard; and a stable comparability preflight with an
+matrix, leaderboard and per-metric statistics; and a stable comparability preflight with an
 experimental comparison verdict.
 
 Every capability in the completion contract is complete except the declared
