@@ -1,0 +1,91 @@
+{
+  "schema_version": "0.3",
+  "project": {
+    "id": "wandb-demo",
+    "name": "W&B demo",
+    "description": null,
+    "tags": [],
+    "metadata": {}
+  },
+  "runs": [
+    {
+      "id": "run-demo-run",
+      "name": "Demo summary run",
+      "started_at": "2026-11-17T10:00:00Z",
+      "params": {
+        "learning_rate": 0.01,
+        "optimizer": {
+          "name": "adam",
+          "beta1": 0.9
+        }
+      },
+      "metadata": {
+        "wandb": {
+          "run_dir": "wandb/offline-run-demo",
+          "run_id": "demo-run",
+          "summary": "wandb/offline-run-demo/files/wandb-summary.json"
+        }
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "wandb-offline-run-demo-files-config.yaml",
+      "path": "wandb/offline-run-demo/files/config.yaml",
+      "sha256": "bc0820ed87b55febd37032249630323b63017fcc00224261dc7dc6d1a1e5fb8c",
+      "size_bytes": 57,
+      "kind": null,
+      "run_id": "run-demo-run",
+      "metadata": {}
+    },
+    {
+      "id": "wandb-offline-run-demo-files-output.log",
+      "path": "wandb/offline-run-demo/files/output.log",
+      "sha256": "755f78019e2c8d121a7cad3ab1e149f3b5d4f5367d6438cea819781b4bd29495",
+      "size_bytes": 8,
+      "kind": null,
+      "run_id": "run-demo-run",
+      "metadata": {}
+    },
+    {
+      "id": "wandb-offline-run-demo-files-wandb-metadata.json",
+      "path": "wandb/offline-run-demo/files/wandb-metadata.json",
+      "sha256": "5d202a1c88dbd111a2193e994ca800b0b44b00ee71ab6585d2aab1e9604ddc3a",
+      "size_bytes": 105,
+      "kind": null,
+      "run_id": "run-demo-run",
+      "metadata": {}
+    },
+    {
+      "id": "wandb-offline-run-demo-files-wandb-summary.json",
+      "path": "wandb/offline-run-demo/files/wandb-summary.json",
+      "sha256": "2b5a3e1a6f7a401a606c0c058879476c717ecf940d731aa98589a82c7265118f",
+      "size_bytes": 73,
+      "kind": null,
+      "run_id": "run-demo-run",
+      "metadata": {}
+    }
+  ],
+  "results": [
+    {
+      "id": "wandb-res-38c8389d8cd9b80d",
+      "run_id": "run-demo-run",
+      "name": "accuracy",
+      "value": 0.91,
+      "artifact_id": "wandb-offline-run-demo-files-wandb-summary.json",
+      "locator": "/accuracy",
+      "metadata": {}
+    },
+    {
+      "id": "wandb-res-6dcc1c9e7dfb6660",
+      "run_id": "run-demo-run",
+      "name": "loss",
+      "value": 0.42,
+      "artifact_id": "wandb-offline-run-demo-files-wandb-summary.json",
+      "locator": "/loss",
+      "metadata": {}
+    }
+  ],
+  "evidence": [],
+  "relationships": []
+}

@@ -10,7 +10,7 @@ verified on each platform and why some adapters fail closed elsewhere.
   lowest declared dependency versions.
 - macOS and Python 3.11-3.13 are not directly verified. They are not declared
   unsupported.
-- The wheel smoke job builds all seven wheels, installs them into a clean venv
+- The wheel smoke job builds all eight wheels, installs them into a clean venv
   and runs both console scripts.
 
 ## Adapter matrix
@@ -24,6 +24,7 @@ verified on each platform and why some adapters fail closed elsewhere.
 | `keras` | yes | **refused** | Needs POSIX directory-descriptor reads. |
 | `lightning` | yes | **refused** | Needs POSIX directory-descriptor reads. |
 | `sacred` | yes | **refused** | Needs POSIX directory-descriptor reads. |
+| `wandb` | yes | **refused** | Needs POSIX directory-descriptor reads for local summary files. |
 
 The three refusing adapters protect against a parent folder or file being
 swapped for an outside link between discovery and the read. Python on Windows
