@@ -74,7 +74,7 @@ from .run_compare import ComparisonError, compare_runs, format_comparison
 from .run_leaderboard import LeaderboardError, rank_runs, format_leaderboard
 from .run_matrix import MatrixError, metric_matrix, format_metric_matrix
 from .run_stats import format_stats, stats_manifest
-from .db_export import export_sqlite
+from .db_export import check_sqlite, export_sqlite
 from .run_inventory import format_runs, runs_manifest
 from .run_details import RunDetailsError, run_details, format_run_details
 from .run_claim import ClaimDetailsError, claim_details, format_claim_details
@@ -583,6 +583,25 @@ def cmd_db_export(args: argparse.Namespace) -> int:
         print(f"Wrote {data['path']} ({data['counts']['runs']} runs, {data['counts']['results']} results).")
         print("JSON remains the authority; this database is a derived query cache.")
     return EXIT_OK
+
+
+def cmd_db_check(args: argparse.Namespace) -> int:
+    loaded = _load_or_report(args.path, args.json)
+    if loaded is None:
+        return EXIT_INVALID
+    data = check_sqlite(loaded, args.db)
+    if args.json:
+        print(json.dumps(data, indent=2))
+    else:
+        if data["error"] if "error" in data else False:
+            print(f"ERROR: {data['error']}")
+        elif data["ok"]:
+            print("OK: database matches the manifest snapshot (exit 0)")
+        else:
+            for item in data["mismatches"]:
+                print(f"DRIFT {item['table']}: {item}")
+            print("FAIL: database differs from the manifest (exit 1)")
+    return data["exit_code"]
 
 
 def cmd_runs(args: argparse.Namespace) -> int:
@@ -2930,6 +2949,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true", help="replace an existing output file")
     p.add_argument("--json", action="store_true", help="machine-readable summary")
     p.set_defaults(func=cmd_db_export)
+
+    p = sub.add_parser("db-check", help="compare a derived SQLite cache with the manifest")
+    p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")
+    p.add_argument("--db", type=Path, required=True, help="SQLite cache to compare")
+    p.add_argument("--json", action="store_true", help="machine-readable result")
+    p.set_defaults(func=cmd_db_check)
 
     p = sub.add_parser("runs", help="list recorded runs with params and conditions")
     p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")

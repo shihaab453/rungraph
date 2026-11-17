@@ -144,3 +144,54 @@ def export_sqlite(loaded: LoadedManifest, output: Path, *, force: bool = False) 
         },
         "exit_code": 0,
     }
+
+
+def check_sqlite(loaded: LoadedManifest, database: Path) -> dict[str, Any]:
+    """Compare a derived SQLite cache with the current manifest snapshot."""
+    database = Path(database)
+    if not database.is_file():
+        return {"format": "runevidence-db-check-v1", "ok": False,
+                "error": "database-not-found", "exit_code": 2}
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return {"format": "runevidence-db-check-v1", "ok": False,
+                "error": "database-unreadable", "exit_code": 2}
+    manifest = loaded.manifest
+    digest = hashlib.sha256(loaded.source_bytes).hexdigest()
+    expected = {
+        "runs": {run.id for run in manifest.runs},
+        "artifacts": {artifact.id for artifact in manifest.artifacts},
+        "results": {result.id for result in manifest.results},
+        "evidence": {evidence.id for evidence in manifest.evidence},
+    }
+    mismatches: list[dict[str, Any]] = []
+    try:
+        row = connection.execute(
+            "select value from meta where key='manifest_sha256'"
+        ).fetchone()
+        database_digest = row[0] if row else None
+        if database_digest != digest:
+            mismatches.append({"table": "meta", "reason": "manifest-changed"})
+        for table, ids in expected.items():
+            try:
+                actual = {item[0] for item in connection.execute(f"select id from {table}")}
+            except sqlite3.Error:
+                mismatches.append({"table": table, "reason": "table-missing"})
+                continue
+            if actual != ids:
+                mismatches.append({
+                    "table": table,
+                    "missing": sorted(ids - actual),
+                    "extra": sorted(actual - ids),
+                })
+    finally:
+        connection.close()
+    return {
+        "format": "runevidence-db-check-v1",
+        "ok": not mismatches,
+        "manifest_sha256": digest,
+        "database_sha256": database_digest,
+        "mismatches": mismatches,
+        "exit_code": 0 if not mismatches else 1,
+    }
