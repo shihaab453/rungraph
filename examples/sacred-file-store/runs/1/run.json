@@ -1,0 +1,18 @@
+{
+  "experiment": {
+    "name": "diabetes-sgd",
+    "id": 7,
+    "base_dir": "/tmp/example"
+  },
+  "command": "train",
+  "host": {
+    "hostname": "example"
+  },
+  "status": "COMPLETED",
+  "start_time": "2026-11-17T10:00:00+00:00",
+  "stop_time": "2026-11-17T10:01:00+00:00",
+  "artifacts": [
+    "model.txt"
+  ],
+  "resources": []
+}

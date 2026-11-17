@@ -103,6 +103,21 @@ package stops installing.
 Any folder. Hashes every file; each `runs/<name>/` subfolder becomes a run.
 No params, results or claims.
 
+### `sacred` (`packages/runevidence-sacred`)
+
+A Sacred `FileStorageObserver` base directory holds one folder per run with `run.json`,
+`config.json`, `metrics.json`, `cout.txt` and copied artifacts. The adapter records one run per
+folder containing `run.json`, the configuration as params, every file as a hashed artifact, and
+every scalar metric value as a schema 0.3 result with a JSON Pointer locator into
+`metrics.json`. Names are `<metric> @ <step>`; non-scalar and non-finite values are skipped.
+No Sacred installation is required.
+
+```bash
+pip install -e . -e ./packages/runevidence-sacred
+runevidence init runs/ --adapter sacred
+runevidence validate runs/ --strict
+```
+
 ### `hydra` (`packages/runevidence-hydra`)
 
 For projects run with [Hydra](https://hydra.cc). Install it next to

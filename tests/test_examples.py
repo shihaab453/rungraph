@@ -23,3 +23,9 @@ def test_workspace_study_example_is_clean(capsys):
     assert rungraph_main(["validate", str(root), "--strict"]) == 0
     assert "OK: exit 0" in capsys.readouterr().out
     assert rungraph_main(["report", str(root), "--json"]) == 0
+
+
+def test_sacred_file_store_example_is_clean(capsys):
+    root = REPO / "examples/sacred-file-store/runs"
+    assert main(["validate", str(root), "--strict"]) == 0
+    assert "0 errors, 0 warnings" in capsys.readouterr().out
