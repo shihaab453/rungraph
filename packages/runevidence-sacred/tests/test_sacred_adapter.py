@@ -9,7 +9,13 @@ import pytest
 
 pytest.importorskip("runevidence_sacred")
 
+from runevidence.checks.files import _dir_fd_supported
 from runevidence.cli import main
+
+pytestmark = pytest.mark.skipif(
+    not _dir_fd_supported(),
+    reason="the Sacred adapter requires POSIX directory-descriptor support",
+)
 
 
 def write_run(root: Path, run_id: str = "1", *, values=(1.0, 0.5)) -> Path:

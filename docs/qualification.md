@@ -204,9 +204,10 @@ cycles, over-cap readers, malformed hooks, stale documents, refused writes and e
   reproducibility, statistical equivalence or scientific truth.
 - **Directory artifacts**: read-only checking is Linux-only and authoring is Linux/ext4 only;
   other filesystems fail closed, and Windows is not claimed.
-- **Keras and Lightning adapters**: both require POSIX directory-descriptor support for
-  protected reads; hosts without it refuse `--adapter keras` or `--adapter lightning` rather
-  than fall back to an unlocked read. The generic adapter remains available.
+- **Keras, Lightning and Sacred adapters**: all require POSIX directory-descriptor support
+  for protected reads; hosts without it refuse `--adapter keras`, `--adapter lightning` or
+  `--adapter sacred` rather than fall back to an unprotected read. The generic adapter
+  remains available.
 - **Adapters**: the MLflow adapter reads a local file store only; no tracking server, remote
   URI or network access.
 - **Accepted changes**: `rehash` records the new bytes and value; it does not re-adjudicate

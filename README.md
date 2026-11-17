@@ -1368,6 +1368,9 @@ Read these before relying on a green `validate` for anything important.
   behaviour: the stale-byte checks remain, but there is no serialization guarantee.
 - Directory artifacts are checked on Linux and authored on Linux/ext4 only; other
   filesystems fail closed. Windows is not claimed for either.
+- Keras, Lightning and Sacred need POSIX directory-descriptor reads. Hosts without them,
+  including Windows, refuse those adapters instead of using an unprotected fallback; the
+  generic, Hydra, MLflow and TensorBoard adapters remain available.
 - Everything is offline. No command reads a network, launches a job or loads model weights.
 - macOS and Python 3.11-3.13 are not directly verified; they are not declared unsupported.
 
