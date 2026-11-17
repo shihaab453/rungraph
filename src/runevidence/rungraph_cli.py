@@ -239,6 +239,18 @@ def cmd_graph(args: argparse.Namespace) -> int:
     return data["exit_code"]
 
 
+_REPORT_TEXT_FINDINGS = 10
+_REPORT_TEXT_CLAIM = 200
+
+
+def _report_text(value: object, limit: int = _REPORT_TEXT_CLAIM) -> str:
+    text = str(value)
+    escaped = json.dumps(text, ensure_ascii=True)[1:-1]
+    if len(escaped) > limit:
+        escaped = escaped[:limit] + "..."
+    return escaped
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     try:
         loaded, graph, checks, states = _loaded(args)
@@ -263,10 +275,28 @@ def cmd_report(args: argparse.Namespace) -> int:
         )
         print("Current evidence:")
         for member in data["members"]:
-            print(f"  {member['id']}: {member['counts']['error']} errors, {member['counts']['warning']} warnings")
+            print(
+                f"  {member['id']} ({member['path']}): "
+                f"{member['counts']['error']} errors, {member['counts']['warning']} warnings"
+            )
+            if member["load_error"]:
+                print(f"    ERROR workspace: {_report_text(member['load_error'])}")
+            for finding in member["findings"][:_REPORT_TEXT_FINDINGS]:
+                subject = f" [{_report_text(finding['subject'], 80)}]" if finding["subject"] else ""
+                print(
+                    f"    {finding['severity'].upper()} {finding['code']}{subject}: "
+                    f"{_report_text(finding['message'])}"
+                )
+            hidden = len(member["findings"]) - _REPORT_TEXT_FINDINGS
+            if hidden > 0:
+                print(f"    and {hidden} more findings (see --json)")
         print("Claims:")
         for claim in data["claims"]:
-            print(f"  {claim['id']}: {', '.join(claim['labels'])}")
+            owner = claim["member"] or "workspace"
+            print(
+                f"  {claim['id']} [{owner}]: {', '.join(claim['labels'])} "
+                f'- "{_report_text(claim["text"])}"'
+            )
         print("Impact:")
         for item in data["impact"]:
             print(f"  {item['code']} {item['node']}: {', '.join(item['claims']) or 'none'}")

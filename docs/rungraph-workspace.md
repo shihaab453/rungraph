@@ -118,9 +118,10 @@ cycles are reported per strongly connected component with a bounded example list
 
 ## Report, impact and comparison
 
-- `report` prints current evidence per member, every claim's states, and the claims affected
-  by each error-level finding. `--directory-artifacts` opts into directory checks and is
-  stated in the header when absent; `--strict` makes warnings fail.
+- `report` prints current evidence per member (path, error/warning counts, up to ten finding
+  messages with severity, code and subject), every claim's states with its owner and claim
+  text, and the claims affected by each error-level finding. `--directory-artifacts` opts into
+  directory checks and is stated in the header when absent; `--strict` makes warnings fail.
 - `impact` returns the claims whose dependency closure contains the requested node.
 - `compare` prints recorded values for one metric; `matrix` lays members against metrics;
   `leaderboard` ranks finite numeric values with ties sharing a rank. Rows are identified by

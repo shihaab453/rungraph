@@ -316,3 +316,16 @@ def test_force_init_preserves_a_declared_manifest_filename(tmp_path: Path, capsy
     assert member["manifest"] == "custom.json"
     loaded = load_workspace(root)
     assert loaded.members["a"].manifest.results[0].value == 7
+
+
+def test_report_text_names_the_claim_and_finding_messages(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    capsys.readouterr()
+
+    assert main(["report", str(root)]) == 1
+    out = capsys.readouterr().out
+    assert "prov-a (a): 2 errors" in out
+    assert "ERROR missing-file [data]" in out
+    assert "claim [prov-a]" in out
+    assert "data is intact" in out
