@@ -135,6 +135,28 @@ def edit_artifact(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
 _RUN_EDITABLE = {"name", "started_at", "params", "metadata", "conditions"}
 
 
+def _validate_run_selectors(raw: dict, run_id: str) -> None:
+    from .conditions_authoring import ConditionsError, _validate_selectors
+    from .manifest import validate_manifest
+
+    manifest = validate_manifest(raw)
+    run = next((item for item in manifest.runs if item.id == run_id), None)
+    if run is None or run.conditions is None:
+        return
+    supplied = {
+        key: value
+        for key, value in run.conditions.model_dump(mode="json").items()
+        if value is not None
+    }
+    try:
+        _validate_selectors(supplied, manifest, run_id)
+    except ConditionsError:
+        raise AuthoringError(
+            "condition selectors must name an existing non-directory artifact of the "
+            "expected kind that is an input to the run"
+        ) from None
+
+
 def add_run(raw: dict, entry: dict[str, Any]) -> None:
     entry = dict(entry)
     _text(entry, "id", "a run")
@@ -142,6 +164,7 @@ def add_run(raw: dict, entry: dict[str, Any]) -> None:
         raise AuthoringError(f"ID {entry['id']!r} is already used")
     raw.setdefault("runs", []).append(entry)
     _validate(raw)
+    _validate_run_selectors(raw, entry["id"])
 
 
 def edit_run(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
@@ -154,6 +177,7 @@ def edit_run(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
             raise AuthoringError(f"unknown run field {key!r}")
         run[key] = value
     _validate(raw)
+    _validate_run_selectors(raw, entry_id)
 
 
 def remove_run(raw: dict, entry_id: str) -> None:

@@ -36,14 +36,6 @@ def test_add_edit_and_remove_a_run(tmp_path: Path, capsys):
             "id": "new",
             "name": "New",
             "params": {"lr": 0.1},
-            "conditions": {
-                "evaluation_split": "test",
-                "evaluation_protocol": {"protocol_id": "p", "version": 1},
-                "evaluation_dataset_artifact_id": "missing",
-                "model_checkpoint_artifact_id": "missing",
-                "source_revision": "rev",
-                "environment": {"python": "3.12"},
-            },
         },
     )
     assert main(["run", str(root), "--add", "--file", str(payload)]) == 0
@@ -85,3 +77,45 @@ def test_add_refuses_duplicate_and_read_detail_still_works(tmp_path: Path, capsy
     assert main(["run", str(root), "--id", "existing", "--json"]) == 0
     detail = json.loads(capsys.readouterr().out)
     assert detail["run"]["id"] == "existing"
+
+
+def test_condition_selectors_must_resolve_to_run_inputs(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    document = json.loads((root / "runevidence.json").read_text(encoding="utf-8"))
+    document["runs"] = [{"id": "r"}]
+    document["artifacts"] = [
+        {"id": "data", "path": "data.csv", "sha256": "0" * 64, "size_bytes": 8, "kind": "dataset"},
+        {"id": "ckpt", "path": "model.bin", "sha256": "1" * 64, "size_bytes": 1, "kind": "checkpoint"},
+    ]
+    document["relationships"] = [
+        {"source": "data", "target": "r", "type": "input_to"},
+        {"source": "ckpt", "target": "r", "type": "input_to"},
+    ]
+    (root / "runevidence.json").write_text(json.dumps(document), encoding="utf-8")
+    payload = entry(
+        root,
+        {
+            "id": "r",
+            "conditions": {
+                "evaluation_split": "test",
+                "evaluation_dataset_artifact_id": "data",
+                "model_checkpoint_artifact_id": "ckpt",
+            },
+        },
+    )
+    assert main(["run", str(root), "--edit", "--file", str(payload)]) == 0
+
+    bad = entry(
+        root,
+        {
+            "id": "r",
+            "conditions": {
+                "evaluation_split": "test",
+                "evaluation_dataset_artifact_id": "absent",
+            },
+        },
+    )
+    before = (root / "runevidence.json").read_bytes()
+    assert main(["run", str(root), "--edit", "--file", str(bad)]) == 2
+    assert "condition selectors" in capsys.readouterr().out
+    assert (root / "runevidence.json").read_bytes() == before
