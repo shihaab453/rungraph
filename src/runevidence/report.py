@@ -168,3 +168,85 @@ def to_json(report: Report, strict: bool = False, manifest: Optional[Manifest] =
         if unreadable:
             data["summary"]["adapter_unreadable"] = [entry for _, entry in unreadable]
     return json.dumps(data, indent=2)
+
+
+def format_markdown(manifest_path, manifest: Manifest, report: Report, strict: bool = False) -> str:
+    """A shareable single-experiment Markdown report."""
+    from .markdown_text import md_text
+
+    lines = [f"# {md_text(manifest.project.name)} ({md_text(manifest.project.id)})", ""]
+    lines.append(f"**Manifest:** `{md_text(manifest_path, 300)}`")
+    lines.append(f"**Exit:** {report.exit_code(strict)}")
+    lines.append("")
+    lines.append("## Runs")
+    lines.append("")
+    if not manifest.runs:
+        lines.append("None.")
+    else:
+        lines.append("| Run | Name | Params | Artifacts | Results |")
+        lines.append("| --- | --- | --- | --- | --- |")
+        artifacts: dict[str, int] = {}
+        results: dict[str, int] = {}
+        for artifact in manifest.artifacts:
+            if artifact.run_id is not None:
+                artifacts[artifact.run_id] = artifacts.get(artifact.run_id, 0) + 1
+        for result in manifest.results:
+            results[result.run_id] = results.get(result.run_id, 0) + 1
+        for run in manifest.runs:
+            lines.append(
+                f"| `{md_text(run.id)}` | {md_text(run.name or '')} | "
+                f"{md_text(run.params, 200)} | {artifacts.get(run.id, 0)} | "
+                f"{results.get(run.id, 0)} |"
+            )
+    lines += ["", "## Artifacts", ""]
+    if not manifest.artifacts:
+        lines.append("None.")
+    else:
+        lines.append("| Artifact | Path | Bytes | sha256 |")
+        lines.append("| --- | --- | --- | --- |")
+        for artifact in manifest.artifacts:
+            digest = artifact.sha256 or "none"
+            lines.append(
+                f"| `{md_text(artifact.id)}` | `{md_text(artifact.path)}` | "
+                f"{artifact.size_bytes if artifact.size_bytes is not None else '?'} | "
+                f"`{md_text(digest[:16], 40)}` |"
+            )
+    lines += ["", "## Results", ""]
+    if not manifest.results:
+        lines.append("None.")
+    else:
+        lines.append("| Result | Run | Name | Value |")
+        lines.append("| --- | --- | --- | --- |")
+        for result in manifest.results:
+            lines.append(
+                f"| `{md_text(result.id)}` | `{md_text(result.run_id)}` | "
+                f"{md_text(result.name)} | {md_text(result.value, 200)} |"
+            )
+    lines += ["", "## Claims", ""]
+    if not manifest.evidence:
+        lines.append("None.")
+    else:
+        lines.append("| Claim | Supports | Contradicts | Text |")
+        lines.append("| --- | --- | --- | --- |")
+        for claim in manifest.evidence:
+            lines.append(
+                f"| `{md_text(claim.id)}` | {md_text(', '.join(claim.supports) or 'none')} | "
+                f"{md_text(', '.join(claim.contradicts) or 'none')} | {md_text(claim.claim)} |"
+            )
+    lines += ["", "## Findings", ""]
+    if not report.findings:
+        lines.append("None.")
+    else:
+        lines.append("| Severity | Code | Subject | Message |")
+        lines.append("| --- | --- | --- | --- |")
+        for finding in report.findings:
+            lines.append(
+                f"| {finding.severity.value} | `{md_text(finding.code.value)}` | "
+                f"{md_text(finding.subject or '')} | {md_text(finding.message)} |"
+            )
+    lines += [
+        "",
+        "> Recorded assertions and local-file checks only; this is not a scientific validity claim.",
+        "",
+    ]
+    return "\n".join(lines)
