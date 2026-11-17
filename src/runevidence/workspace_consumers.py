@@ -381,6 +381,56 @@ def baseline_diff(loaded: LoadedWorkspace, baseline_root) -> dict[str, Any]:
     }
 
 
+def _json_number(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def _safe_mean(values: list[Any]) -> Any:
+    if all(type(value) is int for value in values):
+        from fractions import Fraction
+
+        return _json_number(float(Fraction(sum(values), len(values))))
+    scale = max(abs(float(value)) for value in values)
+    if scale == 0.0:
+        return 0.0
+    return _json_number(scale * (math.fsum(float(value) / scale for value in values) / len(values)))
+
+
+def _safe_median(values: list[Any]) -> Any:
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    if all(type(value) is int for value in values):
+        from fractions import Fraction
+
+        return _json_number(float(Fraction(ordered[middle - 1] + ordered[middle], 2)))
+    return _json_number(ordered[middle - 1] / 2.0 + ordered[middle] / 2.0)
+
+
+def _safe_pstdev(values: list[Any]) -> Any:
+    if all(type(value) is int for value in values):
+        from fractions import Fraction
+
+        scale_int = max(abs(value) for value in values)
+        if scale_int == 0:
+            return 0.0
+        scale = Fraction(scale_int)
+        normalized = [Fraction(value) / scale for value in values]
+        mean = sum(normalized) / len(normalized)
+        variance = sum((item - mean) ** 2 for item in normalized) / len(normalized)
+        return _json_number(float(scale_int) * math.sqrt(float(variance)))
+    scale = max(abs(float(value)) for value in values)
+    if scale == 0.0:
+        return 0.0
+    normalized = [float(value) / scale for value in values]
+    mean = math.fsum(normalized) / len(normalized)
+    variance = math.fsum((item - mean) ** 2 for item in normalized) / len(normalized)
+    return _json_number(scale * math.sqrt(max(variance, 0.0)))
+
+
 def stats_data(loaded: LoadedWorkspace, metric: Optional[str] = None) -> dict[str, Any]:
     """Per-metric count and distribution statistics.
 
@@ -391,8 +441,6 @@ def stats_data(loaded: LoadedWorkspace, metric: Optional[str] = None) -> dict[st
     cannot represent it. Distribution fields cover the numeric rows and are
     null when there are none. ``stddev`` is the population standard deviation.
     """
-
-    import statistics as stats
 
     rows = value_rows(loaded)
     if metric is not None:
@@ -426,9 +474,9 @@ def stats_data(loaded: LoadedWorkspace, metric: Optional[str] = None) -> dict[st
         if numeric_values:
             entry["min"] = min(numeric_values)
             entry["max"] = max(numeric_values)
-            entry["mean"] = stats.fmean(numeric_values)
-            entry["median"] = stats.median(numeric_values)
-            entry["stddev"] = stats.pstdev(numeric_values)
+            entry["mean"] = _safe_mean(numeric_values)
+            entry["median"] = _safe_median(numeric_values)
+            entry["stddev"] = _safe_pstdev(numeric_values)
         metrics.append(entry)
     return {
         "format": "rungraph-stats",

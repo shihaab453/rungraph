@@ -131,6 +131,10 @@ cycles are reported per strongly connected component with a bounded example list
   counts, ambiguous `(member, run)` pairs with more than one recorded value, and min, max,
   mean, median and population standard deviation over the numeric rows. Distribution fields
   are null when a metric has no numeric value. `--metric` restricts it to one name.
+  Calculations use scaled summation (and exact `Fraction` arithmetic for all-integer
+  metrics), so finite inputs at the float limits do not overflow or lose the half-unit
+  difference between adjacent large integers; every emitted number is strict JSON (never
+  `Infinity` or `NaN`).
 - `compare` reports each row pair's recorded-condition status (`comparable`,
   `not-comparable` or `unavailable`) through the experimental comparability surface.
   `leaderboard` shows `conditions: available`, meaning only that the route can carry a
