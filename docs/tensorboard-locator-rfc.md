@@ -575,8 +575,10 @@ Optional package `packages/runevidence-tensorboard`; core verification is unchan
   ```
 
   (0.4 keeps its frozen text.)
-- `rehash`: string-only succeeds; any object locator (jsonl, csv-cell, tensorboard) refuses
-  `LOCATOR_REFRESH_UNSUPPORTED`.
+- `rehash`: string-only succeeds; an artifact read through an object locator (jsonl,
+  csv-cell, tensorboard) refuses `LOCATOR_REFRESH_UNSUPPORTED`. **Update 2026-11-17:** the
+  refusal is artifact-scoped; unrelated artifacts in the same manifest can be rehashed, and
+  `--all` refuses when any selected artifact is targeted.
 - Comparability/fingerprint/conditions refuse 0.5; `schema` stays file/docs-only.
 - Schema 0.5 vector notes: `maxLength` counts code points and `type: integer` accepts `1.0` at the
   schema level; the model enforces 4,096 UTF-8 bytes and `StrictInt`, as documented on the fields.

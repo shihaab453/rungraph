@@ -309,8 +309,9 @@ The optional package `packages/runevidence-tensorboard` registers the
   and locators. A pre-0.5 binary backs the manifest up and replaces it instead.
 - `conditions` remains 0.2-only and names 0.3, 0.4 and 0.5 in its refusal;
   `comparability` refuses 0.5; `fingerprint` keeps v1's 0.1-only guard;
-  `rehash` refuses any object locator, including `tensorboard`
-  (`LOCATOR_REFRESH_UNSUPPORTED`); `add` accepts a 0.5 manifest.
+  `rehash` refuses an artifact read through a `tensorboard` locator
+  (`LOCATOR_REFRESH_UNSUPPORTED`) but accepts unrelated artifacts in the same
+  manifest; `add` accepts a 0.5 manifest.
 - `validate`, `inspect`, `validate-batch` and the other manifest-reading routes
   load 0.5 through the one dispatcher. The `schema` CLI route is unchanged (it
   prints 0.1); the 0.5 schema is available as a file and through

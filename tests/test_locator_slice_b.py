@@ -183,12 +183,11 @@ def _append_result(root: Path, row: dict) -> None:
     (root / "runevidence.json").write_text(dump_manifest(Manifest.model_validate(doc)))
 
 
-def test_no_digest_hint_is_manifest_wide_for_a_kind_mismatched_object_locator(tmp_path):
-    """The hint must match edit.py: any object locator blocks rehash.
+def test_a_kind_mismatched_object_locator_keeps_the_artifact_scoped_refusal(tmp_path):
+    """A kind-mismatched object locator still targets this artifact.
 
-    A kind-mismatched object locator is not in ``usable`` but still makes
-    ``rehash`` refuse the manifest, so the old artifact-scoped hint promised a
-    refresh that cannot happen.
+    It is not in ``usable`` but rehash still refuses this artifact, so the
+    artifact-scoped hint must not promise a refresh.
     """
     root = tmp_path / "mixed-kind-mismatch"
     _write(root, sha256=None, locator="/val", artifact_path="a.json")
@@ -207,11 +206,11 @@ def test_no_digest_hint_is_manifest_wide_for_a_kind_mismatched_object_locator(tm
     report = _report(root)
     assert "locator-kind-mismatch" in _codes(report)
     hint = _finding(report, "locator-no-digest").hint
-    assert "any object locator exists in the manifest" in hint
+    assert "reads this artifact through an object locator" in hint
     assert "only string locators target this artifact" not in hint
 
 
-def test_no_digest_hint_is_manifest_wide_for_an_object_locator_on_another_artifact(tmp_path):
+def test_an_object_locator_on_another_artifact_does_not_block_this_hint(tmp_path):
     root = tmp_path / "mixed-artifacts"
     _write(root, sha256=None, locator="/val", artifact_path="a.json")
     doc = json.loads((root / "runevidence.json").read_text())
@@ -238,11 +237,11 @@ def test_no_digest_hint_is_manifest_wide_for_an_object_locator_on_another_artifa
 
     report = _report(root)
     hint = _finding(report, "locator-no-digest").hint
-    assert "any object locator exists in the manifest" in hint
-    assert "only string locators target this artifact" not in hint
+    assert "rehash can record the missing digest" in hint
+    assert "object locator" not in hint
 
 
-def test_kind_mismatched_object_locator_keeps_the_manifest_wide_no_digest_hint(tmp_path):
+def test_kind_mismatched_object_locator_keeps_the_artifact_scoped_refusal(tmp_path):
     """Only kind-mismatched locators on a digestless artifact.
 
     Nothing is ``usable``, so the restored artifact-level ``no-digest`` warning
@@ -260,7 +259,7 @@ def test_kind_mismatched_object_locator_keeps_the_manifest_wide_no_digest_hint(t
     assert "locator-kind-mismatch" in _codes(report)
     assert "locator-no-digest" not in _codes(report)
     hint = _finding(report, "no-digest").hint
-    assert "any object locator exists in the manifest" in hint
+    assert "reads this artifact through an object locator" in hint
     assert "record sha256 manually or regenerate the manifest" in hint
     assert "Record it with" not in hint
 
@@ -733,3 +732,15 @@ def test_huge_int_versus_large_float_is_a_fixed_finding(tmp_path, kind, directio
     # The comparison completed and produced an ordinary mismatch/unverifiable
     # finding rather than escaping as a Python exception.
     assert report.findings, (kind, direction, _codes(report))
+
+
+def test_a_changed_structured_source_does_not_suggest_rehash(tmp_path):
+    root = tmp_path / "changed-object"
+    _write(root, locator={"kind": "jsonl", "line": 1, "pointer": "/val"})
+    (root / "metrics.jsonl").write_bytes(b'{"val": 0.3}\n')
+
+    report = _report(root)
+
+    hint = _finding(report, "hash-mismatch").hint
+    assert "rehash" in hint and "cannot accept" in hint
+    assert "accept it with" not in hint

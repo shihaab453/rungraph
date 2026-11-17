@@ -235,11 +235,11 @@ For a readable targeted artifact:
 A digest mismatch still compares the value (legacy behavior) but the result is
 never presented as verified. `locator-no-digest` suppresses the artifact-level
 `no-digest` warning for targeted artifacts and its hint says whether `rehash`
-can record the digest. `rehash` refuses an entire manifest that contains any
-object locator, not only one on this artifact, so the hint uses the same
-manifest-wide rule: a manifest with no object locator gets "rehash can record
-the missing digest", and any object locator anywhere gets the manifest-wide
-refusal wording with manual recording or regeneration suggested. Locator errors add the result to the broken set, so a claim resting on
+can record the digest. `rehash` refuses only an artifact that an object
+locator reads, so the hint is artifact-scoped: an artifact with no object
+locator gets "rehash can record the missing digest", and an artifact read
+through one gets the refusal wording with manual recording or regeneration
+suggested. Other artifacts in the same manifest remain rehashable. Locator errors add the result to the broken set, so a claim resting on
 it gets `claim-at-risk`. Unverified warnings do not add to the broken set.
 
 An extension/kind mismatch (`locator-kind-mismatch`) is a reference refusal: it
@@ -308,8 +308,10 @@ the unchanged 0.1/0.2 JSON reader.
 
 - `validate`, `inspect` and `validate-batch` run these checks. Exit `1` on any
   error; warnings only exit `0` (`1` with `--strict`).
-- `rehash` still refuses any object locator before any write with
-  `LOCATOR_REFRESH_UNSUPPORTED` and exit `2`. String locators keep the legacy
+- `rehash` refuses an artifact read through an object locator before any
+  write with `LOCATOR_REFRESH_UNSUPPORTED` and exit `2`; an unrelated artifact
+  in the same manifest can still be rehashed. `--all` refuses when any
+  selected artifact is read through one. String locators keep the legacy
   re-read behavior; `validate` applies the strict 0.3 profile afterwards.
 - `run`, `claim` and `lineage` serialize object locators as JSON objects and
   use bounded escaped text in human output.

@@ -19,9 +19,8 @@ from runevidence.manifest import _issue_location, dump_manifest
 from runevidence.models import Manifest
 
 OBJECT_LOCATOR = {"kind": "jsonl", "line": 1, "pointer": "/val"}
-REFRESH_TEXT = (
-    "ERROR (LOCATOR_REFRESH_UNSUPPORTED): rehash cannot refresh a manifest that "
-    "contains an object locator. Nothing was written.\n"
+REFRESH_PREFIX = (
+    "ERROR (LOCATOR_REFRESH_UNSUPPORTED): rehash cannot accept new bytes for 'metrics':"
 )
 
 
@@ -142,20 +141,20 @@ def test_rehash_refuses_any_object_locator_before_writing(
     code, out, err = _run(capsys, ["rehash", str(root), "--all", *extra])
 
     assert (code, err) == (2, "")
-    assert out == REFRESH_TEXT
+    assert out.startswith(REFRESH_PREFIX)
+    assert "Nothing was written." in out
     assert path.read_bytes() == before
     assert sorted(p.name for p in root.iterdir()) == names_before
 
 
-def test_rehash_refuses_a_string_only_artifact_when_an_object_locator_elsewhere(
+def test_rehash_allows_a_string_only_artifact_when_an_object_locator_is_elsewhere(
     tmp_path, capsys
 ):
-    """``edit.plan_rehash`` refuses the whole manifest, not this artifact.
+    """Only the artifact read through an object locator is unsafe to accept.
 
-    ``a.json`` is targeted only by a string locator, so the artifact-scoped
-    hint used to promise that rehash could record its digest. A second
-    artifact with an object locator makes both the targeted and ``--all``
-    rehash refuse, so the hint must say "in the manifest".
+    ``a.json`` is targeted only by a string locator, so rehashing it is safe
+    even though ``b.jsonl`` is read through an object locator. ``--all`` still
+    refuses because it includes the targeted artifact.
     """
     root = tmp_path / "exp"
     root.mkdir()
@@ -170,7 +169,6 @@ def test_rehash_refuses_a_string_only_artifact_when_an_object_locator_elsewhere(
             {
                 "id": "b",
                 "path": "b.jsonl",
-                "sha256": hashlib.sha256(b'{"val": 0.9}\n').hexdigest(),
                 "size_bytes": len(b'{"val": 0.9}\n'),
             },
         ],
@@ -194,19 +192,24 @@ def test_rehash_refuses_a_string_only_artifact_when_an_object_locator_elsewhere(
     code, out, err = _run(capsys, ["validate", str(root), "--json"])
     # locator-no-digest is an error, so the digestless artifact exits 1.
     assert (code, err) == (1, "")
-    finding = next(
-        row for row in _one_json(out)["findings"]
+    findings = {
+        row["subject"]: row["hint"]
+        for row in _one_json(out)["findings"]
         if row["code"] == "locator-no-digest"
-    )
-    assert "any object locator exists in the manifest" in finding["hint"]
-    assert "only string locators target this artifact" not in finding["hint"]
+    }
+    assert "rehash can record the missing digest" in findings["ra"]
+    assert "reads this artifact through an object locator" in findings["rb"]
 
     before = (root / "runevidence.json").read_bytes()
-    for argv in (["rehash", str(root), "--all"], ["rehash", str(root), "a"]):
-        code, out, err = _run(capsys, [*argv, "--dry-run"])
-        assert (code, err) == (2, ""), argv
-        assert out == REFRESH_TEXT, argv
-        assert (root / "runevidence.json").read_bytes() == before
+    code, out, err = _run(capsys, ["rehash", str(root), "a", "--dry-run"])
+    assert (code, err) == (0, ""), out
+    assert (root / "runevidence.json").read_bytes() == before
+    code, out, err = _run(capsys, ["rehash", str(root), "--all", "--dry-run"])
+    assert (code, err) == (2, "")
+    assert out.startswith(
+        "ERROR (LOCATOR_REFRESH_UNSUPPORTED): rehash cannot accept new bytes for 'b':"
+    )
+    assert (root / "runevidence.json").read_bytes() == before
 
 
 def test_run_claim_lineage_serialize_object_locator_json(tmp_path, capsys):
@@ -296,7 +299,7 @@ def test_all_26_routes_stay_total_on_object_locator(tmp_path, capsys):
         if route == "conditions":
             assert "UNSUPPORTED_VERSION" not in out
         if route == "rehash":
-            assert out == REFRESH_TEXT
+            assert out.startswith(REFRESH_PREFIX)
         if route in ("run", "claim", "lineage"):
             assert _one_json(out)
 
@@ -308,3 +311,50 @@ def test_scalar_locator_diagnostic_keeps_the_result_location():
     (error,) = caught.value.errors()
     assert error["loc"] == ("results", 0, "locator")
     assert _issue_location(error["loc"]) == "/results/0/locator"
+
+
+def test_rehash_accepts_an_unrelated_artifact_despite_an_object_locator(
+    tmp_path, capsys
+):
+    root = tmp_path / "exp"
+    root.mkdir()
+    a = b'{"val": 0.9}\n'
+    b = b'{"val": 0.9}\n'
+    (root / "a.json").write_bytes(a)
+    (root / "b.jsonl").write_bytes(b)
+    (root / "notes.md").write_bytes(b"first\n")
+    document = {
+        "schema_version": "0.3",
+        "project": {"id": "p", "name": "P"},
+        "runs": [{"id": "run", "name": "Run"}],
+        "artifacts": [
+            {"id": "a", "path": "a.json", "sha256": hashlib.sha256(a).hexdigest(), "size_bytes": len(a)},
+            {"id": "b", "path": "b.jsonl", "sha256": hashlib.sha256(b).hexdigest(), "size_bytes": len(b)},
+            {"id": "notes", "path": "notes.md", "sha256": hashlib.sha256(b"first\n").hexdigest(), "size_bytes": 6},
+        ],
+        "results": [
+            {
+                "id": "ra", "run_id": "run", "name": "val", "value": 0.9,
+                "artifact_id": "a", "locator": "/val",
+            },
+            {
+                "id": "rb", "run_id": "run", "name": "val", "value": 0.9,
+                "artifact_id": "b",
+                "locator": {"kind": "jsonl", "line": 1, "pointer": "/val"},
+            },
+        ],
+        "evidence": [],
+    }
+    (root / "runevidence.json").write_text(
+        dump_manifest(Manifest.model_validate(document)), encoding="utf-8"
+    )
+    (root / "notes.md").write_bytes(b"second\n")
+
+    code, out, err = _run(capsys, ["rehash", str(root), "notes"])
+    assert (code, err) == (0, "")
+    updated = json.loads((root / "runevidence.json").read_text(encoding="utf-8"))
+    notes = next(item for item in updated["artifacts"] if item["id"] == "notes")
+    assert notes["sha256"] == hashlib.sha256(b"second\n").hexdigest()
+
+    code, out, err = _run(capsys, ["validate", str(root)])
+    assert code == 0, out

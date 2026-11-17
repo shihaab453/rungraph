@@ -1769,17 +1769,15 @@ def _short(digest: Optional[str]) -> str:
     return digest[:12] + "..." if digest else "none"
 
 
-def _locator_refresh_unsupported() -> int:
-    print(
-        "ERROR (LOCATOR_REFRESH_UNSUPPORTED): rehash cannot refresh a "
-        "manifest that contains an object locator. Nothing was written."
-    )
+def _locator_refresh_unsupported(exc: Exception) -> int:
+    detail = str(exc) or "rehash cannot refresh an artifact read through a structured locator."
+    print(f"ERROR (LOCATOR_REFRESH_UNSUPPORTED): {detail} Nothing was written.")
     return EXIT_INVALID
 
 
 def _edit_error(exc: Exception) -> int:
     if getattr(exc, "code", None) == "LOCATOR_REFRESH_UNSUPPORTED":
-        return _locator_refresh_unsupported()
+        return _locator_refresh_unsupported(exc)
     print(f"ERROR: {exc}\nNothing was written.")
     return EXIT_INVALID
 
