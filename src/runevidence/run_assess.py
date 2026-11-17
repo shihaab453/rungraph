@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import run_comparability
+from . import comparability, run_comparability
 from .checks import run_checks
 from .findings import Code, Severity
 from .manifest import ManifestLoadError, load_manifest
@@ -42,21 +42,26 @@ _UNVERIFIED_CODES = {
     Code.result_unverifiable,
     Code.locator_unverified,
     Code.locator_no_digest,
-    Code.artifact_changed,
-}
-_FAILED_CODES = {
-    Code.result_value_mismatch,
-    Code.locator_mismatch,
     Code.locator_kind_mismatch,
     Code.locator_unreadable,
     Code.locator_unsupported_value,
+    Code.locator_mismatch,
     Code.directory_locator_unsupported,
+    Code.artifact_changed,
 }
-_UNREADABLE_SOURCE_CODES = {
-    Code.missing_file,
-    Code.not_a_file,
-    Code.path_escapes_root,
-}
+# Only a completed value comparison that found a different value is "failed".
+# A locator that cannot be used or read is "unverified", never a mismatch.
+_FAILED_CODES = {Code.result_value_mismatch}
+
+
+def _artifact_errors(findings, artifact_id: Optional[str]) -> list:
+    if artifact_id is None:
+        return []
+    return [
+        finding
+        for finding in findings
+        if finding.severity == Severity.error and finding.subject == artifact_id
+    ]
 
 
 def _result_state(manifest, result_id: str, findings) -> dict:
@@ -88,13 +93,7 @@ def _result_state(manifest, result_id: str, findings) -> dict:
             manifest.schema_version in SUMMARY_SCHEMAS
             and summary_shape(manifest, result)
         ):
-            source_errors = [
-                finding
-                for finding in findings
-                if finding.severity == Severity.error
-                and finding.subject == result.artifact_id
-                and finding.code in _UNREADABLE_SOURCE_CODES
-            ]
+            source_errors = _artifact_errors(findings, result.artifact_id)
             if source_errors:
                 return {
                     "id": result_id,
@@ -120,13 +119,7 @@ def _result_state(manifest, result_id: str, findings) -> dict:
             "state": "unverified",
             "reason": "directory-artifact",
         }
-    source_errors = [
-        finding
-        for finding in findings
-        if finding.severity == Severity.error
-        and finding.subject == result.artifact_id
-        and finding.code in _UNREADABLE_SOURCE_CODES
-    ]
+    source_errors = _artifact_errors(findings, result.artifact_id)
     if source_errors:
         return {
             "id": result_id,
@@ -170,7 +163,16 @@ def assess(
         if conditions == "unavailable":
             error = outcome.document.get("error")
             code = error.get("code") if isinstance(error, dict) else None
-            conditions_error = code if isinstance(code, str) else "INTERNAL_ERROR"
+            if isinstance(code, str):
+                conditions_error = code
+            else:
+                core = outcome.document.get("core")
+                decision = core.get("decision") if isinstance(core, dict) else None
+                conditions_error = (
+                    "INSUFFICIENT_EVIDENCE"
+                    if decision == comparability.INSUFFICIENT
+                    else "INTERNAL_ERROR"
+                )
 
     baseline_report = run_checks(baseline_loaded, enable_directory_artifacts=directory_artifacts)
     target_report = run_checks(target_loaded, enable_directory_artifacts=directory_artifacts)

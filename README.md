@@ -555,9 +555,11 @@ results that are not verifiable MLflow summaries), and non-comparable conditions
 
 The JSON document names `results.baseline` and `results.target` with a state of `verified`,
 `unverified`, `failed` or `missing` and a fixed reason code; `values_verified` is true only
-when both are `verified`. `conditions_error` names a closed comparability failure code when
-the conditions verdict is unavailable, including `INTERNAL_ERROR` for an unexpected internal
-failure. The text output prints the same three facts. A recorded-only comparison is still
+when both are `verified`. `failed` means a completed comparison found a different value;
+unreadable, skipped, unusable or unsupported sources are `unverified`, never `failed`.
+`conditions_error` names a closed comparability failure code when the conditions verdict is
+unavailable, including `INSUFFICIENT_EVIDENCE` for ordinary missing evidence and
+`INTERNAL_ERROR` for an unexpected internal failure. The text output prints the same three facts. A recorded-only comparison is still
 available through `comparability`/`compare`; `assess` does not claim that a recorded value was
 checked when it was not. The verdict is consistency evidence, not scientific truth or a fair
 comparison.

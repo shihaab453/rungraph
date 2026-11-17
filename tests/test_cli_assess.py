@@ -6,6 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from runevidence.cli import main
 
 
@@ -289,3 +291,72 @@ def test_a_known_comparability_error_code_is_preserved(tmp_path: Path, monkeypat
     assert outcome.document["conditions"] == "unavailable"
     assert outcome.document["conditions_error"] == "UNSUPPORTED_VERSION"
     assert outcome.exit_code == 1
+
+
+def test_an_unreadable_source_is_never_verified(tmp_path: Path, capsys):
+    import os
+
+    if os.name != "posix":
+        pytest.skip("permission bits are POSIX-only")
+    baseline = make_member(tmp_path, "base")
+    target = make_member(tmp_path, "target")
+    metrics = target / "metrics.json"
+    metrics.chmod(0)
+    try:
+        code, out = run_assess(baseline, target, capsys, "--json")
+    finally:
+        metrics.chmod(0o600)
+    data = json.loads(out)
+    assert code == 1
+    assert data["results"]["target"]["state"] == "unverified"
+    assert data["results"]["target"]["reason"] in {
+        "locator-unreadable",
+        "missing-file",
+    }
+    assert data["values_verified"] is False
+
+
+def test_a_changed_source_that_still_matches_is_not_verified(tmp_path: Path, capsys):
+    baseline = make_member(tmp_path, "base")
+    target = make_member(tmp_path, "target")
+    (target / "metrics.json").write_bytes(b'{"accuracy": 0.9, "note": "x"}\n')
+
+    code, out = run_assess(baseline, target, capsys, "--json")
+    data = json.loads(out)
+    assert code == 1
+    assert data["results"]["target"]["state"] == "unverified"
+    assert data["results"]["target"]["reason"] == "hash-mismatch"
+    assert data["values_verified"] is False
+
+
+def test_insufficient_conditions_are_not_an_internal_error(tmp_path: Path, capsys):
+    baseline = make_member(tmp_path, "base")
+    target = make_member(tmp_path, "target")
+    path = target / "runevidence.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    del document["runs"][0]["conditions"]["evaluation_split"]
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    code, out = run_assess(baseline, target, capsys, "--json")
+    data = json.loads(out)
+    assert code == 1
+    assert data["conditions"] == "unavailable"
+    assert data["conditions_error"] == "INSUFFICIENT_EVIDENCE"
+    assert data["conditions_error"] != "INTERNAL_ERROR"
+
+
+def test_a_schema_0_3_unsupported_locator_is_unverified(tmp_path: Path, capsys):
+    baseline = make_member(tmp_path, "base")
+    target = make_member(tmp_path, "target")
+    path = target / "runevidence.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["schema_version"] = "0.3"
+    document["results"][0]["artifact_id"] = "data"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    code, out = run_assess(baseline, target, capsys, "--json")
+    data = json.loads(out)
+    assert code == 1
+    assert data["results"]["target"]["state"] == "unverified"
+    assert data["results"]["target"]["reason"] == "locator-kind-mismatch"
+    assert data["values_verified"] is False
