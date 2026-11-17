@@ -23,6 +23,7 @@ from .workspace import (
 )
 from .workspace_consumers import (
     compare_data,
+    graph_data,
     impact_data,
     leaderboard_data,
     matrix_data,
@@ -221,22 +222,8 @@ def cmd_graph(args: argparse.Namespace) -> int:
             print(f'  "{edge.source}" -> "{edge.target}" [label="{edge.relation}"];')
         print("}")
         return EXIT_EVIDENCE if args.fail_on_unresolved and graph.unresolved else EXIT_OK
-    data = {
-        "format": "rungraph-graph",
-        "version": "0.1",
-        "nodes": [
-            {"id": node.id, "kind": node.kind, "member": node.member, "status": node.status, "label": node.label}
-            for node in graph.nodes.values()
-        ],
-        "edges": [
-            {"source": edge.source, "target": edge.target, "relation": edge.relation, "origin": edge.origin}
-            for edge in graph.edges
-        ],
-        "context": graph.context,
-        "cycles": graph.cycles,
-        "unresolved": graph.unresolved,
-        "exit_code": EXIT_EVIDENCE if args.fail_on_unresolved and graph.unresolved else EXIT_OK,
-    }
+    data = graph_data(loaded, graph, detail=args.detail)
+    data["exit_code"] = EXIT_EVIDENCE if args.fail_on_unresolved and graph.unresolved else EXIT_OK
     _print_json(data)
     return data["exit_code"]
 
@@ -652,6 +639,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("graph", help="print the workspace graph")
     p.add_argument("root", nargs="?", default=".")
     p.add_argument("--format", choices=("json", "dot"), default="json")
+    p.add_argument(
+        "--detail",
+        action="store_true",
+        help="include recorded object data on JSON nodes",
+    )
     p.add_argument("--fail-on-unresolved", action="store_true")
     p.set_defaults(func=cmd_graph)
 
