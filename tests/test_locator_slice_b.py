@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import sys
 from pathlib import Path
 
 import pytest
@@ -588,6 +589,7 @@ def test_targeted_size_mismatch_with_matching_digest_is_reported(tmp_path):
     assert "result-value-mismatch" not in _codes(report)
 
 
+@pytest.mark.skipif(sys.platform == "darwin", reason="directory scanning is Linux-only")
 @pytest.mark.parametrize("flag", [False, True])
 def test_targeted_missing_directory_keeps_normal_finding(tmp_path, flag):
     root = tmp_path / f"targeted-directory-{flag}"
@@ -607,6 +609,7 @@ def test_targeted_missing_directory_keeps_normal_finding(tmp_path, flag):
     assert "claim-at-risk" in _codes(report)
 
 
+@pytest.mark.skipif(sys.platform == "darwin", reason="directory scanning is Linux-only")
 def test_targeted_wrong_digest_directory_keeps_normal_finding(tmp_path):
     root = tmp_path / "targeted-directory-digest"
     _write(
@@ -621,6 +624,7 @@ def test_targeted_wrong_digest_directory_keeps_normal_finding(tmp_path):
     assert "directory-locator-unsupported" in _codes(report)
 
 
+@pytest.mark.skipif(sys.platform == "darwin", reason="directory scanning is Linux-only")
 def test_targeted_matching_directory_only_adds_the_locator_finding(tmp_path):
     from runevidence.directory_scanner import scan_directory
 
