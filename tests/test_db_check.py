@@ -42,3 +42,20 @@ def test_db_check_detects_relationship_and_reference_drift(tmp_path: Path, capsy
     assert main(["db-check", str(manifest), "--db", str(database), "--json"]) == 1
     data = json.loads(capsys.readouterr().out)
     assert any(item["table"] == "relationships" for item in data["mismatches"])
+
+
+def test_db_check_detects_value_drift(tmp_path: Path, capsys):
+    import sqlite3
+    manifest = Path("examples/generic-experiment")
+    database = tmp_path / "cache.sqlite"
+    assert main(["db-export", str(manifest), "--output", str(database)]) == 0
+    capsys.readouterr()
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute("update results set value='0.1' where rowid=1")
+        connection.commit()
+    finally:
+        connection.close()
+    assert main(["db-check", str(manifest), "--db", str(database), "--json"]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert any(item["table"] == "results" for item in data["mismatches"])
