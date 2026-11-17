@@ -303,6 +303,19 @@ class ClaimState:
         return "uncited"
 
 
+def _node_belongs_to_failed_member(node: Node, failed_members: frozenset[str] | set[str]) -> bool:
+    """True only for objects owned by a member, never a workspace claim node.
+
+    A workspace claim's ``member`` field holds the workspace ID, which may
+    coincidentally equal a failed member ID. Claims are not member content, so
+    they are excluded; their own citations carry the failure state."""
+    return (
+        node.kind in OBJECT_KINDS
+        and node.member is not None
+        and node.member in failed_members
+    )
+
+
 def _finding_touches(findings: dict[str, list[Finding]], node: str) -> bool:
     return any(item.severity == Severity.error for item in findings.get(node, ()))
 
@@ -453,7 +466,7 @@ def claim_states(
                     labels.add("unresolved")
                     labels.add("at-risk")
                     continue
-                if node.member is not None and node.member in failed_members:
+                if _node_belongs_to_failed_member(node, failed_members):
                     labels.add("at-risk")
                 if node.kind in ("artifact", "run", "project"):
                     continue
@@ -488,7 +501,7 @@ def claim_states(
                 labels.add("at-risk")
             if any(
                 graph.nodes.get(node) is not None
-                and graph.nodes[node].member in failed_members
+                and _node_belongs_to_failed_member(graph.nodes[node], failed_members)
                 for node in whole
             ):
                 labels.add("at-risk")

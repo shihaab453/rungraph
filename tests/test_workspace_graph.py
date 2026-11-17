@@ -509,3 +509,51 @@ def test_a_workspace_claim_citing_a_failed_member_result_is_at_risk(tmp_path: Pa
     workspace_claim = next(item for item in states if item.member is None)
     assert "at-risk" in workspace_claim.labels
     assert "supported" not in workspace_claim.labels
+
+
+def test_a_workspace_id_matching_a_failed_member_does_not_taint_healthy_claims(
+    tmp_path: Path,
+):
+    root = make_workspace(tmp_path)
+    healthy = root / "b"
+    healthy.mkdir()
+    healthy_manifest = dict(MANIFEST)
+    healthy_manifest["results"] = [
+        {"id": "score", "run_id": "r", "name": "score", "value": 2}
+    ]
+    (healthy / "runevidence.json").write_text(
+        json.dumps(healthy_manifest), encoding="utf-8"
+    )
+    document = json.loads((root / WORKSPACE_FILENAME).read_text(encoding="utf-8"))
+    document["id"] = "a"
+    document["members"] = [
+        {"id": "a", "path": "a"},
+        {"id": "b", "path": "b"},
+    ]
+    document["claims"] = [
+        {
+            "id": "clean",
+            "claim": "b's score is recorded",
+            "supports": [{"member": "b", "id": "score"}],
+            "contradicts": [],
+        },
+        {
+            "id": "nested",
+            "claim": "clean still holds",
+            "supports": [{"claim": "clean"}],
+            "contradicts": [],
+        },
+    ]
+    (root / WORKSPACE_FILENAME).write_text(json.dumps(document), encoding="utf-8")
+    loaded = load_workspace(root)
+    graph = build_graph(loaded)
+    (root / "a" / "runevidence.json").write_text("{not json", encoding="utf-8")
+
+    checks = run_member_checks(loaded)
+    states = claim_states(loaded, graph, checks["findings"], checks["failed"])
+
+    labels = {item.id: item.labels for item in states if item.member is None}
+    assert checks["failed"] == {"a"}
+    assert "supported" in labels["clean"]
+    assert "supported" in labels["nested"]
+    assert "at-risk" not in labels["nested"]
