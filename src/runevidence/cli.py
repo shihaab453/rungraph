@@ -514,7 +514,32 @@ def cmd_matrix(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """Show a run's recorded associations without opening artifact files."""
+    """Show or author one recorded run without opening artifact files."""
+    if args.add or args.edit or args.remove:
+        if args.remove:
+            return _author_manifest(
+                args, lambda raw: authoring.remove_run(raw, args.id), f"remove run {args.id}"
+            )
+        entry = _read_authoring_entry(args)
+        if entry is None:
+            return EXIT_INVALID
+        if args.add:
+            return _author_manifest(
+                args,
+                lambda raw: authoring.add_run(raw, entry),
+                f"add run {entry.get('id')}",
+            )
+        entry_id = _authoring_entry_id(args, entry)
+        if entry_id is None:
+            return EXIT_INVALID
+        return _author_manifest(
+            args,
+            lambda raw: authoring.edit_run(raw, entry_id, entry),
+            f"edit run {entry_id}",
+        )
+    if args.id is None:
+        print("ERROR: run needs --id, or --add/--edit/--remove. Nothing was written.")
+        return EXIT_INVALID
     loaded = _load_or_report(args.path, args.json)
     if loaded is None:
         return EXIT_INVALID
@@ -2816,9 +2841,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="machine-readable metric matrix")
     p.set_defaults(func=cmd_matrix)
 
-    p = sub.add_parser("run", help="show recorded results, artifacts and claims for one run (no artifact checks)")
+    p = sub.add_parser("run", help="show or author one recorded run")
     p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")
-    p.add_argument("--id", required=True, metavar="RUN_ID", help="run ID to inspect")
+    p.add_argument("--id", metavar="RUN_ID", help="run ID to inspect or remove")
+    actions = p.add_mutually_exclusive_group()
+    actions.add_argument("--add", action="store_true", help="add the run in --file")
+    actions.add_argument("--edit", action="store_true", help="edit the run in --file")
+    actions.add_argument("--remove", action="store_true", help="remove --id")
+    p.add_argument("--file", help="one JSON object; see docs/authoring-files.md")
+    p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true", help="machine-readable run detail")
     p.set_defaults(func=cmd_run)
 

@@ -177,8 +177,8 @@ HISTORICAL_READER_DIGEST_23 = (
 # != plugin safety.
 CLI_HASH = frozenset({
     # Single-manifest stats (2026-11-17): 33-route surface.
-    "d7c81387e85bb8210ea370be883852e08e674bf12a7326eb89b0537efd1ca7e3",  # LF
-    "970d97683e909562980052fb5b06a0cdd20d8a0a0629425c66df41e43b788c3f",  # CRLF
+    "c6608f836f2ed4af4299e114743e024c2f9ba216d73042367ae57c36d69b22a7",  # LF
+    "d93bb6e5baec15e403b38bb6972ba09c03b054a6c1d48cca7c44a961d9d2e81f",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.
@@ -230,6 +230,7 @@ def test_pinned_parser_structure():
     calls = [ast.unparse(n.func) for n in ast.walk(build) if isinstance(n, ast.Call)]
     assert set(calls) == {"argparse.ArgumentParser", "parser.add_argument", "parser.add_subparsers",
                           "sub.add_parser", "p.add_argument", "p.set_defaults", "p.add_mutually_exclusive_group",
+                          "actions.add_argument",
                           "vol.add_argument", "add_check_args", "add_edit_args", "Path"}
     assert not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id.startswith("cmd_")
                    for n in ast.walk(build))

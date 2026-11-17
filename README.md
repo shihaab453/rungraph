@@ -371,7 +371,7 @@ below accepts `--json` unless noted, and exits `2` on a load or usage failure.
 | `runevidence leaderboard PATH --metric NAME --direction max\|min` | Rank runs by one recorded numeric metric; `--top` limits the list (1-1000); `--latest` ranks the highest `<name> @ <step>` value per run. |
 | `runevidence matrix PATH` | Show recorded metrics side by side for selected runs (`--run`, `--metric`); `--latest` collapses `<name> @ <step>` names to one column. |
 | `runevidence stats PATH` | Per-metric row/missing/non-numeric/ambiguous counts plus min, max, mean, median and population standard deviation (`--metric`, `--json`). |
-| `runevidence run PATH --id RUN_ID` | Show one run's recorded results, artifacts and claims. |
+| `runevidence run PATH --id RUN_ID` | Show one run's recorded results, artifacts and claims. Author one run with `--add`, `--edit`, `--remove` and `--file RUN.json` (with `--dry-run`/`--json`), merging only name, start time, params, metadata and conditions. |
 | `runevidence claim PATH --id CLAIM_ID` | Show one claim's recorded support and contradiction targets. |
 | `runevidence lineage PATH --id CLAIM_ID` | Trace a claim's recorded upstream provenance, naming unresolved nodes and cycles. |
 | `runevidence impact PATH --id OBJECT_ID` | Find claims potentially affected by one recorded object, with the dependency path. |
