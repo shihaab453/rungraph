@@ -410,4 +410,7 @@ def test_directory_rehash_is_not_blocked_by_an_unrelated_object_locator(
 
     code, out, err = _run(capsys, ["rehash", str(root), "data", "--directory", "--dry-run"])
     assert "INTERNAL_ERROR" not in out
+    # A host without directory-artifact support may refuse for its own reason,
+    # but an unrelated object locator must never trigger the blanket refusal.
+    assert "LOCATOR_REFRESH_UNSUPPORTED" not in out
     assert (code, err) in ((0, ""), (2, ""))
