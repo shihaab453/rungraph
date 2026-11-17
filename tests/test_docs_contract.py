@@ -148,3 +148,13 @@ def test_every_public_route_flag_is_named_in_the_reference():
                     if option in ("-h", "--help"):
                         continue
                     assert option in document, f"{prefix} {route}: {option} is not documented"
+
+
+def test_qualification_and_completion_documents_stay_distinct():
+    qualification = (REPO / "docs" / "qualification.md").read_text(encoding="utf-8")
+    completion = (REPO / "docs" / "product-completion.md").read_text(encoding="utf-8")
+    assert qualification.startswith("# RunGraph qualification record")
+    assert completion.startswith("# RunGraph product completion contract")
+    assert "## Capability status" in qualification
+    assert "## 2. Capability matrix" in completion
+    assert qualification != completion
