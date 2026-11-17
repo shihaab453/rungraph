@@ -14,7 +14,7 @@ platform bounds, F3 and B6, listed under Limitations.
 | --- | --- | --- |
 | A1 frozen versioned schemas, migration | COMPLETE | schemas 0.1–0.11; `tests/test_schema_freeze.py`, `test_cli_migrate.py` |
 | A2 generic ingestion | COMPLETE | generic adapter; empty scans refuse with exit 2 |
-| A3 Sacred/Hydra/MLflow/TensorBoard adapters | COMPLETE | adapter packages and tests; Sacred JSON-pointer metrics, TF2 media 0.10 |
+| A3 Keras/Sacred/Hydra/MLflow/TensorBoard adapters | COMPLETE | adapter packages and tests; Sacred JSON-pointer metrics, TF2 media 0.10 |
 | A4 result/claim/evidence/relationship authoring | COMPLETE | `runevidence result/evidence/relationship`; `tests/test_authoring.py` |
 | A5 condition authoring 0.2–0.11 | COMPLETE | `conditions`; `tests/test_cli_conditions.py` |
 | A6 source/environment capture | COMPLETE | `capture`; `tests/test_cli_capture.py` |
@@ -39,11 +39,11 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,261 passed, 138 skipped on Python 3.12; 6,258 passed, 141 skipped on
+- **Full suite**: 6,269 passed, 138 skipped on Python 3.12; 6,266 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
-- **Wheel smoke**: all five wheels build, install into a clean venv, and run
+- **Wheel smoke**: all six wheels build, install into a clean venv, and run
   `runevidence init/validate` and `rungraph discover/init/validate`.
 - **Schema 0.11 (P3)**: structured TF2 `[k,3]` histograms, covered by
   `tests/test_schema_0_11.py`, `test_schema_0_11_migration.py`, `test_cli_tf2_histograms.py`
@@ -66,7 +66,7 @@ checked both the exit code and the visible output:
 
 | Class | Condition that should fail | Observed |
 | --- | --- | --- |
-| `init` (generic, Sacred, Hydra, MLflow, TensorBoard) | empty folder | exit 2, no manifest written |
+| `init` (generic, Keras, Sacred, Hydra, MLflow, TensorBoard) | empty folder | exit 2, no manifest written |
 | `validate` / `inspect` | changed value in a tracked file | hash mismatch, value mismatch and the affected claims at risk; exit 1 |
 | `validate-batch` | one changed manifest | that manifest fails, aggregate exit 1 |
 | `rehash` / `add` | unknown target, duplicate ID, already-tracked path | exit 2, nothing written |
@@ -153,7 +153,7 @@ cycles, over-cap readers, malformed hooks, stale documents, refused writes and e
 | 4. Guarantees fail when broken | 12 mutation probes for RE-10/ML-1; negative-path suites; the false-clean probe above |
 | 5. Known correctness problems resolved or bounded | RE-10 and ML-1 fixed; F3 and directory artifacts bounded as stated |
 | 6. Realistic multi-run, multi-tool experiment with corruption and propagation | `examples/dogfood-sklearn` (two real models), `examples/dogfood-mlp-sweep` (three-job Hydra sweep with two claims), `examples/workspace-study` (composition); the end-to-end harness corrupts a value and follows the claim-at-risk propagation |
-| 7. Clean install, packaging and platform matrix | `wheel-smoke` (clean venv, five wheels, both console scripts); six required CI jobs on Ubuntu and Windows, Python 3.10 and 3.14, minimum dependencies on 3.10 |
+| 7. Clean install, packaging and platform matrix | `wheel-smoke` (clean venv, six wheels, both console scripts); six required CI jobs on Ubuntu and Windows, Python 3.10 and 3.14, minimum dependencies on 3.10 |
 | 8. Evidence recorded and reproducible | this page, the exact commands below, and the full suite counts |
 | 9. Limitations distinguished | the Limitations section, the README platform section, and the experimental comparability verdict |
 | 10. No blocker contradicts the statuses | no unresolved blocker is recorded; the false-clean probe is closed |
@@ -183,7 +183,7 @@ cycles, over-cap readers, malformed hooks, stale documents, refused writes and e
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" -e ./packages/runevidence-tensorboard \
   -e ./packages/runevidence-mlflow -e ./packages/runevidence-hydra \
-  -e ./packages/runevidence-sacred
+  -e ./packages/runevidence-sacred -e ./packages/runevidence-keras
 python -m pytest
 runevidence validate examples/tensorboard-scalars --strict
 rungraph validate examples/workspace-study --strict

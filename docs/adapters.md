@@ -103,6 +103,21 @@ package stops installing.
 Any folder. Hashes every file; each `runs/<name>/` subfolder becomes a run.
 No params, results or claims.
 
+### `keras` (`packages/runevidence-keras`)
+
+A Keras history CSV saved with `index_label="epoch"` holds one run's per-epoch metrics. The
+adapter records every file as a hashed artifact and every numeric metric cell as a schema 0.4
+result with a `csv-cell` locator; names are `<metric> @ <epoch>`. It uses the strict CSV profile
+that verification uses, so a malformed file is refused rather than partially imported. Keras'
+default `to_csv` writes an empty index header, which the strict profile cannot address; save with
+`index_label="epoch"`.
+
+```bash
+pip install -e . -e ./packages/runevidence-keras
+runevidence init runs/ --adapter keras
+runevidence validate runs/ --strict
+```
+
 ### `sacred` (`packages/runevidence-sacred`)
 
 A Sacred `FileStorageObserver` base directory holds one folder per run with `run.json`,

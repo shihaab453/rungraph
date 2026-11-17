@@ -29,3 +29,9 @@ def test_sacred_file_store_example_is_clean(capsys):
     root = REPO / "examples/sacred-file-store/runs"
     assert main(["validate", str(root), "--strict"]) == 0
     assert "0 errors, 0 warnings" in capsys.readouterr().out
+
+
+def test_keras_history_example_is_clean(capsys):
+    root = REPO / "examples/keras-history"
+    assert main(["validate", str(root), "--strict"]) == 0
+    assert "0 errors, 0 warnings" in capsys.readouterr().out

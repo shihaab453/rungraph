@@ -1087,6 +1087,9 @@ read-only steps: `discover(root)` then `extract(root, discovery)`. The
 `generic` adapter is built in. Tool adapters are separate packages, so core
 stays free of tool dependencies:
 
+- **`keras`** ([packages/runevidence-keras](https://github.com/shihaab453/rungraph/tree/main/packages/runevidence-keras)):
+  reads a Keras history CSV (`index_label="epoch"`), recording numeric metric cells as
+  `csv-cell` results. See `examples/keras-history/`.
 - **`sacred`** ([packages/runevidence-sacred](https://github.com/shihaab453/rungraph/tree/main/packages/runevidence-sacred)):
   reads a Sacred `FileStorageObserver` base directory: one run per folder containing
   `run.json`, the configuration as params, and scalar metric values with JSON Pointer
@@ -1098,7 +1101,7 @@ stays free of tool dependencies:
 
   ```bash
   # From the repository root, install both local packages together.
-  pip install -e . -e ./packages/runevidence-hydra -e ./packages/runevidence-sacred
+  pip install -e . -e ./packages/runevidence-hydra -e ./packages/runevidence-sacred -e ./packages/runevidence-keras
   runevidence init --adapter hydra path/to/project
   ```
 
@@ -1388,7 +1391,7 @@ capability status and completion criteria are recorded in
 [docs/product-completion.md](docs/product-completion.md).
 
 Delivered: versioned schemas 0.1–0.11 with frozen reading rules and migration;
-generic, Sacred, Hydra, MLflow file-store and TensorBoard adapters; file, value and
+generic, Keras, Sacred, Hydra, MLflow file-store and TensorBoard adapters; file, value and
 claim verification; batch validation; single-manifest analysis (run and claim
 detail, lineage, impact, coverage, review gates, fingerprints, comparison,
 metric matrix and leaderboard); guarded artifact, result, evidence,
@@ -1410,7 +1413,7 @@ records why.
 ## Development
 
 ```bash
-pip install -e ".[dev]" -e ./packages/runevidence-hydra -e ./packages/runevidence-mlflow -e ./packages/runevidence-sacred
+pip install -e ".[dev]" -e ./packages/runevidence-hydra -e ./packages/runevidence-mlflow -e ./packages/runevidence-sacred -e ./packages/runevidence-keras
 python -m pytest
 ```
 
