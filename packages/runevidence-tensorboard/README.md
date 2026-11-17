@@ -92,8 +92,18 @@ walk verified. Without either media flag, 0.5/0.6/0.7 output is unchanged.
 `init --include-histograms` also records legacy `Summary.Value.histo`
 (`HistogramProto`) summaries as structured `tensorboard-histogram` results and
 writes schema 0.7. Values carry finite per-bucket counts with at most 1,024
-buckets; malformed histogram entries are skipped, not fatal. TF2 `[k,3]` tensor
-histograms are not recorded. Without the flag, 0.5/0.6 output is unchanged.
+buckets; malformed histogram entries are skipped, not fatal. Without the flag,
+0.5/0.6 output is unchanged.
+
+`init --include-tf2-histograms` records TensorFlow 2 `tf.summary.histogram`
+`[k,3]` float64 tensors as schema 0.11 `tf2-histogram` values with a
+`tensorboard-tf2-histogram` locator. Each bucket is `{left, right, count}`;
+0-1,024 buckets are accepted. Classification is shape-based (the flag is an
+explicit assertion that `[k,3]` doubles are histograms), and malformed claims are
+skipped. A malformed claim that is still a valid 0.9 tensor keeps its
+plain-tensor occurrence, so migrated 0.9/0.10 locators keep their selection;
+with both flags that entry's plain-tensor digest is **not** recorded, which is
+the declared data loss of the shape reservation.
 
 ## Tag filtering
 

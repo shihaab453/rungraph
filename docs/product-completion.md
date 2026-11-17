@@ -69,11 +69,11 @@ committed examples and the scripted lifecycles in `tests/test_e2e_qualification.
 
 | ID | Capability | Status | Acceptance criterion | Evidence |
 | --- | --- | --- | --- | --- |
-| A1 | Versioned manifest, frozen schemas, migration | COMPLETE | every frozen schema has a model, committed schema, freeze pin and docs page; migration is explicit and never infers | schemas 0.1–0.10 are frozen and pinned; `test_schema_freeze.py`, `test_cli_migrate.py` |
+| A1 | Versioned manifest, frozen schemas, migration | COMPLETE | every frozen schema has a model, committed schema, freeze pin and docs page; migration is explicit and never infers | schemas 0.1–0.11 are frozen and pinned; `test_schema_freeze.py`, `test_cli_migrate.py` |
 | A2 | Generic folder ingestion | COMPLETE | a plain folder becomes a valid manifest with hashed artifacts and detected runs; a scan that finds nothing refuses with exit 2 instead of writing an empty manifest | generic adapter; dogfood examples; `tests/test_adapters.py::test_init_generic_refuses_an_empty_folder_and_writes_nothing` |
 | A3 | Tool adapters (Hydra, MLflow file store, TensorBoard) | COMPLETE | each adapter discovers its real layout and records hashes; a scan that finds no files aborts with exit 2 and writes nothing; unreadable or unsafe *contents* inside an accepted layout are recorded as hashed artifacts with the extracted value omitted and a note, never silently dropped. A TensorBoard folder with files but no event files records them as artifacts and reports zero runs by design | adapter packages; `test_adapter_unreadable_integration.py`, `test_hydra_adapter.py`, `test_tensorboard_adapter.py`; `examples/hydra-sweep`, `examples/mlflow-file-store`, `examples/tensorboard-scalars` |
 | A4 | Safe authoring of results, claims, evidence and relationships | COMPLETE | a user can add, edit and remove results, claims, evidence references and relationships from the CLI with validation, dry-run, stale-write protection and no hand-edited JSON | `runevidence result/evidence/relationship`; `tests/test_authoring.py` |
-| A5 | Run-condition authoring | COMPLETE | strict patch, presence rules, dry-run, refusal writes nothing; works on every schema generation that carries the condition fields | `conditions` accepts schemas 0.2–0.10; `tests/test_cli_conditions.py` |
+| A5 | Run-condition authoring | COMPLETE | strict patch, presence rules, dry-run, refusal writes nothing; works on every schema generation that carries the condition fields | `conditions` accepts schemas 0.2–0.11; `tests/test_cli_conditions.py` |
 | A6 | Code and environment provenance capture | COMPLETE | one command records the source revision (commit id) and an environment snapshot into the existing condition fields, offline. `source_revision` keeps its meaning; dirty state lives inside the environment snapshot. No environment variables or credentials are captured | `runevidence capture`; `tests/test_cli_capture.py` |
 | A7 | Safe mutation of an existing manifest | COMPLETE | byte-level stale-write detection on `add`, `rehash`, `migrate` and `conditions`, with atomic replacement; backup generations on `init --force`, `migrate` and `conditions`; cooperative admission lock where the host supports it; declared Windows limit. `init --force` regenerates with a backup but is not a compare-and-swap, and plain `add`/`rehash` do **not** keep a previous generation | `cli.py` `_finish_edit`, `_author_manifest`, `save_raw`, `_backup_existing`; `manifest.py` `save_manifest`; `test_edit.py`, `test_cli_writer_admission.py` |
 
@@ -97,7 +97,7 @@ committed examples and the scripted lifecycles in `tests/test_e2e_qualification.
 | C3 | Impact analysis | COMPLETE | the claims potentially affected by a recorded object are returned with the dependency path | `impact`; route tests |
 | C4 | Structural coverage review | COMPLETE | unsupported, contradicted and uncited claims are flagged with explainable reasons | `coverage`, `coverage-gate`; route tests |
 | C5 | Cross-run comparison, matrix and leaderboard | COMPLETE | recorded values align by name with explicit non-numeric/missing accounting and no fairness claim; single manifest only | `compare`, `matrix`, `leaderboard`; route tests |
-| C6 | Recorded-condition comparability | COMPLETE | five mandatory recorded conditions are compared for a named pair, with a stable preflight and a clearly experimental verdict, across 0.1–0.10 (0.1 through the legacy metadata projection, 0.2–0.10 through the first-class fields) | `comparability` and preflight accept 0.1–0.10; the verdict remains experimental; `tests/test_run_comparability.py`, `tests/test_cli_comparability_preflight.py` |
+| C6 | Recorded-condition comparability | COMPLETE | five mandatory recorded conditions are compared for a named pair, with a stable preflight and a clearly experimental verdict, across 0.1–0.11 (0.1 through the legacy metadata projection, 0.2–0.11 through the first-class fields) | `comparability` and preflight accept 0.1–0.11; the verdict remains experimental; `tests/test_run_comparability.py`, `tests/test_cli_comparability_preflight.py` |
 | C7 | Evidence-aware comparison | COMPLETE | a comparison states whether recorded conditions permit it *and* whether the compared results are backed by intact, verified evidence; missing or changed artifacts, failed source-value checks and unverifiable values change the outcome instead of being ignored | `runevidence assess`; `tests/test_cli_assess.py` |
 | C8 | Change analysis between recorded snapshots | COMPLETE | two recorded manifests can be compared for semantic equality (`fingerprint`, `fingerprint-compare`) and for review-relevant differences (`coverage-diff`, `impact-diff`, `review-diff`, `review-gate`), with exit codes and machine-readable output; documented in the README command reference | `run_fingerprint*.py`, `run_*_diff.py`, `run_review_gate.py`; route tests |
 
@@ -168,7 +168,7 @@ capability depends on it.
    format, never a change to a frozen manifest schema.
 6. **Condition and comparability coverage (A5, C6)** (delivered): condition authoring and the
    comparability preflight/verdict cover every schema generation that carries the condition
-   fields (0.2–0.10; 0.1 through the legacy metadata projection). This removed the gap that
+   fields (0.2–0.11; 0.1 through the legacy metadata projection). This removed the gap that
    kept the product's own adapters outside its comparison surface. No frozen reading rule or
    existing output changed.
 7. **Authoring (A4, D3)** (delivered): CLI authoring for results, claims, evidence references
@@ -196,9 +196,9 @@ capability depends on it.
 
 ### P3 — additional sophistication (permitted, not blocking)
 
-- TF2 `[k,3]` histograms, plugin-specific summaries, graph/run metadata, additional
-  adapters, richer comparison statistics, SQLite persistence (subject to its hold), extra
-  platform guarantees. TF2 media schema 0.10 is delivered.
+- Plugin-specific summaries, graph/run metadata, additional adapters, richer comparison
+  statistics, SQLite persistence (subject to its hold), extra platform guarantees. TF2 media
+  schema 0.10 and TF2 `[k,3]` histogram schema 0.11 are delivered.
 
 ### Documentation and truthfulness
 

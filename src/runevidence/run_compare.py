@@ -90,7 +90,7 @@ def _structured_flag(row: dict[str, Any], side: str, value: Any, *, allow: bool)
     if not allow:
         return
     kind = _kind(value)
-    if kind in ("histogram", "image", "audio", "tensor"):
+    if kind in ("histogram", "tf2-histogram", "image", "audio", "tensor"):
         row[f"{side}_{kind}"] = True
 
 
@@ -197,7 +197,7 @@ def _display_value(
 def _side_flag(row: dict[str, Any], side: str) -> bool:
     return any(
         row.get(f"{side}_{kind}")
-        for kind in ("histogram", "image", "audio", "tensor")
+        for kind in ("histogram", "tf2-histogram", "image", "audio", "tensor")
     )
 
 

@@ -316,6 +316,7 @@ class _TensorState:
         "dtype",
         "dim_count",
         "first_dim_size",
+        "second_dim_size",
         "unknown_rank",
         "content_start",
         "content_end",
@@ -323,6 +324,8 @@ class _TensorState:
         "float_value",
         "double_count",
         "double_value",
+        "hist_values",
+        "hist_overflow",
         "string_count",
         "string_start",
         "string_end",
@@ -334,6 +337,7 @@ class _TensorState:
         self.dtype = 0
         self.dim_count = 0
         self.first_dim_size = 0
+        self.second_dim_size = 0
         self.unknown_rank = False
         self.content_start = -1
         self.content_end = -1
@@ -341,6 +345,8 @@ class _TensorState:
         self.float_value = 0.0
         self.double_count = 0
         self.double_value = 0.0
+        self.hist_values: list[float] = []
+        self.hist_overflow = False
         self.string_count = 0
         self.string_start = -1
         self.string_end = -1
@@ -383,6 +389,8 @@ def _parse_shape(
             state.dim_count += 1
             if state.dim_count == 1:
                 state.first_dim_size = size
+            elif state.dim_count == 2:
+                state.second_dim_size = size
             position = dim_end
         elif field_number == 3:  # unknown_rank
             if wire_type != 0:
@@ -452,6 +460,11 @@ def _parse_tensor(
                 if count and state.double_count == 0:
                     state.double_value = _F64.unpack_from(data, values_start)[0]
                 state.double_count += count
+                for offset in range(values_start, values_end, 8):
+                    if len(state.hist_values) >= 3073:
+                        state.hist_overflow = True
+                        break
+                    state.hist_values.append(_F64.unpack_from(data, offset)[0])
                 position = values_end
             elif wire_type == 1:
                 if end - position < 8:
@@ -459,6 +472,10 @@ def _parse_tensor(
                 if state.double_count == 0:
                     state.double_value = _F64.unpack_from(data, position)[0]
                 state.double_count += 1
+                if len(state.hist_values) >= 3073:
+                    state.hist_overflow = True
+                else:
+                    state.hist_values.append(_F64.unpack_from(data, position)[0])
                 position += 8
             else:
                 _refuse()
@@ -3561,3 +3578,165 @@ def scan_tensorboard_10(
         _tf2_results(tf2_image_states, tf2_image_requests),
         _tf2_results(tf2_audio_states, tf2_audio_requests),
     )
+
+
+# --- Schema 0.11: structured TF2 [k,3] histograms ---------------------------
+
+MAX_TF2_HISTOGRAM_BUCKETS = 1024
+
+
+@dataclass(frozen=True, slots=True)
+class Tf2HistogramRecord:
+    tag: bytes
+    step: int
+    buckets: tuple[dict[str, float], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Tf2HistogramSelection:
+    outcome: str
+    value: tuple[dict[str, float], ...] | None = None
+
+
+def _finalize_tf2_histogram(data, state) -> tuple[str, tuple[dict[str, float], ...] | None]:
+    """Classify one tensor state as a claimed TF2 histogram.
+
+    Returns ``("not_claimed", None)`` for a tensor the shape reservation does
+    not own, ``("bad", None)`` for a claimed but non-conforming histogram, and
+    ``("ok", buckets)`` for a recorded histogram.
+    """
+    if (
+        state.dtype != 2
+        or state.unknown_rank
+        or state.dim_count != 2
+        or state.second_dim_size != 3
+    ):
+        return "not_claimed", None
+    buckets_count = state.first_dim_size
+    if buckets_count < 0 or buckets_count > MAX_TF2_HISTOGRAM_BUCKETS:
+        return "bad", None
+    if state.float_count or state.string_count or state.string_wrong_wire or state.other_typed:
+        return "bad", None
+    content_length = 0
+    if state.content_start >= 0:
+        content_length = state.content_end - state.content_start
+    wanted = 3 * buckets_count
+    if content_length:
+        if content_length != 8 * wanted:
+            return "bad", None
+        values = list(
+            struct.unpack_from(f"<{wanted}d", data, state.content_start)
+        )
+    else:
+        if (
+            state.hist_overflow
+            or state.double_count != wanted
+            or len(state.hist_values) != wanted
+        ):
+            return "bad", None
+        values = state.hist_values
+    buckets: list[dict[str, float]] = []
+    for index in range(buckets_count):
+        left, right, count = values[3 * index : 3 * index + 3]
+        if not (math.isfinite(left) and math.isfinite(right) and math.isfinite(count)):
+            return "bad", None
+        if count < 0 or right < left:
+            return "bad", None
+        buckets.append({"left": left, "right": right, "count": count})
+    return "ok", tuple(buckets)
+
+
+def iter_supported_tf2_histograms(data):
+    """Yield every conforming TF2 ``[k,3]`` histogram in file order."""
+    for (
+        tag_start,
+        tag_end,
+        step,
+        kind,
+        simple_value,
+        tensor,
+        hist,
+        image,
+        audio,
+        tensor_value,
+        tf2_present,
+        tf2_result,
+    ) in _iter_winning_values_10(data):
+        if kind != 8 or tensor is None:
+            continue
+        tag = _tag_bytes(data, tag_start, tag_end)
+        status, buckets = _finalize_tf2_histogram(data, tensor)
+        if status == "ok":
+            yield Tf2HistogramRecord(tag=tag, step=step, buckets=buckets)
+
+
+def scan_tf2_histograms(data, requests):
+    """Select ``(tag, step, occurrence)`` TF2 histogram requests in one pass.
+
+    Occurrences count recorded conforming histograms only. The returned
+    outcomes follow the schema-0.11 ladder: value, missing, unsupported
+    encoding (a claimed but malformed shape), or unsupported value.
+    """
+    wanted: dict[tuple[bytes, int], set[int]] = {}
+    for tag, step, occurrence in requests:
+        wanted.setdefault((tag, step), set()).add(occurrence)
+    if not wanted:
+        return {}
+    state: dict[tuple[bytes, int], dict[str, object]] = {
+        key: {"conforming": 0, "malformed": 0, "tensor": 0, "other": 0, "values": {}}
+        for key in wanted
+    }
+    for (
+        tag_start,
+        tag_end,
+        step,
+        kind,
+        simple_value,
+        tensor,
+        hist,
+        image,
+        audio,
+        tensor_value,
+        tf2_present,
+        tf2_result,
+    ) in _iter_winning_values_10(data):
+        tag = _tag_bytes(data, tag_start, tag_end)
+        key = (tag, step)
+        slot = state.get(key)
+        if slot is None:
+            continue
+        if kind != 8 or tensor is None:
+            slot["other"] = int(slot["other"]) + 1
+            continue
+        status, buckets = _finalize_tf2_histogram(data, tensor)
+        if status == "ok":
+            occurrence = int(slot["conforming"])
+            slot["conforming"] = occurrence + 1
+            if occurrence in wanted[key]:
+                slot["values"][occurrence] = buckets
+        elif status == "bad":
+            slot["malformed"] = int(slot["malformed"]) + 1
+        else:
+            slot["tensor"] = int(slot["tensor"]) + 1
+    result: dict[tuple[bytes, int, int], Tf2HistogramSelection] = {}
+    for key, occurrences in wanted.items():
+        slot = state[key]
+        values = slot["values"]
+        for occurrence in occurrences:
+            if occurrence in values:
+                result[(key[0], key[1], occurrence)] = Tf2HistogramSelection(
+                    "value", values[occurrence]
+                )
+            elif int(slot["conforming"]) > 0:
+                result[(key[0], key[1], occurrence)] = Tf2HistogramSelection("missing")
+            elif int(slot["malformed"]) > 0:
+                result[(key[0], key[1], occurrence)] = Tf2HistogramSelection(
+                    "unsupported_encoding"
+                )
+            elif int(slot["tensor"]) > 0 or int(slot["other"]) > 0:
+                result[(key[0], key[1], occurrence)] = Tf2HistogramSelection(
+                    "unsupported_value"
+                )
+            else:
+                result[(key[0], key[1], occurrence)] = Tf2HistogramSelection("missing")
+    return result

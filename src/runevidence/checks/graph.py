@@ -22,6 +22,7 @@ from ..models import (
     SCHEMA_VERSION_0_8,
     SCHEMA_VERSION_0_9,
     SCHEMA_VERSION_0_10,
+    SCHEMA_VERSION_0_11,
     Manifest,
     RelationshipType as T,
 )
@@ -157,6 +158,7 @@ def check_graph(
             SCHEMA_VERSION_0_8,
             SCHEMA_VERSION_0_9,
             SCHEMA_VERSION_0_10,
+            SCHEMA_VERSION_0_11,
         )
         else "0.3"
     )

@@ -66,6 +66,7 @@ from runevidence.models import (
     SCHEMA_VERSION_0_8,
     SCHEMA_VERSION_0_9,
     SCHEMA_VERSION_0_10,
+    SCHEMA_VERSION_0_11,
     Artifact,
     AudioValue,
     HistogramValue,
@@ -76,6 +77,7 @@ from runevidence.models import (
     Manifest08,
     Manifest09,
     Manifest10,
+    Manifest11,
     Project,
     Result05,
     Result06,
@@ -83,6 +85,7 @@ from runevidence.models import (
     Result08,
     Result09,
     Result10,
+    Result11,
     Run,
     TensorboardAudioLocator,
     TensorboardHistogramLocator,
@@ -91,8 +94,10 @@ from runevidence.models import (
     TensorboardStringLocator,
     TensorboardTensorLocator,
     TensorboardTf2AudioLocator,
+    TensorboardTf2HistogramLocator,
     TensorboardTf2ImageLocator,
     TensorValue,
+    Tf2HistogramValue,
     is_own_file,
 )
 from runevidence.tag_filter import TagFilter, TagPatternTooExpensive
@@ -110,6 +115,8 @@ from runevidence.tensorboard_events import (
     iter_supported_summaries_08,
     iter_supported_summaries_09,
     iter_supported_summaries_10,
+    iter_supported_tf2_histograms,
+    Tf2HistogramRecord,
 )
 
 #: Per-manifest result budget and total tag-byte budget (RFC section 9).
@@ -131,6 +138,7 @@ TAG_MESSAGE_07 = "a scalar tag cannot be represented in schema 0.7; nothing was 
 TAG_MESSAGE_08 = "a scalar tag cannot be represented in schema 0.8; nothing was written"
 TAG_MESSAGE_09 = "a scalar tag cannot be represented in schema 0.9; nothing was written"
 TAG_MESSAGE_10 = "a scalar tag cannot be represented in schema 0.10; nothing was written"
+TAG_MESSAGE_11 = "a scalar tag cannot be represented in schema 0.11; nothing was written"
 BUDGET_MESSAGE = (
     "the selected TensorBoard scalars exceed the 10,000-result or 16 MiB tag limit; "
     "nothing was written"
@@ -150,6 +158,10 @@ BUDGET_MESSAGE_07 = (
 BUDGET_MESSAGE_08 = (
     "the selected TensorBoard summaries exceed the 10,000-result or 16 MiB tag limit; "
     "nothing was written"
+)
+BUDGET_MESSAGE_11 = (
+    "the selected TensorBoard summaries exceed the 10,000-result, 16 MiB tag or "
+    "16 MiB histogram-JSON limit; nothing was written"
 )
 COLLISION_MESSAGE = "a generated id collides with an existing id; nothing was written"
 NAME_MESSAGE = "a generated result name collides within a run; nothing was written"
@@ -174,6 +186,7 @@ class TensorboardAdapter(Adapter):
     supports_include_audio = True
     supports_include_tensors = True
     supports_include_tf2_media = True
+    supports_include_tf2_histograms = True
     description = (
         "TensorBoard log directories: one run per directory, selected scalars or summaries."
     )
@@ -197,7 +210,8 @@ class TensorboardAdapter(Adapter):
         include_audio: bool = False,
         include_tensors: bool = False,
         include_tf2_media: bool = False,
-    ) -> Manifest05 | Manifest06 | Manifest07 | Manifest08 | Manifest09 | Manifest10:
+        include_tf2_histograms: bool = False,
+    ) -> Manifest05 | Manifest06 | Manifest07 | Manifest08 | Manifest09 | Manifest10 | Manifest11:
         root = Path(root)
         paths = sorted(discovery.files)
         if not paths:
@@ -207,7 +221,11 @@ class TensorboardAdapter(Adapter):
             )
         event_paths = [path for path in paths if _tensorboard_path_matches(path)]
         _refuse_paths(paths, event_paths)
-        if include_tf2_media:
+        if include_tf2_histograms:
+            schema_version = SCHEMA_VERSION_0_11
+            result_type = Result11
+            manifest_type = Manifest11
+        elif include_tf2_media:
             schema_version = SCHEMA_VERSION_0_10
             result_type = Result10
             manifest_type = Manifest10
@@ -240,6 +258,7 @@ class TensorboardAdapter(Adapter):
             include_audio=include_audio,
             include_tensors=include_tensors,
             include_tf2_media=include_tf2_media,
+            include_tf2_histograms=include_tf2_histograms,
         )
         events: dict[str, _EventFile] = {}
         for rel in event_paths:
@@ -285,7 +304,7 @@ class TensorboardAdapter(Adapter):
 
         event_set = set(event_paths)
         artifacts: list[Artifact] = []
-        results: list[Result05 | Result06] = []
+        results: list[Result05 | Result06 | Result11] = []
         for rel in paths:
             event = events.get(rel)
             if event is not None:
@@ -299,7 +318,14 @@ class TensorboardAdapter(Adapter):
                     )
                 )
                 for observation in event.observations:
-                    if observation.kind == "tf2-image":
+                    if observation.kind == "tf2-histogram":
+                        locator = TensorboardTf2HistogramLocator(
+                            kind="tensorboard-tf2-histogram",
+                            tag=observation.tag,
+                            step=observation.step,
+                            occurrence=observation.occurrence,
+                        )
+                    elif observation.kind == "tf2-image":
                         locator = TensorboardTf2ImageLocator(
                             kind="tensorboard-tf2-image",
                             tag=observation.tag,
@@ -475,6 +501,7 @@ class _State:
     include_audio: bool = False
     include_tensors: bool = False
     include_tf2_media: bool = False
+    include_tf2_histograms: bool = False
     budget: _Budget = field(default_factory=_Budget)
     failures: dict[int, Exception] = field(default_factory=dict)
     selected: dict[str, bool] = field(default_factory=dict)
@@ -623,6 +650,8 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
     try:
         for record in iterator:
             if isinstance(record, Tf2MediaRecord):
+                if not state.include_tf2_media:
+                    continue
                 try:
                     tf2_tag = _decoded_tag(
                         record.tag,
@@ -703,6 +732,15 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
                 continue
             if tag is None:
                 continue
+            if (
+                is_tensor
+                and state.include_tf2_histograms
+                and _claimed_histogram_tensor(record.value)
+            ):
+                if state.include_tensors:
+                    key = ("tensor", tag, record.step)
+                    occurrences[key] = occurrences.get(key, 0) + 1
+                continue
             key = (kind, tag, record.step)
             occurrence = occurrences.get(key, 0)
             occurrences[key] = occurrence + 1
@@ -744,6 +782,50 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
                     value=value,
                 )
             )
+        if state.include_tf2_histograms:
+            for record in iter_supported_tf2_histograms(snapshot.data):
+                try:
+                    tag = _decoded_tag(
+                        record.tag,
+                        state.include_strings,
+                        state.include_histograms,
+                        state.include_images or state.include_audio,
+                        state.include_tensors,
+                        state.include_tf2_media,
+                        schema_11=True,
+                        text=True,
+                    )
+                except AdapterError:
+                    continue
+                if tag is None or not state.select(tag):
+                    continue
+                key = ("tf2-histogram", tag, record.step)
+                occurrence = occurrences.get(key, 0)
+                occurrences[key] = occurrence + 1
+                hist_bytes = len(
+                    json.dumps(
+                        list(record.buckets),
+                        ensure_ascii=True,
+                        allow_nan=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                )
+                if state.budget.over or not state.budget.charge(
+                    len(record.tag), 0, hist_bytes
+                ):
+                    state.record(_BUDGET, AdapterError(_budget_message(state)))
+                    continue
+                observations.append(
+                    _Observation(
+                        kind="tf2-histogram",
+                        tag=tag,
+                        step=record.step,
+                        occurrence=occurrence,
+                        value=Tf2HistogramValue.model_validate(
+                            {"kind": "tf2-histogram", "buckets": list(record.buckets)}
+                        ),
+                    )
+                )
     except EventFileError:
         state.record(_PROFILE, AdapterError(PROFILE_MESSAGE))
         return None
@@ -781,7 +863,11 @@ def _assign_names(events: dict[str, _EventFile], state: _State) -> None:
     seen: set[tuple[str, str]] = set()
     for (run_id, kind, tag, step), members in groups.items():
         files = {event.path for event, _ in members}
-        labels = {"tf2-image": "tf2 image", "tf2-audio": "tf2 audio"}
+        labels = {
+            "tf2-image": "tf2 image",
+            "tf2-audio": "tf2 audio",
+            "tf2-histogram": "tf2 histogram",
+        }
         marker = f" ({labels.get(kind, kind)})" if kind != "scalar" else ""
         for event, observation in members:
             element_suffix = (
@@ -814,6 +900,8 @@ def _record_reservation(value: str, used: set[str], state: _State) -> None:
 
 def _budget_message(state: _State) -> str:
     """The budget text for the flag set that was actually passed."""
+    if state.include_tf2_histograms:
+        return BUDGET_MESSAGE_11
     if (
         state.include_tf2_media
         or state.include_tensors
@@ -832,6 +920,18 @@ def _budget_message(state: _State) -> str:
     return BUDGET_MESSAGE_06 if state.include_strings else BUDGET_MESSAGE
 
 
+def _claimed_histogram_tensor(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    shape = value.get("shape")
+    return (
+        value.get("dtype") == "float64"
+        and isinstance(shape, list)
+        and len(shape) == 2
+        and shape[1] == 3
+    )
+
+
 def _decoded_tag(
     raw: bytes,
     schema_06: bool = False,
@@ -839,6 +939,7 @@ def _decoded_tag(
     schema_08: bool = False,
     schema_09: bool = False,
     schema_10: bool = False,
+    schema_11: bool = False,
     *,
     text: bool = False,
 ) -> str | None:
@@ -850,6 +951,8 @@ def _decoded_tag(
     if not raw or len(raw) > MAX_TENSORBOARD_TAG:
         if text:
             return None
+        if schema_11:
+            raise AdapterError(TAG_MESSAGE_11)
         if schema_10:
             raise AdapterError(TAG_MESSAGE_10)
         if schema_09:
@@ -864,6 +967,8 @@ def _decoded_tag(
     except UnicodeDecodeError:
         if text:
             return None
+        if schema_11:
+            raise AdapterError(TAG_MESSAGE_11)
         if schema_10:
             raise AdapterError(TAG_MESSAGE_10)
         if schema_09:

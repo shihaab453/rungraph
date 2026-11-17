@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,7 @@ from ..models import (
     SCHEMA_VERSION_0_8,
     SCHEMA_VERSION_0_9,
     SCHEMA_VERSION_0_10,
+    SCHEMA_VERSION_0_11,
     CsvCellLocator,
     TensorboardAudioLocator,
     TensorboardHistogramLocator,
@@ -25,6 +27,9 @@ from ..models import (
     TensorboardStringLocator,
     TensorboardTensorLocator,
     TensorboardTf2AudioLocator,
+    TensorboardTf2HistogramLocator,
+    HistogramValue,
+    Tf2HistogramValue,
     TensorboardTf2ImageLocator,
 )
 from .conditions import check_conditions
@@ -65,6 +70,7 @@ _LOCATOR_SCHEMAS = frozenset(
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
         SCHEMA_VERSION_0_10,
+        SCHEMA_VERSION_0_11,
     }
 )
 
@@ -87,6 +93,7 @@ def _csv_cell_cap(
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
         SCHEMA_VERSION_0_10,
+        SCHEMA_VERSION_0_11,
     ):
         return False, frozenset()
     eligible_artifacts = {
@@ -132,6 +139,7 @@ def _tensorboard_cap(
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
         SCHEMA_VERSION_0_10,
+        SCHEMA_VERSION_0_11,
     ):
         return False, frozenset()
     eligible_artifacts = {
@@ -144,6 +152,7 @@ def _tensorboard_cap(
     }
     entries = 0
     tag_bytes = 0
+    histogram_bytes = 0
     with_entries: set[str] = set()
     for result in manifest.results:
         locator = result.locator
@@ -158,6 +167,7 @@ def _tensorboard_cap(
                 TensorboardTensorLocator,
                 TensorboardTf2ImageLocator,
                 TensorboardTf2AudioLocator,
+                TensorboardTf2HistogramLocator,
             ),
         ):
             continue
@@ -165,10 +175,28 @@ def _tensorboard_cap(
             continue
         entries += 1
         tag_bytes += len(locator.tag.encode("utf-8"))
+        value = result.value
+        if isinstance(value, HistogramValue):
+            measured = value.model_dump(mode="json")
+        elif isinstance(value, Tf2HistogramValue):
+            # Extraction measures only the bucket list, not the value wrapper.
+            measured = [bucket.model_dump(mode="json") for bucket in value.buckets]
+        else:
+            measured = None
+        if measured is not None:
+            histogram_bytes += len(
+                json.dumps(
+                    measured,
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
         with_entries.add(result.artifact_id)
     capped = (
         entries > TENSORBOARD_MAX_ENTRIES
         or tag_bytes > TENSORBOARD_MAX_TAG_BYTES
+        or histogram_bytes > TENSORBOARD_MAX_TAG_BYTES
     )
     return capped, frozenset(with_entries)
 
@@ -188,6 +216,7 @@ def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
         SCHEMA_VERSION_0_10,
+        SCHEMA_VERSION_0_11,
     ):
         return frozenset()
     paths = {
@@ -209,6 +238,7 @@ def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
                 TensorboardTensorLocator,
                 TensorboardTf2ImageLocator,
                 TensorboardTf2AudioLocator,
+                TensorboardTf2HistogramLocator,
             ),
         )
         and result.artifact_id is not None

@@ -12,17 +12,17 @@ platform bounds, F3 and B6, listed under Limitations.
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| A1 frozen versioned schemas, migration | COMPLETE | schemas 0.1–0.10; `tests/test_schema_freeze.py`, `test_cli_migrate.py` |
+| A1 frozen versioned schemas, migration | COMPLETE | schemas 0.1–0.11; `tests/test_schema_freeze.py`, `test_cli_migrate.py` |
 | A2 generic ingestion | COMPLETE | generic adapter; empty scans refuse with exit 2 |
 | A3 Hydra/MLflow/TensorBoard adapters | COMPLETE | adapter packages and tests; TF2 media 0.10 |
 | A4 result/claim/evidence/relationship authoring | COMPLETE | `runevidence result/evidence/relationship`; `tests/test_authoring.py` |
-| A5 condition authoring 0.2–0.10 | COMPLETE | `conditions`; `tests/test_cli_conditions.py` |
+| A5 condition authoring 0.2–0.11 | COMPLETE | `conditions`; `tests/test_cli_conditions.py` |
 | A6 source/environment capture | COMPLETE | `capture`; `tests/test_cli_capture.py` |
 | A7 safe mutation | COMPLETE | backups, stale-byte checks, POSIX admission lock |
 | B1–B5 file, value, graph, batch, unreadable input | COMPLETE | core checks; full suite |
 | B6 directory artifacts | BOUNDED (Linux only) | guarded recording and re-verification; non-Linux filesystems fail closed |
 | C1–C5 detail, lineage, impact, coverage, comparison | COMPLETE | analysis routes and tests |
-| C6 recorded-condition comparability 0.1–0.10 | COMPLETE (experimental verdict) | `comparability`, preflight; tests |
+| C6 recorded-condition comparability 0.1–0.11 | COMPLETE (experimental verdict) | `comparability`, preflight; tests |
 | C7 evidence-aware comparison | COMPLETE | `assess`; `tests/test_cli_assess.py` |
 | C8 change analysis between snapshots | COMPLETE | fingerprint/diff/review-gate routes |
 | D0–D6 workspace composition | COMPLETE | `rungraph` CLI; workspace tests, examples |
@@ -39,12 +39,15 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,197 passed, 138 skipped on Python 3.12; 6,194 passed, 141 skipped on
+- **Full suite**: 6,248 passed, 138 skipped on Python 3.12; 6,245 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
 - **Wheel smoke**: all four wheels build, install into a clean venv, and run
   `runevidence init/validate` and `rungraph discover/init/validate`.
+- **Schema 0.11 (P3)**: structured TF2 `[k,3]` histograms, covered by
+  `tests/test_schema_0_11.py`, `test_schema_0_11_migration.py`, `test_cli_tf2_histograms.py`
+  and `test_tensorboard_tf2_histograms.py`.
 - **Targeted proof**: RE-10/ML-1 have 12 mutation probes that each kill a named test, plus an
   end-to-end MLflow lifecycle; the workspace layer has document, discovery, graph, claim,
   report, impact, compare, authoring and baseline tests, including explicit tests for impact

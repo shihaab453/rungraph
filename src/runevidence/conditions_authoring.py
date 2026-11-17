@@ -60,7 +60,7 @@ MAX_ABS_FLOAT = 1e100
 MAX_CONTAINER_WIDTH = 128
 MAX_NODES = 4096
 
-SUPPORTED_VERSIONS = ("0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10")
+SUPPORTED_VERSIONS = ("0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11")
 
 # Fixed field order: operation order, new-child order and result array order.
 FIELDS: tuple[str, ...] = (

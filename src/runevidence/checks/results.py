@@ -37,6 +37,7 @@ from ..models import (
     SCHEMA_VERSION_0_8,
     SCHEMA_VERSION_0_9,
     SCHEMA_VERSION_0_10,
+    SCHEMA_VERSION_0_11,
     CsvCellLocator,
     HistogramValue,
     JsonlLocator,
@@ -49,9 +50,11 @@ from ..models import (
     TensorboardTensorLocator,
     TensorboardTf2AudioLocator,
     TensorboardTf2ImageLocator,
+    TensorboardTf2HistogramLocator,
     AudioValue,
     ImageValue,
     TensorValue,
+    Tf2HistogramValue,
 )
 from ..tensorboard_events import (
     EventFileError,
@@ -62,6 +65,7 @@ from ..tensorboard_events import (
     scan_tensorboard_08,
     scan_tensorboard_09,
     scan_tensorboard_10,
+    scan_tf2_histograms,
 )
 from .csv import (
     CsvNotNumeric,
@@ -79,6 +83,10 @@ CSV_CELL_CAP_MESSAGE = (
     "16 MiB of header metadata); no CSV cell was read"
 )
 CSV_PROFILE_HINT = "the CSV artifact does not satisfy the strict csv-cell profile"
+TENSORBOARD_CAP_MESSAGE_11 = (
+    "the selected TensorBoard summaries exceed the 10,000-result, 16 MiB tag or "
+    "16 MiB histogram-JSON limit; nothing was written"
+)
 TENSORBOARD_CAP_MESSAGE_06 = (
     "the manifest exceeds the tensorboard verification limit (10,000 entries or "
     "16 MiB of tag metadata); no TensorBoard value was read"
@@ -163,6 +171,7 @@ def _extension_matches(artifact_path: str, locator: Any) -> bool:
             TensorboardTensorLocator,
             TensorboardTf2ImageLocator,
             TensorboardTf2AudioLocator,
+            TensorboardTf2HistogramLocator,
         ),
     ):
         return _tensorboard_path_matches(artifact_path)
@@ -185,6 +194,7 @@ def _expected_extension(locator: Any) -> str:
             TensorboardTensorLocator,
             TensorboardTf2ImageLocator,
             TensorboardTf2AudioLocator,
+            TensorboardTf2HistogramLocator,
         ),
     ):
         return "TensorBoard event"
@@ -683,9 +693,58 @@ def _check_one_tensorboard_histogram(
     return findings, False
 
 
+def _check_one_tf2_histogram(
+    result, artifact_path: str, locator: TensorboardTf2HistogramLocator, selection
+) -> tuple[list[Finding], bool]:
+    findings: list[Finding] = []
+    outcome = selection.outcome
+    if outcome == "missing":
+        findings.append(
+            _value_error(
+                result, artifact_path, locator, Code.locator_mismatch, "was not found"
+            )
+        )
+        return findings, True
+    if outcome == "unsupported_encoding":
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unsupported_value,
+                "selects an unsupported tf2 histogram encoding",
+            )
+        )
+        return findings, True
+    if outcome != "value" or selection.value is None:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.locator_unsupported_value, "selects an unsupported value",
+            )
+        )
+        return findings, True
+    recorded = result.value
+    if isinstance(recorded, Tf2HistogramValue):
+        recorded = recorded.model_dump(mode="json")
+    expected = {
+        "kind": "tf2-histogram",
+        "buckets": list(selection.value),
+    }
+    if not isinstance(recorded, dict) or recorded != expected:
+        findings.append(
+            _value_error(
+                result, artifact_path, locator,
+                Code.result_value_mismatch, "does not match the recorded value",
+            )
+        )
+        return findings, True
+    return findings, False
+
+
 def _locator_kind(locator: Any) -> str:
     if isinstance(locator, TensorboardTf2ImageLocator):
         return "tensorboard-tf2-image"
+    if isinstance(locator, TensorboardTf2HistogramLocator):
+        return "tensorboard-tf2-histogram"
     if isinstance(locator, TensorboardTf2AudioLocator):
         return "tensorboard-tf2-audio"
     if isinstance(locator, TensorboardTensorLocator):
@@ -814,7 +873,9 @@ def check_targeted_results(
                     subject=artifact.id,
                     path=artifact.path,
                     message=(
-                        TENSORBOARD_CAP_MESSAGE_06
+                        TENSORBOARD_CAP_MESSAGE_11
+                        if manifest.schema_version == SCHEMA_VERSION_0_11
+                        else TENSORBOARD_CAP_MESSAGE_06
                         if manifest.schema_version
                         in (
                             SCHEMA_VERSION_0_6,
@@ -838,6 +899,7 @@ def check_targeted_results(
                     "tensorboard-tensor",
                     "tensorboard-tf2-image",
                     "tensorboard-tf2-audio",
+                    "tensorboard-tf2-histogram",
                 }
             )
             capped_artifact = True
@@ -884,6 +946,7 @@ def check_targeted_results(
             "tensorboard-tensor",
             "tensorboard-tf2-image",
             "tensorboard-tf2-audio",
+            "tensorboard-tf2-histogram",
         ):
             if file_over_cap_128:
                 findings.append(
@@ -985,6 +1048,7 @@ def check_targeted_results(
                 TensorboardTensorLocator,
                 TensorboardTf2ImageLocator,
                 TensorboardTf2AudioLocator,
+                TensorboardTf2HistogramLocator,
             ),
         )
     ]
@@ -997,6 +1061,7 @@ def check_targeted_results(
     tensor_selections = None
     tf2_image_selections = None
     tf2_audio_selections = None
+    tf2_histogram_selections = None
     if tensorboard_results:
         scalar_requests = [
             (
@@ -1072,8 +1137,17 @@ def check_targeted_results(
             for result in tensorboard_results
             if isinstance(result.locator, TensorboardTf2AudioLocator)
         ]
+        tf2_histogram_requests = [
+            (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+            )
+            for result in tensorboard_results
+            if isinstance(result.locator, TensorboardTf2HistogramLocator)
+        ]
         try:
-            if manifest.schema_version == SCHEMA_VERSION_0_10:
+            if manifest.schema_version in (SCHEMA_VERSION_0_10, SCHEMA_VERSION_0_11):
                 (
                     scalar_selections,
                     text_selections,
@@ -1144,6 +1218,10 @@ def check_targeted_results(
             else:
                 scalar_selections = scan_scalars(data, scalar_requests)
                 text_selections = None
+            if manifest.schema_version == SCHEMA_VERSION_0_11:
+                tf2_histogram_selections = scan_tf2_histograms(
+                    data, tf2_histogram_requests
+                )
         except EventFileError:
             for result in tensorboard_results:
                 finding = _value_error(
@@ -1284,6 +1362,16 @@ def check_targeted_results(
                 model=AudioValue,
                 label="tf2 audio",
             )
+        elif isinstance(result.locator, TensorboardTf2HistogramLocator):
+            assert tf2_histogram_selections is not None
+            key = (
+                result.locator.tag.encode("utf-8"),
+                result.locator.step,
+                result.locator.occurrence,
+            )
+            result_findings, failed = _check_one_tf2_histogram(
+                result, artifact.path, result.locator, tf2_histogram_selections[key]
+            )
         elif isinstance(result.locator, TensorboardTensorLocator):
             assert tensor_selections is not None
             key = (
@@ -1359,6 +1447,7 @@ def check_results(
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
         SCHEMA_VERSION_0_10,
+        SCHEMA_VERSION_0_11,
     )
 
     def unverifiable(res_id: str, msg: str) -> None:

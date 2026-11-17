@@ -722,7 +722,7 @@ def test_artifact_to_dict_has_explicit_version_context():
     assert artifact_to_dict(plain, schema_version="0.10")["path"] == plain.path
 
     with pytest.raises(ValueError):
-        artifact_to_dict(plain, schema_version="0.11")
+        artifact_to_dict(plain, schema_version="0.12")
 
 
 def _two_entry_doc(version: str = "0.2") -> dict:

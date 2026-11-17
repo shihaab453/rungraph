@@ -236,7 +236,7 @@ unchanged file, so no `init --force` is needed. If no installed adapter claims
 the result, `validate` reports `result-unverified` instead of passing silently.
 A volatile metric file is not read: `validate` warns and `rehash` leaves the
 summary alone; `--no-volatile` records the digest and refreshes it. Schemas
-0.3–0.10 keep their existing `result-unverified` warning and are not refreshed
+0.3–0.11 keep their existing `result-unverified` warning and are not refreshed
 this way. See [MLflow metric summaries](https://github.com/shihaab453/rungraph/blob/main/docs/adapters.md#mlflow-metric-summaries-re-10)
 and the [draft alpha release notes](https://github.com/shihaab453/rungraph/blob/main/docs/alpha-release-notes-draft.md).
 
@@ -301,7 +301,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence comparability BASELINE TARGET --baseline-result ID --target-result ID [--json]` | Experimental read-only comparison of five mandatory recorded conditions across two manifests (no artifact checks; exit `0` comparable, `1` different, `2` unavailable). `--preflight` is a text-only read-only readiness listing/pair check (no JSON; exit `0` list/ready, `1` not ready, `2` load/unknown/invalid). See [Comparability (verdict CLI experimental)](#comparability-verdict-cli-experimental). |
 | `runevidence assess BASELINE TARGET --baseline-result ID --target-result ID [--json] [--directory-artifacts]` | Read-only combined verdict: recorded-condition comparability plus artifact/value integrity on both sides. Exit `0` permitted and clean, `1` not permitted or evidence errors, `2` load failure. |
 | `runevidence init [PATH]` | Scan a folder and write a starter `runevidence.json` (`--adapter`, `--name`, `--id`, `--force`, `--tags PATTERN`, `--include-strings`, `--include-histograms`, `--volatile GLOB`). With `--force`, the old manifest is kept as a backup, because a fresh scan does not carry over hand-written results and claims. See [Backups from `init --force`](#backups-from-init---force). |
-| `runevidence migrate PATH --to 0.2\|0.3\|0.4\|0.5\|0.6\|0.7\|0.8\|0.9\|0.10 [--dry-run] [--json]` | Declare an existing valid manifest as the chosen schema without changing any recorded value. Exits `0` on success, no-op or dry run; `2` on refusal or failure. There is no inference and no downgrade. See [Migrating a manifest to 0.2](#migrating-a-manifest-to-02), [Schema 0.4 CSV cell locators](#schema-04-csv-cell-locators-slice-c) and [Schema 0.5 TensorBoard scalar locators](#schema-05-tensorboard-scalar-locators-slice-d). |
+| `runevidence migrate PATH --to 0.2\|0.3\|0.4\|0.5\|0.6\|0.7\|0.8\|0.9\|0.10\|0.11 [--dry-run] [--json]` | Declare an existing valid manifest as the chosen schema without changing any recorded value. Exits `0` on success, no-op or dry run; `2` on refusal or failure. There is no inference and no downgrade. See [Migrating a manifest to 0.2](#migrating-a-manifest-to-02), [Schema 0.4 CSV cell locators](#schema-04-csv-cell-locators-slice-c) and [Schema 0.5 TensorBoard scalar locators](#schema-05-tensorboard-scalar-locators-slice-d). |
 | `runevidence conditions PATH --run RUN_ID [--patch FILE\|-] [--clear FIELD]... [--dry-run] [--json]` | Set or clear recorded run conditions on a schema 0.2 or later manifest from a local JSON patch; no condition values on the command line. Exits `0` on success, no-op or dry run; `2` on refusal or failure. See [Authoring run conditions](#authoring-run-conditions). |
 | `runevidence capture PATH --run RUN_ID [--dry-run] [--json]` | Record the run's git `HEAD` as `source_revision` and a small environment snapshot (Python, platform, machine, dirty state). Requires schema 0.2+ and a git repository. |
 | `runevidence rehash PATH TARGET... \| --all` | Accept intended changes: re-record digest and size, and re-read values only for supported, resolvable scalar JSON-located results in changed files (`--volatile`, `--no-volatile`, `--dry-run`). `--directory` re-records one exact directory artifact ID. |
@@ -799,6 +799,12 @@ Schema 0.10 adds opt-in **TF2 image and audio summaries**
 tensors become digest references with a per-payload `element` index. See
 [docs/schema-0.10-tf2-media.md](docs/schema-0.10-tf2-media.md).
 
+Schema 0.11 adds opt-in **TF2 `[k,3]` histograms** (`init --include-tf2-histograms`):
+`tf.summary.histogram` writes a float64 tensor of `[left, right, count]` rows, recorded as
+structured `tf2-histogram` values with a `tensorboard-tf2-histogram` locator. A `DT_FLOAT`
+`[k,3]` tensor, or a `[k,3]` double without the flag, keeps the plain-tensor behavior.
+See [docs/schema-0.11-tf2-histograms.md](docs/schema-0.11-tf2-histograms.md).
+
 Schema 0.9 adds opt-in **numeric tensor digests** (`init --include-tensors`):
 canonical `TensorValue` results for float32/float64/int32/int64 arrays, with exact
 re-verification and compact display. See
@@ -908,7 +914,7 @@ runevidence conditions PATH --run RUN_ID [--patch FILE|-] [--clear FIELD]... [--
 
 `conditions` is a stable authoring path. It sets or clears the six
 `runs[i].conditions` children on a manifest that already declares schema 0.2 or later
-(0.2-0.10);
+(0.2-0.11);
 run `migrate` first. A 0.1 target is
 refused with instructions to migrate, and nothing is changed automatically. The
 patch is one strict JSON object from a local file or `-`
@@ -1111,6 +1117,9 @@ stays free of tool dependencies:
   scalars, string tensors, histograms, image/audio references and numeric
   tensor digests under opt-in flags. See the
   [TensorBoard guide](https://github.com/shihaab453/rungraph/blob/main/docs/tensorboard-guide.md).
+  The opt-in flags are `--include-strings`, `--include-histograms`, `--include-images`,
+  `--include-audio`, `--include-tensors`, `--include-tf2-media` and
+  `--include-tf2-histograms`.
   `examples/tensorboard-scalars/` is a committed two-run log directory.
 
   ```bash
@@ -1195,7 +1204,7 @@ Read these before relying on a green `validate` for anything important.
   summary alone, and `--no-volatile` records the digest and refreshes it. The
   digest of the bytes parsed must equal the recorded or planned digest, so a
   file that changes mid-check is reported instead of accepted. Schemas
-  0.3–0.10 keep their existing `result-unverified` warning for locator-less
+  0.3–0.11 keep their existing `result-unverified` warning for locator-less
   results and are not refreshed this way.
 - **MLflow metric histories are bounded.** A history is read at most 50 MiB,
   with at most 1,000,000 lines and at most 64 KiB per line. A history over any
@@ -1374,7 +1383,7 @@ RunEvidence is the first layer of **RunGraph**. The primary-product scope,
 capability status and completion criteria are recorded in
 [docs/product-completion.md](docs/product-completion.md).
 
-Delivered: versioned schemas 0.1–0.10 with frozen reading rules and migration;
+Delivered: versioned schemas 0.1–0.11 with frozen reading rules and migration;
 generic, Hydra, MLflow file-store and TensorBoard adapters; file, value and
 claim verification; batch validation; single-manifest analysis (run and claim
 detail, lineage, impact, coverage, review gates, fingerprints, comparison,

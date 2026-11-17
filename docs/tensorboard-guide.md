@@ -19,8 +19,9 @@ schema it needs. Schemas 0.1–0.4 and their behavior are untouched.
 | `--include-audio` | legacy `Summary.Audio` | 0.8 | `tensorboard-audio` | digest reference |
 | `--include-tensors` | numeric `TensorProto` | 0.9 | `tensorboard-tensor` | digest reference |
 | `--include-tf2-media` | TF2 image/audio string tensors | 0.10 | `tensorboard-tf2-image`, `tensorboard-tf2-audio` | digest reference per element |
+| `--include-tf2-histograms` | TF2 `[k,3]` histogram tensors | 0.11 | `tensorboard-tf2-histogram` | structured bucket list |
 
-Precedence: TF2 media → 0.10, tensors → 0.9, media → 0.8, histograms → 0.7,
+Precedence: TF2 histograms → 0.11, TF2 media → 0.10, tensors → 0.9, media → 0.8, legacy histograms → 0.7,
 strings → 0.6, else 0.5. Flags combine; the manifest carries only the kinds actually requested.
 
 ```bash
@@ -109,17 +110,18 @@ kinds.
 
 ## Migration and refusals
 
-`migrate --to 0.9` is a version-only rewrite from 0.3–0.8; 0.1/0.2 run the
-locator precheck. Downgrades are refused (`DOWNGRADE_UNSUPPORTED`), comparability
-refuses 0.8 and 0.9 by version, and `init --force` refuses to regenerate a
+`migrate --to 0.11` is a version-only rewrite from 0.1–0.10; 0.1/0.2 run the
+locator precheck. Downgrades are refused (`DOWNGRADE_UNSUPPORTED`), condition
+comparability covers 0.2–0.11, and `init --force` refuses to regenerate a
 declared manifest whose schema it cannot carry over. An event artifact can never
 be marked `--volatile`.
 
 ## Deliberate limits
 
-- TF2 `tf.summary.image`/`tf.summary.audio` are read under
-  `--include-tf2-media` (0.10). TF2 `[k,3]` histogram tensors are recorded as
-  plain tensors when `--include-tensors` is on.
+- TF2 `tf.summary.image`/`tf.summary.audio` are read under `--include-tf2-media` (0.10).
+  TF2 `[k,3]` histogram tensors are recorded as structured histograms under
+  `--include-tf2-histograms` (0.11), or as plain tensors without it when
+  `--include-tensors` is on.
 - Graph definitions, run metadata and plugin-specific payloads are not results.
 - No arrays or media bytes are inlined; nothing is extracted.
 - Exact comparison only; there is no tolerance, statistical or distributional
@@ -133,4 +135,5 @@ be marked `--volatile`.
 - [Schema 0.8 media](schema-0.8-tensorboard-media.md)
 - [Schema 0.9 tensors](schema-0.9-tensorboard-tensors.md)
 - [Schema 0.10 TF2 media](schema-0.10-tf2-media.md)
+- [Schema 0.11 TF2 histograms](schema-0.11-tf2-histograms.md)
 - [Adapter guide](adapters.md)
