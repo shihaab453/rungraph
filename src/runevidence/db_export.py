@@ -185,6 +185,45 @@ def check_sqlite(loaded: LoadedManifest, database: Path) -> dict[str, Any]:
                     "missing": sorted(ids - actual),
                     "extra": sorted(actual - ids),
                 })
+        expected_relationships = {
+            (item.source, item.target, item.type.value)
+            for item in manifest.relationships
+        }
+        expected_refs = {
+            (evidence.id, relation, target)
+            for evidence in manifest.evidence
+            for relation, refs in (
+                ("supports", evidence.supports),
+                ("contradicts", evidence.contradicts),
+            )
+            for target in refs
+        }
+        for table, expected_rows in (
+            ("relationships", expected_relationships),
+            ("evidence_refs", expected_refs),
+        ):
+            try:
+                if table == "relationships":
+                    actual_rows = {
+                        tuple(row) for row in connection.execute(
+                            "select source, target, type from relationships"
+                        )
+                    }
+                else:
+                    actual_rows = {
+                        tuple(row) for row in connection.execute(
+                            "select evidence_id, relation, target from evidence_refs"
+                        )
+                    }
+            except sqlite3.Error:
+                mismatches.append({"table": table, "reason": "table-missing"})
+                continue
+            if actual_rows != expected_rows:
+                mismatches.append({
+                    "table": table,
+                    "missing": sorted(expected_rows - actual_rows),
+                    "extra": sorted(actual_rows - expected_rows),
+                })
     finally:
         connection.close()
     return {
