@@ -2738,7 +2738,27 @@ def cmd_schema(args: argparse.Namespace) -> int:
 
 
 def cmd_adapters(args: argparse.Namespace) -> int:
-    for name, cls in sorted(available_adapters().items()):
+    adapters = available_adapters()
+    if args.json:
+        print(json.dumps(
+            {
+                "format": "runevidence-adapters-v1",
+                "version": "0.1",
+                "adapters": [
+                    {
+                        "name": name,
+                        "description": cls.description,
+                        "module": cls.__module__,
+                    }
+                    for name, cls in sorted(adapters.items())
+                ],
+                "exit_code": EXIT_OK,
+            },
+            indent=2,
+            sort_keys=False,
+        ))
+        return EXIT_OK
+    for name, cls in sorted(adapters.items()):
         print(f"{name:<12} {cls.description}")
     return EXIT_OK
 
@@ -3180,6 +3200,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_schema)
 
     p = sub.add_parser("adapters", help="list installed adapters")
+    p.add_argument("--json", action="store_true", help="machine-readable adapter list")
     p.set_defaults(func=cmd_adapters)
     return parser
 
