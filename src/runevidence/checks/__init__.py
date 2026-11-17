@@ -195,7 +195,8 @@ def _tensorboard_cap(
         with_entries.add(result.artifact_id)
     capped = (
         entries > TENSORBOARD_MAX_ENTRIES
-        or tag_bytes + histogram_bytes > TENSORBOARD_MAX_TAG_BYTES
+        or tag_bytes > TENSORBOARD_MAX_TAG_BYTES
+        or histogram_bytes > TENSORBOARD_MAX_TAG_BYTES
     )
     return capped, frozenset(with_entries)
 

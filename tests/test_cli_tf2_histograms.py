@@ -223,7 +223,19 @@ def test_validation_measures_tf2_histogram_bytes_like_extraction(tmp_path: Path,
     buckets = [bucket.model_dump(mode="json") for bucket in result.value.buckets]
     measured = len(json.dumps(buckets, ensure_ascii=True, allow_nan=False, separators=(",", ":")))
     tag_bytes = len(result.locator.tag.encode("utf-8"))
-    monkeypatch.setattr("runevidence.checks.TENSORBOARD_MAX_TAG_BYTES", measured + tag_bytes)
+    # Tag and histogram JSON are separate 16 MiB budgets, not one combined sum.
+    monkeypatch.setattr("runevidence.checks.TENSORBOARD_MAX_TAG_BYTES", measured)
     assert _tensorboard_cap(manifest)[0] is False
-    monkeypatch.setattr("runevidence.checks.TENSORBOARD_MAX_TAG_BYTES", measured + tag_bytes - 1)
+    monkeypatch.setattr("runevidence.checks.TENSORBOARD_MAX_TAG_BYTES", measured - 1)
     assert _tensorboard_cap(manifest)[0] is True
+
+    from runevidence_tensorboard.adapter import _Budget
+
+    monkeypatch.setattr(
+        "runevidence_tensorboard.adapter.MAX_HISTOGRAM_BYTES", measured
+    )
+    monkeypatch.setattr("runevidence_tensorboard.adapter.MAX_TAG_BYTES", measured)
+    budget = _Budget()
+    assert budget.charge(tag_bytes, 0, measured) is True
+    over = _Budget()
+    assert over.charge(tag_bytes, 0, measured + 1) is False
