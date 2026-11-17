@@ -151,3 +151,8 @@ def test_generated_schema_has_the_new_definitions():
     assert "Tf2HistogramValue" in schema["$defs"]
     assert "TensorboardTf2HistogramLocator" in schema["$defs"]
     assert schema["$defs"]["Tf2HistogramValue"]["properties"]["buckets"]["maxItems"] == 1024
+
+
+def test_missing_buckets_is_refused():
+    with pytest.raises(ValidationError):
+        Tf2HistogramValue.model_validate({"kind": "tf2-histogram"})

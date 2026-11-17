@@ -110,17 +110,18 @@ kinds.
 
 ## Migration and refusals
 
-`migrate --to 0.9` is a version-only rewrite from 0.3–0.8; 0.1/0.2 run the
-locator precheck. Downgrades are refused (`DOWNGRADE_UNSUPPORTED`), comparability
-refuses 0.8 and 0.9 by version, and `init --force` refuses to regenerate a
+`migrate --to 0.11` is a version-only rewrite from 0.1–0.10; 0.1/0.2 run the
+locator precheck. Downgrades are refused (`DOWNGRADE_UNSUPPORTED`), condition
+comparability covers 0.2–0.11, and `init --force` refuses to regenerate a
 declared manifest whose schema it cannot carry over. An event artifact can never
 be marked `--volatile`.
 
 ## Deliberate limits
 
-- TF2 `tf.summary.image`/`tf.summary.audio` are read under
-  `--include-tf2-media` (0.10) and `--include-tf2-histograms` (0.11). TF2 `[k,3]` histogram tensors are recorded as
-  structured histograms with the 0.11 flag, or as plain tensors without it when `--include-tensors` is on.
+- TF2 `tf.summary.image`/`tf.summary.audio` are read under `--include-tf2-media` (0.10).
+  TF2 `[k,3]` histogram tensors are recorded as structured histograms under
+  `--include-tf2-histograms` (0.11), or as plain tensors without it when
+  `--include-tensors` is on.
 - Graph definitions, run metadata and plugin-specific payloads are not results.
 - No arrays or media bytes are inlined; nothing is extracted.
 - Exact comparison only; there is no tolerance, statistical or distributional

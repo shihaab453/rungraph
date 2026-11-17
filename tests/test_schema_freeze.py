@@ -51,7 +51,7 @@ SCHEMA_PINS = {
         "bd8760ca6ce119326a0b0b06e7c616d8b0fa027285f67422454934fadfba1cdf"
     ),
     "schema/runevidence-0.11.schema.json": (
-        "1dce887130d09ef13465274793a0c8e70ccd017db6ea10d9d3b6ad71e111ce00"
+        "49e9e6173b0767b0ab09860be19803fdf5e074fef4d9c4b19a83e4df36b990fd"
     ),
 }
 

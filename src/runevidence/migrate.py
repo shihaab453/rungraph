@@ -242,6 +242,8 @@ def _migrate_manifest(
             backup="none",
             backup_path=None,
         )
+    if source_version == TARGET_VERSION_0_11 and target_version != TARGET_VERSION_0_11:
+        raise MigrationError("DOWNGRADE_UNSUPPORTED")
     if target_version == TARGET_VERSION:
         # The existing --to 0.2 path is additive from 0.1 only; no downgrade.
         if source_version != SOURCE_VERSION:

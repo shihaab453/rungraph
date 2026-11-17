@@ -1015,9 +1015,8 @@ class Tf2HistogramValue(_Strict):
         description="Value kind; 0.11 admits tf2-histogram."
     )
     buckets: list[Tf2HistogramBucket] = Field(
-        default_factory=list,
         max_length=1024,
-        description="0-1024 buckets in recorded row order.",
+        description="0-1024 buckets in recorded row order; required.",
     )
 
 

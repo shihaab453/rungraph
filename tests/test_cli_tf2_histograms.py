@@ -181,3 +181,29 @@ def test_without_the_flag_a_histogram_shape_is_a_plain_tensor(tmp_path: Path):
     manifest = read_manifest(tmp_path)
     assert manifest["schema_version"] == "0.9"
     assert manifest["results"][0]["locator"]["kind"] == "tensorboard-tensor"
+
+
+def test_the_histogram_json_budget_caps_validation(tmp_path: Path, monkeypatch, capsys):
+    write_event(tmp_path, [hist_payload(b"t", [(0.0, 1.0, 2.0)])])
+    assert main(
+        ["init", str(tmp_path), "--adapter", "tensorboard", "--name", "h", "--id", "h",
+         "--include-tf2-histograms"]
+    ) == 0
+    monkeypatch.setattr("runevidence.checks.TENSORBOARD_MAX_TAG_BYTES", 1)
+    capsys.readouterr()
+    assert main(["validate", str(tmp_path)]) == 1
+    out = capsys.readouterr().out
+    assert "does not match the recorded value" not in out
+
+
+def test_0_11_locators_raise_the_snapshot_cap(tmp_path: Path):
+    from runevidence.checks import _tensorboard_snapshot_ids
+    from runevidence.manifest import load_manifest
+
+    write_event(tmp_path, [hist_payload(b"t", [(0.0, 1.0, 2.0)])])
+    assert main(
+        ["init", str(tmp_path), "--adapter", "tensorboard", "--name", "h", "--id", "h",
+         "--include-tf2-histograms"]
+    ) == 0
+    manifest = load_manifest(tmp_path).manifest
+    assert _tensorboard_snapshot_ids(manifest) == {manifest.artifacts[0].id}

@@ -59,3 +59,24 @@ def test_init_force_refuses_a_declared_0_11(tmp_path: Path):
     assert main(["init", str(tmp_path), "--force"]) == 2
     document = json.loads((tmp_path / "runevidence.json").read_text(encoding="utf-8"))
     assert document["schema_version"] == "0.11"
+
+
+def test_downgrade_reports_the_closed_code(tmp_path: Path, capsys):
+    path = write(tmp_path, "0.11")
+    before = path.read_bytes()
+    assert main(["migrate", str(tmp_path), "--to", "0.10", "--json"]) == 2
+    out = capsys.readouterr().out
+    assert '"DOWNGRADE_UNSUPPORTED"' in out
+    assert path.read_bytes() == before
+
+
+def test_a_locator_less_result_is_unverified_under_0_11(tmp_path: Path, capsys):
+    path = write(tmp_path, "0.11")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["results"] = [
+        {"id": "plain", "run_id": "run", "name": "plain", "value": 1}
+    ]
+    path.write_text(json.dumps(document), encoding="utf-8")
+    capsys.readouterr()
+    assert main(["validate", str(tmp_path), "--json"]) == 0
+    assert "result-unverified" in capsys.readouterr().out

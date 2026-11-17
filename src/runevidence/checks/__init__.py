@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,8 @@ from ..models import (
     TensorboardTensorLocator,
     TensorboardTf2AudioLocator,
     TensorboardTf2HistogramLocator,
+    HistogramValue,
+    Tf2HistogramValue,
     TensorboardTf2ImageLocator,
 )
 from .conditions import check_conditions
@@ -149,6 +152,7 @@ def _tensorboard_cap(
     }
     entries = 0
     tag_bytes = 0
+    histogram_bytes = 0
     with_entries: set[str] = set()
     for result in manifest.results:
         locator = result.locator
@@ -171,10 +175,21 @@ def _tensorboard_cap(
             continue
         entries += 1
         tag_bytes += len(locator.tag.encode("utf-8"))
+        value = result.value
+        if isinstance(value, (HistogramValue, Tf2HistogramValue)):
+            histogram_bytes += len(
+                json.dumps(
+                    value.model_dump(mode="json"),
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
         with_entries.add(result.artifact_id)
     capped = (
         entries > TENSORBOARD_MAX_ENTRIES
         or tag_bytes > TENSORBOARD_MAX_TAG_BYTES
+        or histogram_bytes > TENSORBOARD_MAX_TAG_BYTES
     )
     return capped, frozenset(with_entries)
 
@@ -194,6 +209,7 @@ def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
         SCHEMA_VERSION_0_10,
+        SCHEMA_VERSION_0_11,
     ):
         return frozenset()
     paths = {

@@ -99,9 +99,11 @@ buckets; malformed histogram entries are skipped, not fatal. Without the flag,
 `[k,3]` float64 tensors as schema 0.11 `tf2-histogram` values with a
 `tensorboard-tf2-histogram` locator. Each bucket is `{left, right, count}`;
 0-1,024 buckets are accepted. Classification is shape-based (the flag is an
-explicit assertion that `[k,3]` doubles are histograms), malformed claims are
-skipped, and a plain-tensor occurrence still counts them so migrated 0.9/0.10
-locators keep their selection.
+explicit assertion that `[k,3]` doubles are histograms), and malformed claims are
+skipped. A malformed claim that is still a valid 0.9 tensor keeps its
+plain-tensor occurrence, so migrated 0.9/0.10 locators keep their selection;
+with both flags that entry's plain-tensor digest is **not** recorded, which is
+the declared data loss of the shape reservation.
 
 ## Tag filtering
 

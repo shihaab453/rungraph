@@ -1564,7 +1564,7 @@
       "description": "Structured schema-0.11 TF2 ``[k,3]`` histogram value.\n\nEach bucket is ``{left, right, count}`` in recorded row order. Values are\nfinite binary64; counts are nonnegative and right edges are at least left\nedges. Bucket continuity and integral counts are not enforced.",
       "properties": {
         "buckets": {
-          "description": "0-1024 buckets in recorded row order.",
+          "description": "0-1024 buckets in recorded row order; required.",
           "items": {
             "$ref": "#/$defs/Tf2HistogramBucket"
           },

@@ -83,6 +83,10 @@ CSV_CELL_CAP_MESSAGE = (
     "16 MiB of header metadata); no CSV cell was read"
 )
 CSV_PROFILE_HINT = "the CSV artifact does not satisfy the strict csv-cell profile"
+TENSORBOARD_CAP_MESSAGE_11 = (
+    "the selected TensorBoard summaries exceed the 10,000-result, 16 MiB tag or "
+    "16 MiB histogram-JSON limit; nothing was written"
+)
 TENSORBOARD_CAP_MESSAGE_06 = (
     "the manifest exceeds the tensorboard verification limit (10,000 entries or "
     "16 MiB of tag metadata); no TensorBoard value was read"
@@ -869,7 +873,9 @@ def check_targeted_results(
                     subject=artifact.id,
                     path=artifact.path,
                     message=(
-                        TENSORBOARD_CAP_MESSAGE_06
+                        TENSORBOARD_CAP_MESSAGE_11
+                        if manifest.schema_version == SCHEMA_VERSION_0_11
+                        else TENSORBOARD_CAP_MESSAGE_06
                         if manifest.schema_version
                         in (
                             SCHEMA_VERSION_0_6,
@@ -893,6 +899,7 @@ def check_targeted_results(
                     "tensorboard-tensor",
                     "tensorboard-tf2-image",
                     "tensorboard-tf2-audio",
+                    "tensorboard-tf2-histogram",
                 }
             )
             capped_artifact = True
@@ -939,6 +946,7 @@ def check_targeted_results(
             "tensorboard-tensor",
             "tensorboard-tf2-image",
             "tensorboard-tf2-audio",
+            "tensorboard-tf2-histogram",
         ):
             if file_over_cap_128:
                 findings.append(
@@ -1439,6 +1447,7 @@ def check_results(
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
         SCHEMA_VERSION_0_10,
+        SCHEMA_VERSION_0_11,
     )
 
     def unverifiable(res_id: str, msg: str) -> None:
