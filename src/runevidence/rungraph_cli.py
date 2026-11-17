@@ -27,6 +27,7 @@ from .workspace_consumers import (
     leaderboard_data,
     matrix_data,
     report_data,
+    runs_data,
     stats_data,
 )
 from .workspace_graph import build_graph, claim_states, run_member_checks
@@ -245,8 +246,10 @@ _REPORT_TEXT_CLAIM = 200
 
 
 def _report_text(value: object, limit: int = _REPORT_TEXT_CLAIM) -> str:
-    text = str(value)
-    escaped = json.dumps(text, ensure_ascii=True)[1:-1]
+    if isinstance(value, (dict, list)):
+        escaped = json.dumps(value, ensure_ascii=True)
+    else:
+        escaped = json.dumps(str(value), ensure_ascii=True)[1:-1]
     if len(escaped) > limit:
         escaped = escaped[:limit] + "..."
     return escaped
@@ -359,6 +362,39 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     except WorkspaceError as exc:
         return _error("matrix", "workspace", str(exc))
     _print_json(matrix_data(loaded, latest=args.latest))
+    return EXIT_OK
+
+
+def cmd_runs(args: argparse.Namespace) -> int:
+    try:
+        loaded = load_workspace(Path(args.root))
+    except WorkspaceError as exc:
+        return _error("runs", "workspace", str(exc))
+    if args.member is not None and args.member not in loaded.members:
+        return _error("runs", "member", f"unknown member {args.member!r}")
+    data = runs_data(
+        loaded,
+        args.member,
+        include_metadata=args.metadata,
+    )
+    if args.json:
+        _print_json(data)
+        return EXIT_OK
+    print(f"Runs ({len(data['runs'])}):")
+    for row in data["runs"]:
+        name = f" ({row['name']})" if row["name"] else ""
+        print(
+            f"  {row['member']} / {row['run']}{name}: "
+            f"{row['counts']['artifacts']} artifacts, {row['counts']['results']} results"
+        )
+        if row["params"]:
+            print(f"    params: {_report_text(row['params'], 240)}")
+        if row["conditions"] is not None:
+            print(f"    conditions: {_report_text(row['conditions'], 240)}")
+        if row["started_at"]:
+            print(f"    started: {_report_text(row['started_at'], 80)}")
+        if args.metadata:
+            print(f"    metadata: {_report_text(row['metadata'], 240)}")
     return EXIT_OK
 
 
@@ -526,6 +562,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--directory-artifacts", action="store_true")
     p.add_argument("--baseline")
     p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("runs", help="list recorded runs across members")
+    p.add_argument("root", nargs="?", default=".")
+    p.add_argument("--member")
+    p.add_argument("--metadata", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_runs)
 
     p = sub.add_parser("impact", help="claims affected by one workspace node")
     p.add_argument("root", nargs="?", default=".")

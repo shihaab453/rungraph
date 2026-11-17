@@ -198,8 +198,8 @@ capability depends on it.
 
 - Plugin-specific summaries, graph/run metadata, additional adapters, richer comparison
   statistics, SQLite persistence (subject to its hold), extra platform guarantees. TF2 media
-  schema 0.10, TF2 `[k,3]` histogram schema 0.11, and per-metric workspace statistics
-  (`rungraph stats`) are delivered.
+  schema 0.10, TF2 `[k,3]` histogram schema 0.11, per-metric workspace statistics
+  (`rungraph stats`), and the cross-member run inventory (`rungraph runs`) are delivered.
 
 ### Documentation and truthfulness
 

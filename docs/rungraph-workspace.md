@@ -21,6 +21,7 @@ rungraph validate path/to/project
 
 # 4. Ask project-level questions.
 rungraph report path/to/project
+rungraph runs path/to/project
 rungraph graph path/to/project
 rungraph impact path/to/project --from artifact:exp-a#test-data
 rungraph compare path/to/project --metric accuracy
@@ -123,6 +124,9 @@ cycles are reported per strongly connected component with a bounded example list
   messages with severity, code and subject), every claim's states with its owner and claim
   text, and the claims affected by each error-level finding. `--directory-artifacts` opts into
   directory checks and is stated in the header when absent; `--strict` makes warnings fail.
+- `runs` lists every recorded run across members with its params, recorded conditions, start
+  time and per-run artifact/result counts. Adapter metadata is opt-in with `--metadata`;
+  `--member` restricts the inventory. It reads the loaded manifest snapshot and no artifact.
 - `impact` returns the claims whose dependency closure contains the requested node.
 - `compare` prints recorded values for one metric; `matrix` lays members against metrics;
   `leaderboard` ranks finite numeric values with ties sharing a rank; `stats` summarizes each
@@ -154,8 +158,8 @@ cycles are reported per strongly connected component with a bounded example list
 
 ## JSON and exit codes
 
-`discover`, `init`, `validate` and `report` print text by default and accept `--json` for a
-`rungraph-<command>` envelope with `version: "0.1"` and `exit_code`. `compare`, `matrix`,
+`discover`, `init`, `validate`, `report` and `runs` print text by default and accept `--json`
+for a `rungraph-<command>` envelope with `version: "0.1"` and `exit_code`. `compare`, `matrix`,
 `leaderboard` and `stats` always emit JSON; `--json` is accepted for symmetry, not required.
 `graph` selects JSON or DOT with `--format`; `impact` always emits JSON. Errors use
 `{"format": "rungraph-error", "command": ...}`.
@@ -167,6 +171,7 @@ cycles are reported per strongly connected component with a bounded example list
 | `validate` | no errors | evidence errors or strict warnings | workspace/member load, usage |
 | `graph` | built | `--fail-on-unresolved` and unresolved | load/usage |
 | `report` | no errors | evidence errors or strict warnings | workspace/member load, usage |
+| `runs` | listed | — | unknown member, workspace load |
 | `impact` | object resolves | — | object/workspace load failure |
 | `compare`/`matrix`/`leaderboard`/`stats` | rendered | — | load/usage |
 | `patch`/`member`/`claim`/`relationship` | written or dry-run | — | refusal, stale SHA, unreadable file |
