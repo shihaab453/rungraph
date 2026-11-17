@@ -26,6 +26,7 @@ rungraph impact path/to/project --from artifact:exp-a#test-data
 rungraph compare path/to/project --metric accuracy
 rungraph matrix path/to/project
 rungraph leaderboard path/to/project --metric accuracy --direction max
+rungraph stats path/to/project
 ```
 
 `discover` exits `2` when it finds no manifests, a duplicate or nested member, an unreadable
@@ -123,9 +124,21 @@ cycles are reported per strongly connected component with a bounded example list
   stated in the header when absent; `--strict` makes warnings fail.
 - `impact` returns the claims whose dependency closure contains the requested node.
 - `compare` prints recorded values for one metric; `matrix` lays members against metrics;
-  `leaderboard` ranks finite numeric values with ties sharing a rank. Rows are identified by
-  `(member, run, result ID)`, so duplicate result names are distinct rows and an ambiguous
-  matrix cell is counted, never averaged.
+  `leaderboard` ranks finite numeric values with ties sharing a rank; `stats` summarizes each
+  metric. Rows are identified by `(member, run, result ID)`, so duplicate result names are
+  distinct rows and an ambiguous matrix cell is counted, never averaged.
+- `stats` reports, per metric, the row count, finite numeric count, missing and non-numeric
+  counts, ambiguous `(member, run)` pairs with more than one recorded value, and min, max,
+  mean, median and population standard deviation over the numeric rows. Distribution fields
+  are null when a metric has no numeric value. `--metric` restricts it to one name.
+  Every recorded finite value is converted to an exact `Fraction` (floats are taken at
+  their exact binary value); mean, median and population variance are computed exactly, and
+  the standard deviation uses an 80-digit `Decimal` square root so tiny variances do not
+  underflow, with a final float conversion that clamps a value within half an ulp above the
+  largest finite float. Finite inputs at the float limits therefore do not overflow or lose
+  small differences; every emitted number is strict JSON (never `Infinity` or `NaN`). The
+  final float is computed from the exact variance; the Decimal intermediate is not claimed
+  to be correctly rounded in every adversarial near-tie case.
 - `compare` reports each row pair's recorded-condition status (`comparable`,
   `not-comparable` or `unavailable`) through the experimental comparability surface.
   `leaderboard` shows `conditions: available`, meaning only that the route can carry a
@@ -137,9 +150,9 @@ cycles are reported per strongly connected component with a bounded example list
 ## JSON and exit codes
 
 `discover`, `init`, `validate` and `report` print text by default and accept `--json` for a
-`rungraph-<command>` envelope with `version: "0.1"` and `exit_code`. `compare`, `matrix` and
-`leaderboard` always emit JSON; `--json` is accepted for symmetry, not required. `graph`
-selects JSON or DOT with `--format`; `impact` always emits JSON. Errors use
+`rungraph-<command>` envelope with `version: "0.1"` and `exit_code`. `compare`, `matrix`,
+`leaderboard` and `stats` always emit JSON; `--json` is accepted for symmetry, not required.
+`graph` selects JSON or DOT with `--format`; `impact` always emits JSON. Errors use
 `{"format": "rungraph-error", "command": ...}`.
 
 | Command | 0 | 1 | 2 |
@@ -150,7 +163,7 @@ selects JSON or DOT with `--format`; `impact` always emits JSON. Errors use
 | `graph` | built | `--fail-on-unresolved` and unresolved | load/usage |
 | `report` | no errors | evidence errors or strict warnings | workspace/member load, usage |
 | `impact` | object resolves | — | object/workspace load failure |
-| `compare`/`matrix`/`leaderboard` | rendered | — | load/usage |
+| `compare`/`matrix`/`leaderboard`/`stats` | rendered | — | load/usage |
 | `patch`/`member`/`claim`/`relationship` | written or dry-run | — | refusal, stale SHA, unreadable file |
 
 ## Authoring

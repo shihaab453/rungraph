@@ -111,7 +111,7 @@ committed examples and the scripted lifecycles in `tests/test_e2e_qualification.
 | D3 | Cross-manifest claims and evidence | COMPLETE | a claim can cite a qualified `(member-id, local-id)` evidence reference in another member, and workspace-level claims can be authored, edited and removed; validation reports present, unresolved and at-risk references across members without flagging a valid cross-member reference as dangling, and a member whose manifest disappears, changes after loading, or cannot be checked becomes an error with every dependent claim — member evidence or workspace citation — marked at risk | citation, resolution, claim states and claim/relationship authoring; `tests/test_workspace_graph.py`, `tests/test_rungraph_authoring.py` |
 | D4 | Cross-manifest impact | COMPLETE | a change in one member lists the affected claims in every member with the path that carries the impact | `rungraph impact`; `tests/test_rungraph_cli.py` |
 | D5 | Consolidated report | COMPLETE | one command over a workspace reports, with an explicit baseline named for each section: (a) current recorded-versus-filesystem findings; (b) optional assertion changes against a named prior snapshot; (c) per-claim evidence state; (d) cross-member impact, and text output names the directory-check policy and the baseline diff instead of discarding them | `rungraph report` with current evidence, claim states, impact and `--baseline`; `tests/test_rungraph_authoring.py`, `tests/test_rungraph_cli.py` |
-| D6 | Cross-manifest comparison and ranking | COMPLETE | `compare`, `matrix` and `leaderboard` compare recorded values across members with explicit missing/non-numeric/ambiguous accounting and ties; structured schema 0.8-0.11 values are emitted as JSON objects, and `compare` states each pair's recorded-condition status through the experimental comparability surface | `rungraph compare/matrix/leaderboard`; `tests/test_workspace_compare.py`, `tests/test_rungraph_cli.py` |
+| D6 | Cross-manifest comparison and ranking | COMPLETE | `compare`, `matrix`, `leaderboard` and `stats` compare recorded values across members with explicit missing/non-numeric/ambiguous accounting and ties; `stats` adds per-metric min/max/mean/median/population-standard-deviation with overflow-safe, version-stable arithmetic; structured schema 0.8-0.11 values are emitted as JSON objects, and `compare` states each pair's recorded-condition status through the experimental comparability surface | `rungraph compare/matrix/leaderboard/stats`; `tests/test_workspace_compare.py`, `tests/test_workspace_stats.py`, `tests/test_rungraph_cli.py` |
 
 ### 2.5 Delivery, usability and qualification
 
@@ -198,7 +198,8 @@ capability depends on it.
 
 - Plugin-specific summaries, graph/run metadata, additional adapters, richer comparison
   statistics, SQLite persistence (subject to its hold), extra platform guarantees. TF2 media
-  schema 0.10 and TF2 `[k,3]` histogram schema 0.11 are delivered.
+  schema 0.10, TF2 `[k,3]` histogram schema 0.11, and per-metric workspace statistics
+  (`rungraph stats`) are delivered.
 
 ### Documentation and truthfulness
 

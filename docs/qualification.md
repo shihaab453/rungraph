@@ -25,7 +25,7 @@ platform bounds, F3 and B6, listed under Limitations.
 | C6 recorded-condition comparability 0.1–0.11 | COMPLETE (experimental verdict) | `comparability`, preflight; tests |
 | C7 evidence-aware comparison | COMPLETE | `assess`; `tests/test_cli_assess.py` |
 | C8 change analysis between snapshots | COMPLETE | fingerprint/diff/review-gate routes |
-| D0–D6 workspace composition | COMPLETE | `rungraph` CLI; workspace tests, examples |
+| D0–D6 workspace composition | COMPLETE | `rungraph` CLI; workspace tests, examples, `stats` |
 | E1 every route documented | COMPLETE | README reference; docs-contract route test |
 | E2 TensorBoard and workspace examples | COMPLETE | `examples/tensorboard-scalars`, `examples/workspace-study` |
 | E3 packaging and fresh install | COMPLETE | packaging advisory + `wheel-smoke` job |
@@ -39,7 +39,7 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,331 passed, 138 skipped on Python 3.12; 6,328 passed, 141 skipped on
+- **Full suite**: 6,345 passed, 138 skipped on Python 3.12; 6,342 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.

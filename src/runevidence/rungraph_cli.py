@@ -27,6 +27,7 @@ from .workspace_consumers import (
     leaderboard_data,
     matrix_data,
     report_data,
+    stats_data,
 )
 from .workspace_graph import build_graph, claim_states, run_member_checks
 
@@ -331,6 +332,15 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_stats(args: argparse.Namespace) -> int:
+    try:
+        loaded = load_workspace(Path(args.root))
+    except WorkspaceError as exc:
+        return _error("stats", "workspace", str(exc))
+    _print_json(stats_data(loaded, getattr(args, "metric", None)))
+    return EXIT_OK
+
+
 def cmd_leaderboard(args: argparse.Namespace) -> int:
     try:
         loaded = load_workspace(Path(args.root))
@@ -503,6 +513,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("root", nargs="?", default=".")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_matrix)
+
+    p = sub.add_parser("stats", help="per-metric count and distribution statistics")
+    p.add_argument("root", nargs="?", default=".")
+    p.add_argument("--metric")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_stats)
 
     p = sub.add_parser("leaderboard", help="recorded numeric values ranked across members")
     p.add_argument("root", nargs="?", default=".")
