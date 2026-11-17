@@ -11,6 +11,7 @@ import math
 from typing import Any, Literal
 
 from .histogram_display import value_to_json
+from .metric_steps import latest_names, split_step_name
 from .models import Manifest
 
 
@@ -25,7 +26,7 @@ def _safe_number(value: object) -> bool:
 
 def rank_runs(
     manifest: Manifest, metric: str, direction: Literal["max", "min"], *,
-    top: int = 10, manifest_path: str,
+    top: int = 10, manifest_path: str, latest: bool = False,
 ) -> dict[str, Any]:
     """Return deterministic competition ranks and explicit missing/excluded runs.
 
@@ -45,15 +46,25 @@ def rank_runs(
             raise LeaderboardError(f"duplicate run ID {run.id!r}; refusing ambiguous leaderboard")
         runs[run.id] = run
 
+    base_metric = split_step_name(metric)[0] if latest else metric
     values: dict[str, Any] = {}
-    for result in manifest.results:
-        if result.name != metric or result.run_id not in runs:
+    for run_id in runs:
+        results = [result for result in manifest.results if result.run_id == run_id]
+        if latest:
+            keep = latest_names(result.name for result in results)
+            results = [result for result in results if result.name in keep]
+        matches = [
+            result
+            for result in results
+            if (split_step_name(result.name)[0] if latest else result.name) == base_metric
+        ]
+        if not matches:
             continue
-        if result.run_id in values:
+        if len(matches) > 1:
             raise LeaderboardError(
-                f"run {result.run_id!r} has multiple results named {metric!r}; refusing ambiguous leaderboard"
+                f"run {run_id!r} has multiple results named {base_metric!r}; refusing ambiguous leaderboard"
             )
-        values[result.run_id] = value_to_json(result.value)
+        values[run_id] = value_to_json(matches[0].value)
 
     eligible: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
@@ -80,8 +91,9 @@ def rank_runs(
     listed = eligible[:top]
     data = {
         "manifest": manifest_path,
-        "metric": metric,
+        "metric": base_metric,
         "direction": direction,
+        "latest": latest,
         "ranked": listed,
         "missing": missing,
         "excluded": excluded,

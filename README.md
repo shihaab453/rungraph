@@ -367,9 +367,9 @@ below accepts `--json` unless noted, and exits `2` on a load or usage failure.
 
 | Command | What it does |
 | --- | --- |
-| `runevidence compare PATH --base RUN_ID --target RUN_ID` | Compare recorded parameters and results of two runs in one manifest (no artifact checks). |
-| `runevidence leaderboard PATH --metric NAME --direction max\|min` | Rank runs by one recorded numeric metric; `--top` limits the list (1-1000). |
-| `runevidence matrix PATH` | Show recorded metrics side by side for selected runs (`--run`, `--metric`). |
+| `runevidence compare PATH --base RUN_ID --target RUN_ID` | Compare recorded parameters and results of two runs in one manifest (no artifact checks; `--latest` compares the highest `<name> @ <step>` value per run). |
+| `runevidence leaderboard PATH --metric NAME --direction max\|min` | Rank runs by one recorded numeric metric; `--top` limits the list (1-1000); `--latest` ranks the highest `<name> @ <step>` value per run. |
+| `runevidence matrix PATH` | Show recorded metrics side by side for selected runs (`--run`, `--metric`); `--latest` collapses `<name> @ <step>` names to one column. |
 | `runevidence run PATH --id RUN_ID` | Show one run's recorded results, artifacts and claims. |
 | `runevidence claim PATH --id CLAIM_ID` | Show one claim's recorded support and contradiction targets. |
 | `runevidence lineage PATH --id CLAIM_ID` | Trace a claim's recorded upstream provenance, naming unresolved nodes and cycles. |
@@ -398,9 +398,9 @@ documents the document format, claim states and exit codes.
 | `rungraph graph ROOT` | Print the graph as JSON or DOT (`--format json\|dot`) and fail on unresolved references with `--fail-on-unresolved`. |
 | `rungraph report ROOT` | Consolidated evidence, claim states and impact (`--baseline`, `--strict`, `--directory-artifacts`, `--json`). |
 | `rungraph impact ROOT --from NODE` | Claims affected by one node, with the dependency path; JSON output. Exit `2` for an unknown node. |
-| `rungraph compare ROOT --metric NAME` | Recorded values for one metric across members with each pair's condition status (`--run`, `--json`). |
-| `rungraph matrix ROOT` | Member-by-metric matrix of recorded values (`--json`). |
-| `rungraph leaderboard ROOT --metric NAME --direction max\|min` | Rank finite numeric values with ties sharing a rank (`--top`, `--json`). |
+| `rungraph compare ROOT --metric NAME` | Recorded values for one metric across members with each pair's condition status (`--run`, `--latest`, `--json`). |
+| `rungraph matrix ROOT` | Member-by-metric matrix of recorded values (`--latest`, `--json`). |
+| `rungraph leaderboard ROOT --metric NAME --direction max\|min` | Rank finite numeric values with ties sharing a rank (`--top`, `--latest`, `--json`). |
 | `rungraph stats ROOT` | Per-metric counts and distribution statistics: rows, numeric, missing, non-numeric, ambiguous, min, max, mean, median and population standard deviation (`--metric`, `--json`). |
 | `rungraph patch ROOT --file PATCH` | Apply an all-or-nothing `rungraph-patch` 0.1 document (`--expected-sha256`, `--dry-run`, `--json`). |
 | `rungraph member add\|remove\|move\|rename ROOT ...` | Edit membership without regenerating the document (`--id`, `--path`, `--expected-sha256`, `--dry-run`, `--json`). |

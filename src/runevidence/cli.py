@@ -372,7 +372,8 @@ def cmd_compare(args: argparse.Namespace) -> int:
         return EXIT_INVALID
     try:
         comparison = compare_runs(
-            loaded.manifest, args.base, args.target, manifest_path=str(loaded.path)
+            loaded.manifest, args.base, args.target,
+            manifest_path=str(loaded.path), latest=args.latest,
         )
     except ComparisonError as exc:
         if args.json:
@@ -455,7 +456,7 @@ def cmd_leaderboard(args: argparse.Namespace) -> int:
     try:
         ranked = rank_runs(
             loaded.manifest, args.metric, args.direction,
-            top=args.top, manifest_path=str(loaded.path),
+            top=args.top, manifest_path=str(loaded.path), latest=args.latest,
         )
     except LeaderboardError as exc:
         if args.json:
@@ -479,7 +480,7 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     try:
         data = metric_matrix(
             loaded.manifest, manifest_path=str(loaded.path),
-            selected_runs=args.run, selected_metrics=args.metric,
+            selected_runs=args.run, selected_metrics=args.metric, latest=args.latest,
         )
     except MatrixError as exc:
         if args.json:
@@ -2731,6 +2732,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")
     p.add_argument("--base", required=True, metavar="RUN_ID", help="baseline run ID")
     p.add_argument("--target", required=True, metavar="RUN_ID", help="target run ID")
+    p.add_argument(
+        "--latest",
+        action="store_true",
+        help="compare the highest '<name> @ <step>' value per run",
+    )
     p.add_argument("--json", action="store_true", help="machine-readable comparison")
     p.set_defaults(func=cmd_compare)
 
@@ -2765,6 +2771,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--direction", choices=("max", "min"), required=True,
                    help="whether a larger (max) or smaller (min) recorded value ranks first")
     p.add_argument("--top", type=int, default=10, metavar="N", help="show 1 to 1000 ranked runs (default: 10)")
+    p.add_argument(
+        "--latest",
+        action="store_true",
+        help="rank the highest '<name> @ <step>' value per run",
+    )
     p.add_argument("--json", action="store_true", help="machine-readable leaderboard")
     p.set_defaults(func=cmd_leaderboard)
 
@@ -2772,6 +2783,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")
     p.add_argument("--run", action="append", metavar="RUN_ID", help="include this run (repeatable; default: all)")
     p.add_argument("--metric", action="append", metavar="NAME", help="include this metric (repeatable; default: all)")
+    p.add_argument(
+        "--latest",
+        action="store_true",
+        help="show the highest '<name> @ <step>' value per run",
+    )
     p.add_argument("--json", action="store_true", help="machine-readable metric matrix")
     p.set_defaults(func=cmd_matrix)
 

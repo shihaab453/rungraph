@@ -128,6 +128,10 @@ cycles are reported per strongly connected component with a bounded example list
   `leaderboard` ranks finite numeric values with ties sharing a rank; `stats` summarizes each
   metric. Rows are identified by `(member, run, result ID)`, so duplicate result names are
   distinct rows and an ambiguous matrix cell is counted, never averaged.
+- `--latest` applies the delivered adapter name convention: for each member, run and base
+  name, it keeps the highest `<name> @ <step>` value (ties at that step stay visible as an
+  ambiguous matrix cell). It turns `loss @ 10` and `loss @ 20` into one `loss` column/row, so
+  runs of different lengths can be compared. Without `--latest` names match exactly.
 - `stats` reports, per metric, the row count, finite numeric count, missing and non-numeric
   counts, ambiguous `(member, run)` pairs with more than one recorded value, and min, max,
   mean, median and population standard deviation over the numeric rows. Distribution fields

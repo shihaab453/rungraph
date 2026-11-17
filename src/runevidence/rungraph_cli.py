@@ -348,7 +348,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
         loaded = load_workspace(Path(args.root))
     except WorkspaceError as exc:
         return _error("compare", "workspace", str(exc))
-    data = compare_data(loaded, args.metric, args.run)
+    data = compare_data(loaded, args.metric, args.run, latest=args.latest)
     _print_json(data)
     return data["exit_code"]
 
@@ -358,7 +358,7 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         loaded = load_workspace(Path(args.root))
     except WorkspaceError as exc:
         return _error("matrix", "workspace", str(exc))
-    _print_json(matrix_data(loaded))
+    _print_json(matrix_data(loaded, latest=args.latest))
     return EXIT_OK
 
 
@@ -376,7 +376,7 @@ def cmd_leaderboard(args: argparse.Namespace) -> int:
         loaded = load_workspace(Path(args.root))
     except WorkspaceError as exc:
         return _error("leaderboard", "workspace", str(exc))
-    data = leaderboard_data(loaded, args.metric, args.direction, args.top)
+    data = leaderboard_data(loaded, args.metric, args.direction, args.top, latest=args.latest)
     _print_json(data)
     return data["exit_code"]
 
@@ -536,11 +536,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("root", nargs="?", default=".")
     p.add_argument("--metric", required=True)
     p.add_argument("--run")
+    p.add_argument(
+        "--latest",
+        action="store_true",
+        help="keep the highest '<name> @ <step>' value per run",
+    )
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_compare)
 
     p = sub.add_parser("matrix", help="recorded values as a member x metric matrix")
     p.add_argument("root", nargs="?", default=".")
+    p.add_argument(
+        "--latest",
+        action="store_true",
+        help="keep the highest '<name> @ <step>' value per run",
+    )
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_matrix)
 
@@ -555,6 +565,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--metric", required=True)
     p.add_argument("--direction", choices=("max", "min"), required=True)
     p.add_argument("--top", type=int, default=10)
+    p.add_argument(
+        "--latest",
+        action="store_true",
+        help="keep the highest '<name> @ <step>' value per run",
+    )
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_leaderboard)
 
