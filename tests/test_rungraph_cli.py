@@ -329,3 +329,26 @@ def test_report_text_names_the_claim_and_finding_messages(tmp_path: Path, capsys
     assert "ERROR missing-file [data]" in out
     assert "claim [prov-a]" in out
     assert "data is intact" in out
+
+
+def test_analysis_routes_offer_human_readable_text(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    capsys.readouterr()
+
+    assert main(["compare", str(root), "--metric", "accuracy", "--text"]) == 0
+    out = capsys.readouterr().out
+    assert "Metric: accuracy" in out and "Rows (2):" in out
+
+    assert main(["matrix", str(root), "--text"]) == 0
+    assert "Metrics: accuracy" in capsys.readouterr().out
+
+    assert main(
+        ["leaderboard", str(root), "--metric", "accuracy", "--direction", "max", "--text"]
+    ) == 0
+    out = capsys.readouterr().out
+    assert "Ranking:" in out and "0.9" in out
+
+    assert main(["stats", str(root), "--metric", "accuracy", "--text"]) == 0
+    out = capsys.readouterr().out
+    assert "2 rows, 2 numeric" in out

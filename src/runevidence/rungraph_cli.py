@@ -346,13 +346,102 @@ def cmd_impact(args: argparse.Namespace) -> int:
     return data["exit_code"]
 
 
+def _format_value(value: object) -> str:
+    if isinstance(value, (dict, list)):
+        return _report_text(value, 120)
+    return _report_text(value, 120)
+
+
+def _format_compare(data: dict) -> str:
+    latest = " (latest step per run)" if data.get("latest") else ""
+    lines = [f'Metric: {data["metric"]}{latest}', f'Rows ({len(data["rows"])}):']
+    for row in data["rows"]:
+        if row["value"] is None:
+            shown = "missing"
+        elif not row["numeric"]:
+            shown = f"{_format_value(row['value'])} (non-numeric)"
+        else:
+            shown = _format_value(row["value"])
+        lines.append(f'  {row["member"]}/{row["run"]}/{row["result"]}: {shown}')
+    lines.append(f'Missing: {data["missing"]}. Non-numeric: {data["non_numeric"]}.')
+    if data["comparability"]:
+        lines.append("Comparability:")
+        for pair in data["comparability"]:
+            if "baseline" in pair:
+                lines.append(
+                    f'  {pair["baseline"]["member"]}#{pair["baseline"]["result"]} -> '
+                    f'{pair["target"]["member"]}#{pair["target"]["result"]}: {pair["conditions"]}'
+                )
+            else:
+                lines.append(f'  {pair["conditions"]}')
+    return "\n".join(lines)
+
+
+def _format_matrix(data: dict) -> str:
+    lines = [f'Metrics: {", ".join(data["metrics"]) or "none"}']
+    for cell in data["cells"]:
+        if cell["state"] == "value":
+            shown = _format_value(cell["value"])
+            if "step" in cell:
+                shown += f' (step {cell["step"]})'
+        else:
+            shown = cell["state"]
+        lines.append(f'  {cell["member"]}/{cell["run"]} {cell["metric"]}: {shown}')
+    lines.append(
+        f'Missing: {data["missing"]}. Non-numeric: {data["non_numeric"]}. '
+        f'Ambiguous: {data["ambiguous"]}.'
+    )
+    return "\n".join(lines)
+
+
+def _format_leaderboard(data: dict) -> str:
+    latest = " (latest step per run)" if data.get("latest") else ""
+    lines = [f'Metric: {data["metric"]} ({data["direction"]}){latest}', "Ranking:"]
+    for row in data["rows"]:
+        lines.append(
+            f'  {row["rank"]:>3}. {_format_value(row["value"])}: '
+            f'{row["member"]}/{row["run"]}'
+        )
+    if not data["rows"]:
+        lines.append("  none")
+    lines.append(
+        f'Missing: {data["excluded"]["missing"]}. '
+        f'Non-numeric: {data["excluded"]["non_numeric"]}.'
+    )
+    return "\n".join(lines)
+
+
+def _format_stats(data: dict) -> str:
+    selected = data.get("metric")
+    latest = " (latest step per run)" if data.get("latest") else ""
+    lines = [f'Metric: {selected}{latest}' if selected else f"All metrics{latest}"]
+    for entry in data["metrics"]:
+        lines.append(
+            f'  {entry["name"]}: {entry["rows"]} rows, {entry["numeric"]} numeric, '
+            f'{entry["missing"]} missing, {entry["non_numeric"]} non-numeric, '
+            f'{entry["ambiguous"]} ambiguous'
+        )
+        if entry["numeric"]:
+            lines.append(
+                f'    min {_format_value(entry["min"])}  max {_format_value(entry["max"])}  '
+                f'mean {_format_value(entry["mean"])}  median {_format_value(entry["median"])}  '
+                f'stddev {_format_value(entry["stddev"])}'
+            )
+    if not data["metrics"]:
+        lines.append("  none")
+    return "\n".join(lines)
+
+
 def cmd_compare(args: argparse.Namespace) -> int:
     try:
         loaded = load_workspace(Path(args.root))
     except WorkspaceError as exc:
         return _error("compare", "workspace", str(exc))
     data = compare_data(loaded, args.metric, args.run, latest=args.latest)
-    _print_json(data)
+    if args.text:
+        print(_format_compare(data))
+    else:
+        _print_json(data)
     return data["exit_code"]
 
 
@@ -361,7 +450,11 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         loaded = load_workspace(Path(args.root))
     except WorkspaceError as exc:
         return _error("matrix", "workspace", str(exc))
-    _print_json(matrix_data(loaded, latest=args.latest))
+    data = matrix_data(loaded, latest=args.latest)
+    if args.text:
+        print(_format_matrix(data))
+    else:
+        _print_json(data)
     return EXIT_OK
 
 
@@ -403,7 +496,11 @@ def cmd_stats(args: argparse.Namespace) -> int:
         loaded = load_workspace(Path(args.root))
     except WorkspaceError as exc:
         return _error("stats", "workspace", str(exc))
-    _print_json(stats_data(loaded, args.metric, latest=args.latest))
+    data = stats_data(loaded, args.metric, latest=args.latest)
+    if args.text:
+        print(_format_stats(data))
+    else:
+        _print_json(data)
     return EXIT_OK
 
 
@@ -413,7 +510,10 @@ def cmd_leaderboard(args: argparse.Namespace) -> int:
     except WorkspaceError as exc:
         return _error("leaderboard", "workspace", str(exc))
     data = leaderboard_data(loaded, args.metric, args.direction, args.top, latest=args.latest)
-    _print_json(data)
+    if args.text:
+        print(_format_leaderboard(data))
+    else:
+        _print_json(data)
     return data["exit_code"]
 
 
@@ -584,6 +684,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="keep the highest '<name> @ <step>' value per run",
     )
+    p.add_argument("--text", action="store_true", help="human-readable output instead of JSON")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_compare)
 
@@ -594,6 +695,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="keep the highest '<name> @ <step>' value per run",
     )
+    p.add_argument("--text", action="store_true", help="human-readable output instead of JSON")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_matrix)
 
@@ -605,6 +707,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="keep the highest '<name> @ <step>' value per run",
     )
+    p.add_argument("--text", action="store_true", help="human-readable output instead of JSON")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_stats)
 
@@ -618,6 +721,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="keep the highest '<name> @ <step>' value per run",
     )
+    p.add_argument("--text", action="store_true", help="human-readable output instead of JSON")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_leaderboard)
 

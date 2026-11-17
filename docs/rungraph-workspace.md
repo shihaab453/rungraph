@@ -162,7 +162,7 @@ cycles are reported per strongly connected component with a bounded example list
 `discover`, `init`, `validate`, `report` and `runs` print text by default and accept `--json`
 for a `rungraph-<command>` envelope with `version: "0.1"` and `exit_code`. `compare`, `matrix`,
 `leaderboard` and `stats` always emit JSON; `--json` is accepted for symmetry, not required.
-`graph` selects JSON or DOT with `--format`; `impact` always emits JSON. Errors use
+`compare`, `matrix`, `leaderboard` and `stats` also accept `--text` for a compact human-readable table; without it they emit JSON. `graph` selects JSON or DOT with `--format`; `impact` always emits JSON. Errors use
 `{"format": "rungraph-error", "command": ...}`.
 
 | Command | 0 | 1 | 2 |
