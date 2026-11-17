@@ -75,3 +75,22 @@ def test_stats_loads_a_manifest_file_and_reports_load_errors(tmp_path: Path, cap
     assert main(["stats", str(root), "--json"]) == 2
     error = json.loads(capsys.readouterr().out)
     assert error["ok"] is False
+
+
+def test_stats_latest_groups_step_families(tmp_path: Path, capsys):
+    document = {
+        "schema_version": "0.1",
+        "project": {"id": "p", "name": "p"},
+        "runs": [{"id": "r"}],
+        "results": [
+            {"id": "a", "run_id": "r", "name": "loss @ 5", "value": 0.9},
+            {"id": "b", "run_id": "r", "name": "loss @ 10", "value": 0.5},
+        ],
+    }
+    (tmp_path / "runevidence.json").write_text(json.dumps(document), encoding="utf-8")
+
+    assert main(["stats", str(tmp_path), "--metric", "loss", "--latest", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["latest"] is True
+    assert data["metrics"][0]["rows"] == 1
+    assert data["metrics"][0]["mean"] == 0.5

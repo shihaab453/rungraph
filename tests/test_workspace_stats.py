@@ -207,3 +207,21 @@ def test_stddev_rounds_the_exact_variance_case(tmp_path: Path, capsys):
     value = 2**180 + 2**127
     entry = stats_for(capsys, tmp_path, [{"name": "m", "value": 0}, {"name": "m", "value": value}])
     assert entry["stddev"] == 7.662477704329444e53
+
+
+def test_stats_latest_groups_step_families(tmp_path: Path, capsys):
+    root = tmp_path
+    left = root / "a"
+    left.mkdir()
+    (left / "runevidence.json").write_text(
+        json.dumps(manifest([{"name": "loss @ 5", "value": 0.9}, {"name": "loss @ 10", "value": 0.5}])),
+        encoding="utf-8",
+    )
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    capsys.readouterr()
+
+    assert main(["stats", str(root), "--metric", "loss", "--latest", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["latest"] is True
+    assert data["metrics"][0]["rows"] == 1
+    assert data["metrics"][0]["mean"] == 0.5

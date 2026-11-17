@@ -483,6 +483,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
         loaded.manifest,
         manifest_path=str(loaded.path),
         metric=args.metric,
+        latest=args.latest,
     )
     if args.json:
         print(json.dumps(data, indent=2, ensure_ascii=True, allow_nan=False))
@@ -2844,6 +2845,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("stats", help="summarize recorded metrics with counts and distribution statistics")
     p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")
     p.add_argument("--metric", metavar="NAME", help="include only this metric")
+    p.add_argument(
+        "--latest",
+        action="store_true",
+        help="summarize the highest '<name> @ <step>' value per run",
+    )
     p.add_argument("--json", action="store_true", help="machine-readable statistics")
     p.set_defaults(func=cmd_stats)
 

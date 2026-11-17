@@ -403,7 +403,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
         loaded = load_workspace(Path(args.root))
     except WorkspaceError as exc:
         return _error("stats", "workspace", str(exc))
-    _print_json(stats_data(loaded, getattr(args, "metric", None)))
+    _print_json(stats_data(loaded, args.metric, latest=args.latest))
     return EXIT_OK
 
 
@@ -600,6 +600,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("stats", help="per-metric count and distribution statistics")
     p.add_argument("root", nargs="?", default=".")
     p.add_argument("--metric")
+    p.add_argument(
+        "--latest",
+        action="store_true",
+        help="keep the highest '<name> @ <step>' value per run",
+    )
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_stats)
 
