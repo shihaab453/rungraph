@@ -128,7 +128,7 @@ def test_the_adapter_refuses_without_protected_reads(tmp_path: Path, monkeypatch
     from runevidence_keras import KerasAdapter
 
     write_history(tmp_path, "epoch,loss\n1,0.5\n")
-    monkeypatch.setattr("runevidence_keras.adapter._dir_fd_supported", lambda: False)
+    monkeypatch.setattr("runevidence.checks.files._DIR_FD", False)
     with pytest.raises(AdapterError):
         KerasAdapter().extract(
             tmp_path, KerasAdapter().discover(tmp_path), project_id="p", project_name="p"

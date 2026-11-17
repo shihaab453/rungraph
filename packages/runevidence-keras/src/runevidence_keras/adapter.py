@@ -17,7 +17,8 @@ from typing import Any
 from runevidence.adapters import Adapter, AdapterError, Discovery, GenericAdapter
 from runevidence.adapters.generic import valid_slug
 from runevidence.checks.csv import CsvProfile, CsvProfileError, parse_number
-from runevidence.checks.files import _dir_fd_supported, _parts_for, _read_snapshot_parts
+from runevidence.checks import files as check_files
+from runevidence.checks.files import _parts_for, _read_snapshot_parts
 from runevidence.models import Artifact, Manifest04, Project, Result04, Run
 
 HISTORY_NAME = "history.csv"
@@ -38,7 +39,7 @@ class KerasAdapter(Adapter):
         self, root: Path, discovery: Discovery, *, project_id: str, project_name: str
     ) -> Manifest04:
         root = Path(root)
-        if not _dir_fd_supported():
+        if not check_files._DIR_FD:
             raise AdapterError(
                 "the Keras adapter needs POSIX directory-descriptor support for protected "
                 "reads; use --adapter generic on this host. Nothing was written."
