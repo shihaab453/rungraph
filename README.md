@@ -397,7 +397,7 @@ documents the document format, claim states and exit codes.
 | `rungraph discover ROOT` | List every manifest under a root with stable or provisional member IDs (`--check`, `--directory-artifacts`, `--json`). Exit `2` on empty discovery, duplicates, nested members, unreadable manifests or limits. |
 | `rungraph init ROOT` | Write `rungraph.json` from discovery (`--id`, `--name`, `--force`, `--dry-run`, `--json`). Refuses an empty discovery or an invalid ID/name; writes under the workspace lock and an atomic replace; `--force` keeps a copy of the previous document even if the write fails. |
 | `rungraph validate ROOT` | Validate every member and the workspace layer (`--strict`, `--directory-artifacts`, `--json`). Exit `1` on evidence errors or strict warnings, `2` on load or usage failure. |
-| `rungraph graph ROOT` | Print the graph as JSON or DOT (`--format json\|dot`) and fail on unresolved references with `--fail-on-unresolved`. |
+| `rungraph graph ROOT` | Print the graph as JSON or DOT (`--format json\|dot`), optionally with recorded object data on JSON nodes (`--detail`), and fail on unresolved references with `--fail-on-unresolved`. |
 | `rungraph report ROOT` | Consolidated evidence, claim states and impact (`--baseline`, `--strict`, `--directory-artifacts`, `--json`). |
 | `rungraph runs ROOT` | Recorded runs across members with params, conditions and per-run artifact/result counts (`--member`, `--metadata`, `--json`). |
 | `rungraph impact ROOT --from NODE` | Claims affected by one node, with the dependency path; JSON output. Exit `2` for an unknown node. |

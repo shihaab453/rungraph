@@ -14,6 +14,64 @@ from .workspace import LoadedWorkspace
 from .workspace_graph import ClaimState, Graph, claim_support_closure, node_id
 
 
+def _node_detail(loaded: LoadedWorkspace, node) -> Optional[dict[str, Any]]:
+    item = loaded.members.get(node.member) if node.member is not None else None
+    manifest = item.manifest if item is not None else None
+    if node.kind == "claim":
+        claim = next((entry for entry in loaded.document.claims if entry.id == node.local), None)
+        return claim.model_dump(mode="json") if claim is not None else None
+    if manifest is None:
+        return None
+    if node.kind == "project":
+        return manifest.project.model_dump(mode="json")
+    collections = {
+        "run": manifest.runs,
+        "artifact": manifest.artifacts,
+        "result": manifest.results,
+        "evidence": manifest.evidence,
+    }
+    entries = collections.get(node.kind)
+    if entries is None:
+        return None
+    entry = next((value for value in entries if value.id == node.local), None)
+    return entry.model_dump(mode="json") if entry is not None else None
+
+
+def graph_data(loaded: LoadedWorkspace, graph: Graph, *, detail: bool = False) -> dict[str, Any]:
+    nodes: list[dict[str, Any]] = []
+    for node in graph.nodes.values():
+        row: dict[str, Any] = {
+            "id": node.id,
+            "kind": node.kind,
+            "member": node.member,
+            "status": node.status,
+            "label": node.label,
+        }
+        if detail:
+            data = _node_detail(loaded, node)
+            if data is not None:
+                row["data"] = data
+        nodes.append(row)
+    return {
+        "format": "rungraph-graph",
+        "version": "0.1",
+        "detail": detail,
+        "nodes": nodes,
+        "edges": [
+            {
+                "source": edge.source,
+                "target": edge.target,
+                "relation": edge.relation,
+                "origin": edge.origin,
+            }
+            for edge in graph.edges
+        ],
+        "context": graph.context,
+        "cycles": graph.cycles,
+        "unresolved": graph.unresolved,
+    }
+
+
 def claim_closure(loaded: LoadedWorkspace, graph: Graph, state: ClaimState) -> set[str]:
     if state.member is not None:
         start = node_id("evidence", state.member, state.id)

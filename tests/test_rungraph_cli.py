@@ -352,3 +352,21 @@ def test_analysis_routes_offer_human_readable_text(tmp_path: Path, capsys):
     assert main(["stats", str(root), "--metric", "accuracy", "--text"]) == 0
     out = capsys.readouterr().out
     assert "2 rows, 2 numeric" in out
+
+
+def test_graph_detail_adds_recorded_object_data(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    capsys.readouterr()
+
+    assert main(["graph", str(root), "--detail"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["detail"] is True
+    nodes = {node["id"]: node for node in data["nodes"]}
+    assert nodes["run:prov-a#r"]["data"]["id"] == "r"
+    assert nodes["evidence:prov-a#claim"]["data"]["claim"] == "data is intact"
+    assert nodes["artifact:prov-a#data"]["data"]["path"] == "data.csv"
+
+    assert main(["graph", str(root)]) == 0
+    plain = json.loads(capsys.readouterr().out)
+    assert all("data" not in node for node in plain["nodes"])
