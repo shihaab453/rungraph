@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("runevidence_sacred")
+
 from runevidence.cli import main
 
 
@@ -131,3 +133,73 @@ def test_nested_pointer_names_are_escaped(tmp_path: Path):
     manifest = json.loads((tmp_path / "runevidence.json").read_text(encoding="utf-8"))
     assert manifest["results"][0]["locator"] == "/a~1b~0c/values/0"
     assert main(["validate", str(tmp_path)]) == 0
+
+
+def test_repeated_steps_get_distinct_result_names(tmp_path: Path, capsys):
+    folder = write_run(tmp_path)
+    (folder / "metrics.json").write_text(
+        json.dumps({"loss": {"values": [1, 2], "steps": [1, 1]}}), encoding="utf-8"
+    )
+    assert main(["init", str(tmp_path), "--adapter", "sacred", "--name", "Study", "--id", "study"]) == 0
+    manifest = json.loads((tmp_path / "runevidence.json").read_text(encoding="utf-8"))
+    names = [item["name"] for item in manifest["results"]]
+    assert names == ["loss @ 1", "loss @ 1 #2"]
+    capsys.readouterr()
+    assert main(["validate", str(tmp_path), "--strict"]) == 0
+
+
+def test_strict_json_refusals_leave_the_artifact(tmp_path: Path, capsys):
+    folder = write_run(tmp_path)
+    for bad in (
+        '{"loss":{"values":[1],"values":[2]}}',
+        '{"loss":{"values":[1e-999]}}',
+        '{"lost":1e999,"loss":{"values":[1]}}',
+        '{"loss":{"values":[' + "9" * 513 + ']}}',
+        '{"loss":\r{"values":[1]}}',
+    ):
+        (folder / "metrics.json").write_text(bad, encoding="utf-8")
+        (tmp_path / "runevidence.json").unlink(missing_ok=True)
+        assert main(["init", str(tmp_path), "--adapter", "sacred", "--name", "Study", "--id", "study"]) == 0
+        manifest = json.loads((tmp_path / "runevidence.json").read_text(encoding="utf-8"))
+        assert manifest["results"] == []
+        assert "1/metrics.json" in manifest["runs"][0]["metadata"]["sacred"]["unreadable"]
+        capsys.readouterr()
+        assert main(["validate", str(tmp_path)]) == 0
+
+
+def test_literal_nan_values_are_skipped_but_finite_values_remain(tmp_path: Path):
+    folder = write_run(tmp_path)
+    (folder / "metrics.json").write_text(
+        '{"loss":{"values":[NaN, 1.0],"steps":[1,2]}}', encoding="utf-8"
+    )
+    assert main(["init", str(tmp_path), "--adapter", "sacred", "--name", "Study", "--id", "study"]) == 0
+    manifest = json.loads((tmp_path / "runevidence.json").read_text(encoding="utf-8"))
+    assert [item["value"] for item in manifest["results"]] == [1.0]
+    assert main(["validate", str(tmp_path)]) == 0
+
+
+def test_a_lone_surrogate_metric_name_is_skipped(tmp_path: Path):
+    folder = write_run(tmp_path)
+    (folder / "metrics.json").write_text(
+        '{"\\ud800":{"values":[1]},"ok":{"values":[2]}}', encoding="utf-8"
+    )
+    assert main(["init", str(tmp_path), "--adapter", "sacred", "--name", "Study", "--id", "study"]) == 0
+    manifest = json.loads((tmp_path / "runevidence.json").read_text(encoding="utf-8"))
+    assert [item["name"] for item in manifest["results"]] == ["ok @ 0"]
+
+
+def test_an_external_symlink_is_not_read(tmp_path: Path):
+    import os
+
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"secret": 1}), encoding="utf-8")
+    folder = write_run(tmp_path / "root")
+    (folder / "config.json").unlink()
+    try:
+        os.symlink(outside, folder / "config.json")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available")
+    assert main(["init", str(tmp_path / "root"), "--adapter", "sacred", "--name", "Study", "--id", "study"]) == 0
+    manifest = json.loads((tmp_path / "root" / "runevidence.json").read_text(encoding="utf-8"))
+    assert manifest["runs"][0]["params"] == {}
+    assert "1/config.json" in manifest["runs"][0]["metadata"]["sacred"]["unreadable"]

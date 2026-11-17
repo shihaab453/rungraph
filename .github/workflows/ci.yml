@@ -77,7 +77,7 @@ jobs:
       # The adapter's tests skip themselves when it is not installed. Fail
       # here instead, so a broken install cannot hide behind a green run.
       - name: Check adapters are registered
-        run: python -c "from runevidence.adapters import get_adapter; get_adapter('hydra'); get_adapter('mlflow'); get_adapter('tensorboard')"
+        run: python -c "from runevidence.adapters import get_adapter; get_adapter('sacred'); get_adapter('hydra'); get_adapter('mlflow'); get_adapter('tensorboard')"
 
       - name: Run tests
         run: python -m pytest
@@ -397,7 +397,7 @@ jobs:
               print("PACKAGING ADVISORY: ALL TWELVE ARCHIVES PASS")
               summary = Path(os.environ.get("GITHUB_STEP_SUMMARY", str(OUT / "summary.md")))
               with summary.open("a", encoding="utf-8") as f:
-                  f.write("### Packaging advisory: PASS\nTwelve archives built and checked, including four sdist-derived wheels. See job log for SHA-256, members, metadata, and validators. No artifacts uploaded.\n")
+                  f.write("### Packaging advisory: PASS\nFifteen archives built and checked, including five sdist-derived wheels. See job log for SHA-256, members, metadata, and validators. No artifacts uploaded.\n")
 
 
           if __name__ == "__main__":
@@ -411,7 +411,7 @@ jobs:
                   raise
           PY
 
-  # Advisory fresh-install smoke: build the four wheels, install them into a
+  # Advisory fresh-install smoke: build the five wheels, install them into a
   # clean venv and run the installed console scripts. Not a required ruleset
   # context, but it catches a wheel that imports or dispatches differently from
   # the source tree.

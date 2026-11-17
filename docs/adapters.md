@@ -109,8 +109,10 @@ A Sacred `FileStorageObserver` base directory holds one folder per run with `run
 `config.json`, `metrics.json`, `cout.txt` and copied artifacts. The adapter records one run per
 folder containing `run.json`, the configuration as params, every file as a hashed artifact, and
 every scalar metric value as a schema 0.3 result with a JSON Pointer locator into
-`metrics.json`. Names are `<metric> @ <step>`; non-scalar and non-finite values are skipped.
-No Sacred installation is required.
+`metrics.json`. Names are `<metric> @ <step>`, with a stable suffix for repeated steps;
+non-scalar and parseable non-finite values are skipped. A file that fails the strict JSON
+locator profile is retained as an artifact but listed under `metadata.sacred.unreadable`.
+No Sacred installation is required, and an external symlink is never read.
 
 ```bash
 pip install -e . -e ./packages/runevidence-sacred

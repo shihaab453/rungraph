@@ -22,7 +22,6 @@ artifact and is reported in ``metadata["sacred"]["unreadable"]``.
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +30,7 @@ from typing import Any, Optional
 from runevidence.adapters import Adapter, AdapterError, Discovery, GenericAdapter
 from runevidence.adapters.generic import valid_slug
 from runevidence.hashing import sha256_file
+from runevidence.locator_profiles import ProfileError, parse_json_document
 from runevidence.models import Artifact, Manifest, Project, Result, Run
 
 RUN_FILE = "run.json"
@@ -38,10 +38,6 @@ CONFIG_FILE = "config.json"
 METRICS_FILE = "metrics.json"
 MAX_METRICS_BYTES = 50 * 1024 * 1024
 MAX_RESULTS = 10_000
-
-
-def _reject_constant(value: str) -> Any:
-    raise ValueError(f"non-finite JSON constant {value}")
 
 
 class SacredAdapter(Adapter):
@@ -66,7 +62,11 @@ class SacredAdapter(Adapter):
         self, root: Path, discovery: Discovery, *, project_id: str, project_name: str
     ) -> Manifest:
         root = Path(root)
-        run_dirs: list[str] = sorted(set(discovery.details.get("runs", [])))
+        run_dirs: list[str] = [
+            item
+            for item in sorted(set(discovery.details.get("runs", [])))
+            if not _has_symlink_component(root, item)
+        ]
         if not run_dirs:
             raise AdapterError(
                 "no Sacred run folders found (a run folder contains run.json). "
@@ -74,6 +74,7 @@ class SacredAdapter(Adapter):
             )
         used: set[str] = {project_id}
         run_ids: dict[str, str] = {}
+        names_by_run: dict[str, set[str]] = {}
         runs: list[Run] = []
         results: list[Result] = []
         for run_dir in run_dirs:
@@ -94,6 +95,10 @@ class SacredAdapter(Adapter):
             )
             metrics_path = _join(run_dir, METRICS_FILE)
             for metric_name in sorted(metrics):
+                try:
+                    metric_name.encode("utf-8")
+                except UnicodeEncodeError:
+                    continue
                 entry = metrics[metric_name]
                 if not isinstance(entry, dict):
                     continue
@@ -108,6 +113,8 @@ class SacredAdapter(Adapter):
                     step = steps[index] if index < len(steps) else index
                     if isinstance(step, bool) or not isinstance(step, (int, float, str)):
                         step = index
+                    elif isinstance(step, float) and not math.isfinite(step):
+                        step = index
                     pointer = (
                         "/"
                         + _escape(metric_name)
@@ -116,11 +123,18 @@ class SacredAdapter(Adapter):
                     )
                     result_id = _result_id(run_id, pointer)
                     _reserve(result_id, used)
+                    base_name = f"{metric_name} @ {step}"
+                    name = base_name
+                    suffix = 2
+                    while name in names_by_run.setdefault(run_id, set()):
+                        name = f"{base_name} #{suffix}"
+                        suffix += 1
+                    names_by_run[run_id].add(name)
                     results.append(
                         Result(
                             id=result_id,
                             run_id=run_id,
-                            name=f"{metric_name} @ {step}",
+                            name=name,
                             value=value,
                             artifact_id=None,
                             locator=pointer,
@@ -172,37 +186,48 @@ def _read_run(root: Path, run_dir: str) -> tuple[dict, dict, dict, dict]:
     unreadable: list[str] = []
     reasons: dict[str, str] = {}
 
-    def load(name: str, cap: Optional[int] = None) -> Any:
+    def load(
+        name: str, cap: Optional[int] = None, *, allow_nonfinite: bool = False
+    ) -> Any:
         rel = _join(run_dir, name)
         path = root / rel
         if not path.is_file():
             return None
+        target = _safe_target(root, path)
+        if target is None:
+            unreadable.append(rel)
+            reasons[rel] = "resolves outside the selected root"
+            return None
         try:
-            size = path.stat().st_size
+            size = target.stat().st_size
             if cap is not None and size > cap:
                 unreadable.append(rel)
                 reasons[rel] = f"larger than {cap} bytes"
                 return None
-            text = path.read_text(encoding="utf-8")
+            data = target.read_bytes()
         except (OSError, UnicodeDecodeError) as exc:
             unreadable.append(rel)
             reasons[rel] = f"cannot be read as UTF-8 text ({type(exc).__name__})"
             return None
         try:
-            data = json.loads(text, parse_constant=_reject_constant)
-        except (ValueError, RecursionError) as exc:
+            parsed = parse_json_document(data)
+        except ProfileError as exc:
             unreadable.append(rel)
-            reasons[rel] = f"is not valid JSON ({type(exc).__name__})"
+            reasons[rel] = f"is not valid under the strict JSON profile ({exc})"
             return None
-        if not isinstance(data, dict):
+        if not isinstance(parsed, dict):
             unreadable.append(rel)
             reasons[rel] = "is not a JSON object"
             return None
-        return data
+        if not allow_nonfinite and not _finite_json(parsed):
+            unreadable.append(rel)
+            reasons[rel] = "contains a non-finite number"
+            return None
+        return parsed
 
     run_json = load(RUN_FILE) or {}
     config = load(CONFIG_FILE) or {}
-    metrics = load(METRICS_FILE, MAX_METRICS_BYTES) or {}
+    metrics = load(METRICS_FILE, MAX_METRICS_BYTES, allow_nonfinite=True) or {}
     experiment = _mapping(run_json.get("experiment"))
     for key in ("name", "id", "status", "command", "start_time", "stop_time"):
         value = experiment.get(key, run_json.get(key))
@@ -213,6 +238,35 @@ def _read_run(root: Path, run_dir: str) -> tuple[dict, dict, dict, dict]:
         info["unreadable"] = unreadable
         info["unreadable_reasons"] = reasons
     return run_json, config, metrics, info
+
+def _has_symlink_component(root: Path, rel: str) -> bool:
+    current = root
+    for part in rel.split("/") if rel else ():
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def _safe_target(root: Path, path: Path) -> Optional[Path]:
+    try:
+        base = root.resolve()
+        target = path.resolve()
+    except OSError:
+        return None
+    if target != base and base not in target.parents:
+        return None
+    return target
+
+
+def _finite_json(value: Any) -> bool:
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, list):
+        return all(_finite_json(item) for item in value)
+    if isinstance(value, dict):
+        return all(isinstance(key, str) and _finite_json(item) for key, item in value.items())
+    return True
 
 
 def _started_at(run_json: dict) -> Optional[datetime]:

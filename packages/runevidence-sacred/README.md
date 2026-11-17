@@ -24,8 +24,11 @@ runevidence validate runs/
 The adapter records every file as a hashed artifact, one run per folder containing
 `run.json`, the configuration as run params, and every scalar metric value as a schema 0.3 result
 with a JSON Pointer locator into `metrics.json`. Result names are `<metric> @ <step>`; when no
-step was recorded, the array index is used. Non-scalar and non-finite values are skipped. A
-malformed `metrics.json` leaves its artifact and is listed under
-`metadata.sacred.unreadable`.
+step was recorded, the array index is used, and repeated names get a stable `#2`, `#3` suffix.
+Non-scalar values and parseable non-finite values are skipped. A file that fails the strict
+JSON locator profile (duplicate keys, underflow/overflow, oversized integers, bare CR or excessive
+nesting) is retained as an artifact but listed under `metadata.sacred.unreadable`; no results are
+recorded from it. Configuration files use the same strict profile, and an external symlink is not
+read.
 
 No Sacred installation is required, and nothing is read outside the folder.
