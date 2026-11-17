@@ -39,7 +39,7 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,315 passed, 138 skipped on Python 3.12; 6,312 passed, 141 skipped on
+- **Full suite**: 6,324 passed, 138 skipped on Python 3.12; 6,321 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
@@ -79,6 +79,7 @@ checked both the exit code and the visible output:
 | `fingerprint-compare` / `review-diff` / `impact-diff` / `review-gate` | changed file bytes | not their domain: they state that recorded assertions only were compared and point at `validate` |
 | `comparability` | no recorded conditions | exit 2 (unavailable); preflight with the same pair exits 1 (not ready) |
 | `assess` | changed artifact or value | target evidence errors, `NOT PERMITTED`, exit 1 |
+| `assess` | selected result without a locator | `results.<side>.state = unverified`, `NOT PERMITTED`, exit 1 |
 | `discover` / `init` (workspace) | empty root; existing document without `--force` | exit 2 |
 | `validate` / `report` (workspace) | member evidence error | exit 1; unresolved references and cycles are named claim states, and `graph --fail-on-unresolved` exits 1 |
 | workspace authoring | path escape, duplicate member path, stale SHA, malformed or non-object file, wrong patch envelope, operation without its payload, missing claim `id` | exit 2, no traceback, document byte-identical |
@@ -119,6 +120,13 @@ The probe found and fixed these defects, each with a regression test:
 - The README command reference did not name the workspace routes, and the workspace guide
   claimed `--json` for `graph`/`impact`; both are corrected and the docs-contract test now
   covers the workspace parser (`tests/test_docs_contract.py`).
+- `assess` treated a manifest with no error findings as intact and permitted the comparison
+  even when a selected result had no source locator, including every recorded-only 0.1/0.2
+  result that is not a verifiable MLflow summary. Each selected result is now classified
+  `verified`, `unverified`, `failed` or `missing`; `PERMITTED` requires both selected values
+  to be `verified`, and an unavailable conditions verdict names its closed failure code
+  (`tests/test_cli_assess.py`). Recorded-only comparison remains available through
+  `comparability` and `compare`.
 - Workspace verification could report success after a member changed: a member manifest that
   loaded once but could not be re-read or checked was skipped, so `validate` exited `0` and
   the member claim stayed `supported`. A manifest replaced with a different valid document
