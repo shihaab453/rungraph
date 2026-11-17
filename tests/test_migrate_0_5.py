@@ -58,7 +58,7 @@ CONDITIONS_0_3_TEXT = (
 )
 UNSUPPORTED_TARGET_TEXT = (
     "ERROR (UNSUPPORTED_TARGET): only --to 0.2, --to 0.3, --to 0.4, --to 0.5, "
-    "--to 0.6, --to 0.7, --to 0.8, --to 0.9 or --to 0.10 is supported; downgrade and other "
+    "--to 0.6, --to 0.7, --to 0.8, --to 0.9, --to 0.10 or --to 0.11 is supported; downgrade and other "
     "versions are not available. Nothing was written."
 )
 LOCATOR_REFRESH_TEXT = (
@@ -492,13 +492,13 @@ def test_unknown_target_stays_unsupported_at_the_cli_layer(tmp_path):
     write(folder, tb_doc())
     before = snapshot(folder)
 
-    code, out, err = run(["migrate", str(folder), "--to", "0.11", "--json"])
+    code, out, err = run(["migrate", str(folder), "--to", "0.12", "--json"])
 
     assert (code, err) == (2, "")
     assert json.loads(out)["error"]["code"] == "UNSUPPORTED_TARGET"
     assert_no_writes(folder, before)
 
-    text_code, text_out, text_err = run(["migrate", str(folder), "--to", "0.11"])
+    text_code, text_out, text_err = run(["migrate", str(folder), "--to", "0.12"])
     assert (text_code, text_err) == (2, "")
     assert text_out == UNSUPPORTED_TARGET_TEXT + "\n"
     assert_no_writes(folder, before)

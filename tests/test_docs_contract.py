@@ -18,6 +18,7 @@ PAGES = {
     "0.8": "schema-0.8-tensorboard-media.md",
     "0.9": "schema-0.9-tensorboard-tensors.md",
     "0.10": "schema-0.10-tf2-media.md",
+    "0.11": "schema-0.11-tf2-histograms.md",
 }
 
 
@@ -37,15 +38,16 @@ def test_guide_names_every_init_include_flag():
         "--include-audio",
         "--include-tensors",
         "--include-tf2-media",
+        "--include-tf2-histograms",
     ):
         assert flag in GUIDE, f"{flag} is missing from the TensorBoard guide"
         assert flag in README, f"{flag} is missing from README.md"
 
 
 def test_readme_names_every_migrate_target():
-    listed = "0.2\\|0.3\\|0.4\\|0.5\\|0.6\\|0.7\\|0.8\\|0.9\\|0.10"
+    listed = "0.2\\|0.3\\|0.4\\|0.5\\|0.6\\|0.7\\|0.8\\|0.9\\|0.10\\|0.11"
     assert f"--to {listed}" in README, "the README migrate row is missing a target"
-    assert TARGET_VERSIONS[-1] == "0.10"
+    assert TARGET_VERSIONS[-1] == "0.11"
 
 
 def test_guide_locator_kinds_match_the_models():
@@ -80,6 +82,7 @@ def test_guide_lists_every_include_flag_in_the_table():
         "--include-audio",
         "--include-tensors",
         "--include-tf2-media",
+        "--include-tf2-histograms",
     ):
         assert any(flag in row for row in table_rows), f"{flag} has no guide table row"
 

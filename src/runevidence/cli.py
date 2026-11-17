@@ -1085,6 +1085,14 @@ INIT_0_7_REFUSAL = (
 )
 
 
+INIT_0_11_REFUSAL = (
+    "ERROR: the existing manifest declares schema 0.11. init --force would regenerate the "
+    "manifest and cannot carry over first-class values or locators. Nothing was written. "
+    "Move the manifest aside, run init, then run runevidence migrate PATH --to 0.11 (unless "
+    "the adapter writes 0.11 itself) and reapply the first-class values and locators."
+)
+
+
 INIT_0_10_REFUSAL = (
     "ERROR: the existing manifest declares schema 0.10. init --force would regenerate the "
     "manifest and cannot carry over first-class values or locators. Nothing was written. "
@@ -1128,13 +1136,15 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         return EXIT_INVALID
     declared = _declared_manifest_version(out) if out.exists() else None
     if out.exists() and args.force and declared in (
-        "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10"
+        "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11"
     ):
         # Refuse before adapter discovery, backup creation or any write: a raw
         # 0.2/0.3/0.4/0.5 declaration means hand-entered data (or a would-be
         # downgrade) is at risk. An unparseable manifest keeps the legacy
         # backup-and-replace path below.
-        if declared == "0.10":
+        if declared == "0.11":
+            print(INIT_0_11_REFUSAL)
+        elif declared == "0.10":
             print(INIT_0_10_REFUSAL)
         elif declared == "0.9":
             print(INIT_0_9_REFUSAL)
@@ -1229,6 +1239,20 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
                 "Nothing was written."
             )
             return EXIT_INVALID
+    include_tf2_histograms = bool(getattr(args, "include_tf2_histograms", False))
+    if include_tf2_histograms:
+        if not getattr(adapter, "supports_include_tf2_histograms", False):
+            print(
+                f"ERROR: adapter {adapter.name!r} does not support --include-tf2-histograms. "
+                "Nothing was written."
+            )
+            return EXIT_INVALID
+        if not _accepts_keyword(adapter, "include_tf2_histograms"):
+            print(
+                f"ERROR: adapter {adapter.name!r} cannot apply --include-tf2-histograms. "
+                "Nothing was written."
+            )
+            return EXIT_INVALID
     include_tf2_media = bool(getattr(args, "include_tf2_media", False))
     if include_tf2_media:
         if not getattr(adapter, "supports_include_tf2_media", False):
@@ -1278,6 +1302,8 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
             extra["include_tensors"] = True
         if include_tf2_media:
             extra["include_tf2_media"] = True
+        if include_tf2_histograms:
+            extra["include_tf2_histograms"] = True
         manifest = adapter.extract(
             root,
             discovery,
@@ -1362,7 +1388,7 @@ _MIGRATE_ERROR_TEXT = {
     ),
     "UNSUPPORTED_TARGET": (
         "ERROR (UNSUPPORTED_TARGET): only --to 0.2, --to 0.3, --to 0.4, --to 0.5, "
-        "--to 0.6, --to 0.7, --to 0.8, --to 0.9 or --to 0.10 is supported; downgrade and other "
+        "--to 0.6, --to 0.7, --to 0.8, --to 0.9, --to 0.10 or --to 0.11 is supported; downgrade and other "
         "versions are not available. Nothing was written."
     ),
     "RESERVED_PATH": (
@@ -2895,6 +2921,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--include-tf2-histograms",
+        action="store_true",
+        help=(
+            "also record TensorFlow 2 [k,3] histograms as schema 0.11 results "
+            "(opt-in; implies schema 0.11)"
+        ),
+    )
+    p.add_argument(
         "--include-tensors",
         action="store_true",
         help=(
@@ -2931,10 +2965,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "migrate",
-        help="declare an existing manifest as schema 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9 or 0.10 without changing any recorded value (explicit, no inference)",
+        help="declare an existing manifest as schema 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.10 or 0.11 without changing any recorded value (explicit, no inference)",
     )
     p.add_argument("path", type=Path, help=f"experiment folder (containing {MANIFEST_FILENAME}) or manifest file")
-    p.add_argument("--to", required=True, metavar="VERSION", help="target schema version (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9 or 0.10)")
+    p.add_argument("--to", required=True, metavar="VERSION", help="target schema version (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.10 or 0.11)")
     p.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
     p.add_argument("--json", action="store_true", help="machine-readable result")
     p.set_defaults(func=cmd_migrate)

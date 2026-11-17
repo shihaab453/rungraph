@@ -17,6 +17,7 @@ from ..models import (
     SCHEMA_VERSION_0_8,
     SCHEMA_VERSION_0_9,
     SCHEMA_VERSION_0_10,
+    SCHEMA_VERSION_0_11,
     CsvCellLocator,
     TensorboardAudioLocator,
     TensorboardHistogramLocator,
@@ -25,6 +26,7 @@ from ..models import (
     TensorboardStringLocator,
     TensorboardTensorLocator,
     TensorboardTf2AudioLocator,
+    TensorboardTf2HistogramLocator,
     TensorboardTf2ImageLocator,
 )
 from .conditions import check_conditions
@@ -65,6 +67,7 @@ _LOCATOR_SCHEMAS = frozenset(
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
         SCHEMA_VERSION_0_10,
+        SCHEMA_VERSION_0_11,
     }
 )
 
@@ -87,6 +90,7 @@ def _csv_cell_cap(
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
         SCHEMA_VERSION_0_10,
+        SCHEMA_VERSION_0_11,
     ):
         return False, frozenset()
     eligible_artifacts = {
@@ -132,6 +136,7 @@ def _tensorboard_cap(
         SCHEMA_VERSION_0_8,
         SCHEMA_VERSION_0_9,
         SCHEMA_VERSION_0_10,
+        SCHEMA_VERSION_0_11,
     ):
         return False, frozenset()
     eligible_artifacts = {
@@ -158,6 +163,7 @@ def _tensorboard_cap(
                 TensorboardTensorLocator,
                 TensorboardTf2ImageLocator,
                 TensorboardTf2AudioLocator,
+                TensorboardTf2HistogramLocator,
             ),
         ):
             continue
@@ -209,6 +215,7 @@ def _tensorboard_snapshot_ids(manifest) -> frozenset[str]:
                 TensorboardTensorLocator,
                 TensorboardTf2ImageLocator,
                 TensorboardTf2AudioLocator,
+                TensorboardTf2HistogramLocator,
             ),
         )
         and result.artifact_id is not None

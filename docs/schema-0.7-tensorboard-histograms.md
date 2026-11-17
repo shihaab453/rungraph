@@ -21,7 +21,7 @@ One histogram per `Summary.Value`, as a structured value:
 Numbers are finite binary64, `num` and counts are nonnegative, arrays have
 equal lengths, limits strictly increase, and there are at most 1,024 buckets.
 Counts are per-bucket as written, not cumulative. Statistics are preserved, not
-recomputed. TF2 `[k,3]` tensor histograms are **not** recorded.
+recomputed. TF2 `[k,3]` tensor histograms are covered by schema 0.11, not this legacy form.
 
 The locator is
 `{"kind":"tensorboard-histogram","tag":…,"step":…,"occurrence":…}`; occurrence

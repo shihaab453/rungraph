@@ -3,9 +3,32 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
-from .models import AudioValue, HistogramValue, ImageValue, TensorValue
+from .models import AudioValue, HistogramValue, ImageValue, TensorValue, Tf2HistogramValue
+
+
+def _tf2_num(buckets: list[dict[str, Any]]) -> str:
+    try:
+        total = math.fsum(bucket["count"] for bucket in buckets)
+    except OverflowError:
+        return "overflow"
+    return json.dumps(total)
+
+
+def tf2_histogram_display(value: Any) -> str | None:
+    """Return ``tf2-histogram(<k> buckets, num=...)`` or None."""
+    if isinstance(value, Tf2HistogramValue):
+        data = value.model_dump(mode="json")
+    elif isinstance(value, dict) and value.get("kind") == "tf2-histogram":
+        data = value
+    else:
+        return None
+    buckets = data.get("buckets")
+    if not isinstance(buckets, list):
+        return None
+    return f"tf2-histogram({len(buckets)} buckets, num={_tf2_num(buckets)})"
 
 
 def histogram_display(value: Any) -> str | None:
@@ -65,11 +88,19 @@ def tensor_display(value: Any) -> str | None:
 
 def value_display(value: Any) -> str | None:
     """Compact display for a histogram or media value, in model or dict form."""
-    return histogram_display(value) or media_display(value) or tensor_display(value)
+    return (
+        histogram_display(value)
+        or tf2_histogram_display(value)
+        or media_display(value)
+        or tensor_display(value)
+    )
 
 
 def value_to_json(value: Any) -> Any:
     """Return a JSON-compatible recorded value."""
-    if isinstance(value, (HistogramValue, ImageValue, AudioValue, TensorValue)):
+    if isinstance(
+        value,
+        (HistogramValue, ImageValue, AudioValue, TensorValue, Tf2HistogramValue),
+    ):
         return value.model_dump(mode="json")
     return value

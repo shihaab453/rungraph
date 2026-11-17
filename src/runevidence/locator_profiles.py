@@ -432,6 +432,11 @@ def display_locator(locator: Any, *, limit: int = 200) -> str:
                 f"{locator.get('kind')}:step={locator.get('step')},"
                 f"occurrence={locator.get('occurrence')},element={locator.get('element')}"
             )
+        if locator.get("kind") == "tensorboard-tf2-histogram":
+            return (
+                f"tensorboard-tf2-histogram:step={locator.get('step')},"
+                f"occurrence={locator.get('occurrence')}"
+            )
         prefix, payload = f"jsonl:{locator.get('line')}#", str(locator.get('pointer', ''))
     elif getattr(locator, "kind", None) == "csv-cell":
         return f"csv-cell:{locator.row},{locator.column}"
@@ -469,6 +474,11 @@ def display_locator(locator: Any, *, limit: int = 200) -> str:
         return (
             f"{locator.kind}:step={locator.step},"
             f"occurrence={locator.occurrence},element={locator.element}"
+        )
+    elif getattr(locator, "kind", None) == "tensorboard-tf2-histogram":
+        return (
+            f"tensorboard-tf2-histogram:step={locator.step},"
+            f"occurrence={locator.occurrence}"
         )
     else:
         prefix, payload = f"jsonl:{locator.line}#", str(locator.pointer)

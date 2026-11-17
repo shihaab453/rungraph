@@ -70,4 +70,4 @@ locator precheck. Downgrades are `DOWNGRADE_UNSUPPORTED`, comparability refuses
 - PNG and RIFF/WAVE only; rank-0 and `[1]` single-payload tensors are out of
   scope and keep the delivered text behavior.
 - No extraction, transcoding or pixel decoding.
-- TF2 `[k,3]` histogram tensors and plugin-specific summaries are out of scope.
+- TF2 `[k,3]` histogram tensors are covered by schema 0.11; plugin-specific summaries remain out of scope.

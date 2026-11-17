@@ -282,7 +282,7 @@ def test_dangling_artifact_id_is_a_later_validation_concern(tmp_path):
     assert json.loads(path.read_bytes())["schema_version"] == "0.3"
 
 
-@pytest.mark.parametrize("target", ["0.1", "0.11", "", "1.0", "0.2.0"])
+@pytest.mark.parametrize("target", ["0.1", "0.12", "", "1.0", "0.2.0"])
 def test_unsupported_targets_are_refused(tmp_path, target):
     folder = tmp_path / "exp"
     path = write(folder, doc("0.2"))
@@ -300,4 +300,4 @@ def test_migrate_help_mentions_0_3():
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = cli.main(["migrate", "--help"])
     assert (code, err.getvalue()) == (0, "")
-    assert "0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9 or 0.10" in " ".join(out.getvalue().split())
+    assert "0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.10 or 0.11" in " ".join(out.getvalue().split())

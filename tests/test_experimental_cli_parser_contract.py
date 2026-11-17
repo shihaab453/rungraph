@@ -135,6 +135,10 @@ HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
     # Historical only; superseded by the validate-batch directory opt-in.
     "e3a3ecc71113d3ba8ab204ed22a9fd349829e0000c425d4095681db97a30287f",  # LF
     "d28797e337f43912f619bbffbd505ac740ced5cfb15cb86b34d20129cc7d12f2",  # CRLF
+    # Validate-batch directory opt-in (2026-11-16). Historical only; superseded
+    # by the schema 0.11 histogram flag.
+    "5bea330eec0e94eb77f76931ea1bd06b0e081252c420d76732131c770f8c31e3",  # LF
+    "315523ecc6d0ef7472fbca3b3621ca8589fe6a9f5f29c5a5be6ab2d6f6a64428",  # CRLF
 })
 HISTORICAL_READER_HASHES = (
     # Capture (2026-11-16): the 30-route reader assertion was updated for capture.
@@ -172,9 +176,9 @@ HISTORICAL_READER_DIGEST_23 = (
 # pin is an exact byte SHA-256. Nothing is normalized during checking. Static
 # != plugin safety.
 CLI_HASH = frozenset({
-    # validate-batch directory opt-in (2026-11-16): same 31-route surface.
-    "5bea330eec0e94eb77f76931ea1bd06b0e081252c420d76732131c770f8c31e3",  # LF
-    "315523ecc6d0ef7472fbca3b3621ca8589fe6a9f5f29c5a5be6ab2d6f6a64428",  # CRLF
+    # Schema 0.11 TF2 histogram flag (2026-11-17): same 31-route surface.
+    "98e9a8a40e6300d720f2b0ced65f45ba4e959c855e21ba7e2ad92ad669c912e9",  # LF
+    "2cb423f65330e38a6780d3a02d2ffb08449c73a71aca88bb1a121769de1b0dc2",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.

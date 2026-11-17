@@ -254,7 +254,7 @@ Limits and edge cases:
   the whole summary. The file bytes are still hashed.
 - Metric logs are plain text. Core value locators support JSON only, so these
   results have no locator. On schema 0.1/0.2, `validate` verifies each summary
-  through the adapter and `rehash` refreshes it; on 0.3–0.10 the existing
+  through the adapter and `rehash` refreshes it; on 0.3–0.11 the existing
   `result-unverified` warning still applies.
 
 #### MLflow metric summaries (RE-10)
@@ -275,7 +275,7 @@ On schema 0.1/0.2, a locator-less metric result is verified against its file:
 - If no installed adapter claims the result, `validate` reports
   `result-unverified` and `rehash` accepts the bytes with a NOTE. It is never
   silently clean.
-- A migrated 0.3–0.10 manifest keeps its existing `result-unverified` warning
+- A migrated 0.3–0.11 manifest keeps its existing `result-unverified` warning
   for the locator-less result and is not refreshed this way.
 
 Metric histories are read under a declared bound: 50 MiB, 1,000,000 lines and

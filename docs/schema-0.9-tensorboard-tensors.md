@@ -69,5 +69,5 @@ locator precheck. `migrate --to 0.8` or lower from a 0.9 manifest is
 - No tolerance or statistical comparison; the digest is exact.
 - String, bool, complex, half, variant, resource and sparse tensors are out of
   scope. Big-endian writers are out of scope.
-- TF2 `[k,3]` histogram tensors are recorded as plain tensors; a future TF2
+- TF2 `[k,3]` histogram tensors are recorded as plain tensors here; schema 0.11 records them structurally with `--include-tf2-histograms`. A future TF2
   histogram gate would decide whether to supersede them.
