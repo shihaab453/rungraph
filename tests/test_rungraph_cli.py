@@ -370,3 +370,17 @@ def test_graph_detail_adds_recorded_object_data(tmp_path: Path, capsys):
     assert main(["graph", str(root)]) == 0
     plain = json.loads(capsys.readouterr().out)
     assert all("data" not in node for node in plain["nodes"])
+
+
+def test_report_markdown_renders_members_claims_and_findings(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    assert main(["init", str(root), "--id", "study", "--name", "Study"]) == 0
+    capsys.readouterr()
+
+    assert main(["report", str(root), "--markdown"]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("# Study (study)")
+    assert "## Members" in out
+    assert "`missing-file`" in out
+    assert "| Claim | Owner | Labels | Text |" in out
+    assert "data is intact" in out

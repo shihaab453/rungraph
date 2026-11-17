@@ -122,7 +122,8 @@ cycles are reported per strongly connected component with a bounded example list
 
 - `report` prints current evidence per member (path, error/warning counts, up to ten finding
   messages with severity, code and subject), every claim's states with its owner and claim
-  text, and the claims affected by each error-level finding. `--directory-artifacts` opts into
+  text, and the claims affected by each error-level finding. `--markdown` emits the same
+  report as a shareable Markdown document. `--directory-artifacts` opts into
   directory checks and is stated in the header when absent; `--strict` makes warnings fail.
 - `runs` lists every recorded run across members with its params, recorded conditions, start
   time and per-run artifact/result counts. Adapter metadata is opt-in with `--metadata`;
