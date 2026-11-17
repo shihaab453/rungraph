@@ -25,3 +25,20 @@ def test_db_check_matches_after_export_and_detects_drift(tmp_path: Path, capsys)
     assert main(["db-check", str(tmp_path / "copy"), "--db", str(database), "--json"]) == 1
     data = json.loads(capsys.readouterr().out)
     assert data["mismatches"][0]["table"] == "meta"
+
+
+def test_db_check_detects_relationship_and_reference_drift(tmp_path: Path, capsys):
+    import sqlite3
+    manifest = Path("examples/generic-experiment")
+    database = tmp_path / "cache.sqlite"
+    assert main(["db-export", str(manifest), "--output", str(database)]) == 0
+    capsys.readouterr()
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute("delete from relationships where source='run-tuned'")
+        connection.commit()
+    finally:
+        connection.close()
+    assert main(["db-check", str(manifest), "--db", str(database), "--json"]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert any(item["table"] == "relationships" for item in data["mismatches"])
