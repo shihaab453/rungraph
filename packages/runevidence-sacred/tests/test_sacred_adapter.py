@@ -241,3 +241,19 @@ def test_an_unreadable_subdirectory_refuses(tmp_path: Path):
         assert not (tmp_path / "runevidence.json").exists()
     finally:
         block.chmod(0o700)
+
+
+def test_an_unreadable_file_refuses(tmp_path: Path):
+    import os
+
+    if os.name != "posix":
+        pytest.skip("permission bits are POSIX-only")
+    folder = write_run(tmp_path)
+    secret = folder / "secret.bin"
+    secret.write_bytes(b"x")
+    secret.chmod(0)
+    try:
+        assert main(["init", str(tmp_path), "--adapter", "sacred"]) == 2
+        assert not (tmp_path / "runevidence.json").exists()
+    finally:
+        secret.chmod(0o600)

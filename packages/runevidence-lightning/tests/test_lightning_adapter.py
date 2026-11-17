@@ -131,3 +131,32 @@ def test_an_unreadable_directory_refuses(tmp_path: Path):
         assert not (tmp_path / "runevidence.json").exists()
     finally:
         block.chmod(0o700)
+
+
+def test_link_metadata_errors_do_not_turn_into_refusals(tmp_path: Path):
+    import os
+
+    write_version(tmp_path, "0", "epoch,step,loss\n0,0,1.0\n")
+    loop = tmp_path / "lightning_logs" / "loop"
+    try:
+        os.symlink("loop", loop)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available")
+    assert main(["init", str(tmp_path), "--adapter", "lightning", "--name", "Study", "--id", "study"]) == 0
+    assert (tmp_path / "runevidence.json").exists()
+
+
+def test_an_unreadable_file_refuses(tmp_path: Path):
+    import os
+
+    if os.name != "posix":
+        pytest.skip("permission bits are POSIX-only")
+    folder = write_version(tmp_path, "0", "epoch,step,loss\n0,0,1.0\n")
+    secret = folder / "secret.bin"
+    secret.write_bytes(b"x")
+    secret.chmod(0)
+    try:
+        assert main(["init", str(tmp_path), "--adapter", "lightning"]) == 2
+        assert not (tmp_path / "runevidence.json").exists()
+    finally:
+        secret.chmod(0o600)

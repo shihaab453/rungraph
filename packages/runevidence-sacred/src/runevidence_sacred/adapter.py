@@ -170,12 +170,19 @@ class SacredAdapter(Adapter):
                 raise AdapterError(
                     f"artifact {rel!r} resolves outside the selected root; nothing was written"
                 )
+            try:
+                digest = sha256_file(target)
+                size = target.stat().st_size
+            except OSError:
+                raise AdapterError(
+                    f"artifact {rel!r} cannot be read; nothing was written"
+                ) from None
             artifacts.append(
                 Artifact(
                     id=_unique(valid_slug(rel), used),
                     path=rel,
-                    sha256=sha256_file(target),
-                    size_bytes=target.stat().st_size,
+                    sha256=digest,
+                    size_bytes=size,
                     run_id=run_ids[owner] if owner is not None else None,
                 )
             )

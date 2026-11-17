@@ -1635,15 +1635,22 @@ def assert_tree_readable(root: Path) -> None:
     def walk(current: Path, ancestors: set[str]) -> None:
         entries = sorted(os.scandir(current), key=lambda entry: entry.name)
         for entry in entries:
-            is_dir = entry.is_dir(follow_symlinks=True)
-            if not is_dir:
+            try:
+                is_dir = entry.is_dir(follow_symlinks=True)
+            except OSError:
+                # Match iter_files: an unreadable link target is not a directory.
+                is_dir = False
+            if is_dir:
+                if entry.name in IGNORED_DIRS or not _within(base, Path(entry.path)):
+                    continue
+                real = _real(Path(entry.path))
+                if real is None or real in ancestors:
+                    continue
+                walk(Path(entry.path), ancestors | {real})
+                continue
+            try:
                 entry.is_file(follow_symlinks=True)
+            except OSError:
                 continue
-            if entry.name in IGNORED_DIRS or not _within(base, Path(entry.path)):
-                continue
-            real = _real(Path(entry.path))
-            if real is None or real in ancestors:
-                continue
-            walk(Path(entry.path), ancestors | {real})
 
     walk(base, {base_real})
