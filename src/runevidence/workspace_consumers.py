@@ -388,47 +388,38 @@ def _json_number(value: Any) -> Any:
 
 
 def _safe_mean(values: list[Any]) -> Any:
-    if all(type(value) is int for value in values):
-        from fractions import Fraction
+    from fractions import Fraction
 
-        return _json_number(float(Fraction(sum(values), len(values))))
-    scale = max(abs(float(value)) for value in values)
-    if scale == 0.0:
-        return 0.0
-    return _json_number(scale * (math.fsum(float(value) / scale for value in values) / len(values)))
+    return _json_number(float(sum(Fraction(value) for value in values) / len(values)))
 
 
 def _safe_median(values: list[Any]) -> Any:
+    from fractions import Fraction
+
     ordered = sorted(values)
     middle = len(ordered) // 2
     if len(ordered) % 2:
         return ordered[middle]
-    if all(type(value) is int for value in values):
-        from fractions import Fraction
-
-        return _json_number(float(Fraction(ordered[middle - 1] + ordered[middle], 2)))
-    return _json_number(ordered[middle - 1] / 2.0 + ordered[middle] / 2.0)
+    return _json_number(float((Fraction(ordered[middle - 1]) + Fraction(ordered[middle])) / 2))
 
 
 def _safe_pstdev(values: list[Any]) -> Any:
-    if all(type(value) is int for value in values):
-        from fractions import Fraction
+    from decimal import Decimal, localcontext
+    from fractions import Fraction
 
-        scale_int = max(abs(value) for value in values)
-        if scale_int == 0:
-            return 0.0
-        scale = Fraction(scale_int)
-        normalized = [Fraction(value) / scale for value in values]
-        mean = sum(normalized) / len(normalized)
-        variance = sum((item - mean) ** 2 for item in normalized) / len(normalized)
-        return _json_number(float(scale_int) * math.sqrt(float(variance)))
-    scale = max(abs(float(value)) for value in values)
-    if scale == 0.0:
+    exact = [Fraction(value) for value in values]
+    mean = sum(exact) / len(exact)
+    variance = sum((item - mean) ** 2 for item in exact) / len(exact)
+    if variance == 0:
         return 0.0
-    normalized = [float(value) / scale for value in values]
-    mean = math.fsum(normalized) / len(normalized)
-    variance = math.fsum((item - mean) ** 2 for item in normalized) / len(normalized)
-    return _json_number(scale * math.sqrt(max(variance, 0.0)))
+    # Decimal sqrt keeps the exponent range of the exact rational variance;
+    # converting the tiny normalized variance to float first would underflow.
+    with localcontext() as context:
+        context.prec = 50
+        root = (
+            Decimal(variance.numerator) / Decimal(variance.denominator)
+        ).sqrt()
+    return _json_number(float(root))
 
 
 def stats_data(loaded: LoadedWorkspace, metric: Optional[str] = None) -> dict[str, Any]:

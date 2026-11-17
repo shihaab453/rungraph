@@ -131,10 +131,13 @@ cycles are reported per strongly connected component with a bounded example list
   counts, ambiguous `(member, run)` pairs with more than one recorded value, and min, max,
   mean, median and population standard deviation over the numeric rows. Distribution fields
   are null when a metric has no numeric value. `--metric` restricts it to one name.
-  Calculations use scaled summation (and exact `Fraction` arithmetic for all-integer
-  metrics), so finite inputs at the float limits do not overflow or lose the half-unit
-  difference between adjacent large integers; every emitted number is strict JSON (never
-  `Infinity` or `NaN`).
+  Every recorded finite value is converted to an exact `Fraction` (floats are taken at
+  their exact binary value); mean, median and population variance are computed exactly, and
+  the standard deviation uses a high-precision `Decimal` square root so tiny variances do
+  not underflow before the final float conversion. Finite inputs at the float limits
+  therefore do not overflow or lose small differences; every emitted number is strict JSON
+  (never `Infinity` or `NaN`). The final result follows one IEEE-754 rounding to a Python
+  float.
 - `compare` reports each row pair's recorded-condition status (`comparable`,
   `not-comparable` or `unavailable`) through the experimental comparability surface.
   `leaderboard` shows `conditions: available`, meaning only that the route can carry a

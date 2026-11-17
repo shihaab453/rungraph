@@ -169,3 +169,27 @@ def test_extreme_values_stay_finite_and_version_independent(
         assert entry["stddev"] is not None and math.isfinite(entry["stddev"])
     else:
         assert entry["stddev"] == pytest.approx(stddev, rel=1e-12, abs=1e-300)
+
+
+def test_integer_stddev_does_not_underflow(tmp_path: Path, capsys):
+    entry = stats_for(
+        capsys, tmp_path, [{"name": "m", "value": 10**200}, {"name": "m", "value": 10**200 + 1}]
+    )
+    assert entry["stddev"] == pytest.approx(0.5, rel=1e-12)
+
+
+def test_float_stddev_keeps_small_differences(tmp_path: Path, capsys):
+    entry = stats_for(
+        capsys, tmp_path, [{"name": "m", "value": 1e16}, {"name": "m", "value": 1e16 + 2}]
+    )
+    assert entry["stddev"] == pytest.approx(1.0, rel=1e-12)
+    assert entry["mean"] == pytest.approx(1e16, rel=1e-12)
+
+
+def test_subnormal_median_does_not_underflow(tmp_path: Path, capsys):
+    entry = stats_for(
+        capsys, tmp_path, [{"name": "m", "value": 5e-324}, {"name": "m", "value": 5e-324}]
+    )
+    assert entry["median"] == 5e-324
+    assert entry["mean"] == 5e-324
+    assert entry["stddev"] == 0.0
