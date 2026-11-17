@@ -32,6 +32,7 @@ import hmac
 import re
 import io
 import os
+import sqlite3
 import stat
 import sys
 from collections import Counter
@@ -73,6 +74,7 @@ from .run_compare import ComparisonError, compare_runs, format_comparison
 from .run_leaderboard import LeaderboardError, rank_runs, format_leaderboard
 from .run_matrix import MatrixError, metric_matrix, format_metric_matrix
 from .run_stats import format_stats, stats_manifest
+from .db_export import export_sqlite
 from .run_inventory import format_runs, runs_manifest
 from .run_details import RunDetailsError, run_details, format_run_details
 from .run_claim import ClaimDetailsError, claim_details, format_claim_details
@@ -559,6 +561,27 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(json.dumps(details, ensure_ascii=True, allow_nan=False, indent=2))
     else:
         print(format_run_details(details))
+    return EXIT_OK
+
+
+def cmd_db_export(args: argparse.Namespace) -> int:
+    """Export one validated manifest as a derived SQLite query cache."""
+    loaded = _load_or_report(args.path, args.json)
+    if loaded is None:
+        return EXIT_INVALID
+    try:
+        data = export_sqlite(loaded, args.output, force=args.force)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        if args.json:
+            print(json.dumps({"ok": False, "exit_code": EXIT_INVALID, "error": str(exc)}, indent=2))
+        else:
+            print(f"ERROR: {exc}\nNothing was written.")
+        return EXIT_INVALID
+    if args.json:
+        print(json.dumps(data, indent=2))
+    else:
+        print(f"Wrote {data['path']} ({data['counts']['runs']} runs, {data['counts']['results']} results).")
+        print("JSON remains the authority; this database is a derived query cache.")
     return EXIT_OK
 
 
@@ -2900,6 +2923,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true", help="machine-readable run detail")
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("db-export", help="export a validated manifest to a derived SQLite cache")
+    p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")
+    p.add_argument("--output", type=Path, required=True, help="SQLite file to write")
+    p.add_argument("--force", action="store_true", help="replace an existing output file")
+    p.add_argument("--json", action="store_true", help="machine-readable summary")
+    p.set_defaults(func=cmd_db_export)
 
     p = sub.add_parser("runs", help="list recorded runs with params and conditions")
     p.add_argument("path", type=Path, help=f"experiment folder or {MANIFEST_FILENAME} file")

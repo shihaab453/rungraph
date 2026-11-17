@@ -177,15 +177,15 @@ HISTORICAL_READER_DIGEST_23 = (
 # != plugin safety.
 CLI_HASH = frozenset({
     # Single-manifest stats (2026-11-17): 33-route surface.
-    "c136a1cc69da329ba470f96407f1b1d1ba74fe65bf6cb2fe4275a956d6eb153f",  # LF
-    "1d6395a224c591184494632049bc4c3cd01b7a6b06c31b73afc5dfc6fd18b0c9",  # CRLF
+    "4fa766d37b1567fe704be84b46690839044ee8de0e707ada4a6301daa9b37f0d",  # LF
+    "dc63d85977b756b8de492bebda2b4e53c386d1780e2640c0e803a0ea0ff0221e",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.
 # Exactly one LF digest string: never a collection, no CRLF or historical alternative.
-READER_HASH = "e210cfc68332a92d4f52796b86236261e8912c8b540aef62ffb1d8e2dff3a890"
+READER_HASH = "dcb04ea2bf080cb9c3d078286867c3947edb5815cc4cd92bb8fca13032f7a626"
 # Exact registration order. Any missing, extra, duplicated or reordered route fails.
-ROUTES = ("validate", "validate-batch", "inspect", "compare", "comparability", "assess", "leaderboard", "stats", "matrix", "run", "runs", "claim",
+ROUTES = ("validate", "validate-batch", "inspect", "compare", "comparability", "assess", "leaderboard", "stats", "matrix", "run", "db-export", "runs", "claim",
           "lineage", "impact", "coverage", "coverage-gate", "fingerprint", "fingerprint-compare",
           "coverage-diff", "review-diff", "impact-diff", "review-gate",
           "result", "evidence", "artifact", "relationship",
@@ -243,14 +243,14 @@ def test_pinned_parser_structure():
 
 def test_current_contract_preserves_historical_baselines():
     # Constant-only: records how the current contract relates to preserved history.
-    assert len(ROUTES) == len(set(ROUTES)) == 34
+    assert len(ROUTES) == len(set(ROUTES)) == 35
     assert set(HISTORICAL_SEVEN_ROUTES) <= set(ROUTES)
     assert [r for r in HISTORICAL_24_ROUTES if r != "comparability"] == list(HISTORICAL_23_ROUTES)
     assert [r for r in HISTORICAL_24_ROUTES if r not in ("validate-batch", "comparability")] == list(HISTORICAL_22_ROUTES)
     assert [r for r in HISTORICAL_25_ROUTES if r != "migrate"] == list(HISTORICAL_24_ROUTES)
-    assert [r for r in ROUTES if r not in ("migrate", "conditions", "assess", "result", "evidence", "artifact", "stats", "runs", "relationship", "capture")] == list(HISTORICAL_24_ROUTES)
+    assert [r for r in ROUTES if r not in ("migrate", "conditions", "assess", "result", "evidence", "artifact", "stats", "db-export", "runs", "relationship", "capture")] == list(HISTORICAL_24_ROUTES)
     assert [r for r in HISTORICAL_25_ROUTES if r not in ("validate-batch", "comparability", "migrate")] == list(HISTORICAL_22_ROUTES)
-    assert [r for r in ROUTES if r not in ("conditions", "assess", "result", "evidence", "artifact", "stats", "runs", "relationship", "capture")] == list(HISTORICAL_25_ROUTES)
+    assert [r for r in ROUTES if r not in ("conditions", "assess", "result", "evidence", "artifact", "stats", "db-export", "runs", "relationship", "capture")] == list(HISTORICAL_25_ROUTES)
     assert ROUTES[ROUTES.index("validate") + 1] == "validate-batch"
     assert ROUTES[ROUTES.index("compare") + 1] == "comparability"
     assert ROUTES[ROUTES.index("init") + 1] == "migrate"
