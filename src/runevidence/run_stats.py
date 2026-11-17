@@ -7,6 +7,7 @@ import math
 from typing import Any, Optional
 
 from .metric_stats import json_value, stats_from_rows
+from .metric_steps import latest_names, split_step_name
 from .models import Manifest
 
 
@@ -15,6 +16,7 @@ def stats_manifest(
     *,
     manifest_path: str,
     metric: Optional[str] = None,
+    latest: bool = False,
 ) -> dict[str, Any]:
     """Summarize recorded result rows without reading any artifact bytes."""
     rows: list[dict[str, Any]] = []
@@ -35,6 +37,11 @@ def stats_manifest(
                 "numeric": numeric,
             }
         )
+    if latest:
+        keep = latest_names(row["name"] for row in rows)
+        rows = [row for row in rows if row["name"] in keep]
+        for row in rows:
+            row["name"] = split_step_name(row["name"])[0]
     if metric is not None:
         rows = [row for row in rows if row["name"] == metric]
     return {
@@ -42,6 +49,7 @@ def stats_manifest(
         "version": "0.1",
         "manifest": manifest_path,
         "metric": metric,
+        "latest": latest,
         "metrics": stats_from_rows(rows),
         "exit_code": 0,
     }

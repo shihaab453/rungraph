@@ -139,7 +139,8 @@ cycles are reported per strongly connected component with a bounded example list
 - `stats` reports, per metric, the row count, finite numeric count, missing and non-numeric
   counts, ambiguous `(member, run)` pairs with more than one recorded value, and min, max,
   mean, median and population standard deviation over the numeric rows. Distribution fields
-  are null when a metric has no numeric value. `--metric` restricts it to one name.
+  are null when a metric has no numeric value. `--metric` restricts it to one name, and
+  `--latest` applies the same highest-step rule as compare/matrix/leaderboard.
   Every recorded finite value is converted to an exact `Fraction` (floats are taken at
   their exact binary value); mean, median and population variance are computed exactly, and
   the standard deviation uses an 80-digit `Decimal` square root so tiny variances do not

@@ -441,7 +441,12 @@ def baseline_diff(loaded: LoadedWorkspace, baseline_root) -> dict[str, Any]:
     }
 
 
-def stats_data(loaded: LoadedWorkspace, metric: Optional[str] = None) -> dict[str, Any]:
+def stats_data(
+    loaded: LoadedWorkspace,
+    metric: Optional[str] = None,
+    *,
+    latest: bool = False,
+) -> dict[str, Any]:
     """Per-metric count and distribution statistics across workspace members.
 
     ``ambiguous`` counts a ``(member, run)`` pair that recorded the same metric
@@ -452,13 +457,14 @@ def stats_data(loaded: LoadedWorkspace, metric: Optional[str] = None) -> dict[st
 
     from .metric_stats import stats_from_rows
 
-    rows = value_rows(loaded)
+    rows = value_rows(loaded, latest=latest)
     if metric is not None:
         rows = [row for row in rows if row["name"] == metric]
     return {
         "format": "rungraph-stats",
         "version": "0.1",
         "metric": metric,
+        "latest": latest,
         "metrics": stats_from_rows(rows),
         "exit_code": 0,
     }
