@@ -183,7 +183,7 @@ CLI_HASH = frozenset({
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.
 # Exactly one LF digest string: never a collection, no CRLF or historical alternative.
-READER_HASH = "017e3cadded6ce6ce5b3381c40f6bde34c925bb854fa79ca0c424ccac6eb157c"
+READER_HASH = "19f59e0ca1d96d7caa0bbdbe5b0a2e7f05d68cd608711f1ce53729c190509657"
 # Exact registration order. Any missing, extra, duplicated or reordered route fails.
 ROUTES = ("validate", "validate-batch", "inspect", "compare", "comparability", "assess", "leaderboard", "matrix", "run", "claim",
           "lineage", "impact", "coverage", "coverage-gate", "fingerprint", "fingerprint-compare",
