@@ -200,7 +200,8 @@ capability depends on it.
   statistics, SQLite persistence (subject to its hold), extra platform guarantees. TF2 media
   schema 0.10, TF2 `[k,3]` histogram schema 0.11, per-metric workspace statistics
   (`rungraph stats`), the cross-member run inventory (`rungraph runs`), and whitelisted
-  plugin summaries in both run inventories are delivered.
+  plugin summaries in both run inventories are delivered; a derived read-only SQLite export
+  is available without changing JSON authority.
 
 ### Documentation and truthfulness
 
