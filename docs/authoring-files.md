@@ -134,6 +134,14 @@ or model checkpoint, or a claim or relationship cites it. Remove or edit those r
 first, then remove the artifact.
 
 
+## TensorBoard scalar byte refresh (`runevidence rehash PATH ID --refresh-locators`)
+
+On a schema 0.5 manifest, this verifies every recorded TensorBoard scalar
+locator from one protected read and updates only the artifact `sha256` and
+`size_bytes`. Result values must already match; record an intentional change
+with `result edit` first. Only explicit exact IDs are accepted, and `--all`,
+volatile, directory, mixed-locator and schema 0.6+ targets are refused.
+
 ## Run (`runevidence run PATH --add|--edit --file RUN.json`)
 
 Required for `add`: `id`. Optional: `name`, `started_at` (ISO 8601), `params`, `metadata`,

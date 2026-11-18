@@ -91,25 +91,20 @@ only for JSON files. The recorded value is the row with the greatest
 `(step, timestamp, value)`, not the last line on disk. Result metadata keeps the
 chosen `step` and `timestamp_ms`.
 
-`validate` detects changed metric bytes through their hash. It does not
-compare the result value again, and `rehash` accepts new bytes without
-refreshing these text-derived results. **RE-10:** the recorded summary
-**value, step and timestamp can stay old** after you accept a changed metric file, and
-`validate --strict` can still exit 0 after that acceptance. Changed bytes do
-not always mean the summary is stale, and validation makes no scientific truth
-or general freshness claim.
+`validate` detects changed metric bytes through their hash. For schema 0.1/0.2
+MLflow summaries, `rehash` re-reads the recorded summary after accepting the
+new bytes and updates `value`, `step` and `timestamp_ms` in the same manifest,
+preserving authored claims, relationships, annotations, volatile flags and
+project fields. **RE-10:** if the summary cannot be re-read, the value is left
+unchanged and `validate --strict` can still exit 0; changed bytes do not always
+mean the summary is stale, and validation makes no scientific truth or general
+freshness claim.
 
-To refresh summaries, run `init --adapter mlflow --force` and follow the
+Run `rehash PATH ARTIFACT_ID` on the metric artifact to accept and refresh it.
+If the summary is structurally unreadable, fix or restore the metric file;
+regenerating the manifest with `init --force` is not required and would discard
+authored values. See the
 [central safe refresh procedure](https://github.com/shihaab453/rungraph/blob/main/docs/adapters.md#refreshing-mlflow-results-safely-re-10).
-The previous manifest is kept as a new backup generation
-(`runevidence.json.bak`, `.bak.2`, ...; never overwritten). Forced
-regeneration does not merge hand-written claims, relationships, annotations,
-volatile flags, or project fields and settings. Compare the backup with the
-regenerated manifest, keep the newly extracted summaries, and manually restore
-only reviewed annotations and settings after verifying IDs and claims. Do not
-copy old metric results back. The `init --force` warning counts every old
-result as missing even when the adapter regenerates it. Version control and a
-separate backup are recommended.
 
 A metric file that is empty, malformed, non-finite (for example `nan` or
 `inf`), not valid UTF-8, or uses an unsupported row shape produces no Result at
@@ -135,8 +130,9 @@ partial log when one row is bad.
   supported. Point at the store or the project folder containing `mlruns/`.
 - No Results are invented for missing metrics, and no evidence claims are
   inferred.
-- Each metric history file is read completely into memory, with no size cap,
-  so a very large metric log can use a lot of memory during `init`.
+- Each metric history file is capped at 50 MiB, and each metric line at 64 KiB;
+  an over-cap or malformed history is recorded without a Result rather than
+  read without a bound.
 
 ## Development
 

@@ -232,3 +232,83 @@ def test_digest_change_warns_about_dependent_claims(tmp_path: Path, capsys):
     (root / "e.tfevents").write_bytes(event() + event(value=0.6, step=2))
     assert main(["rehash", str(root), "a", "--refresh-locators"]) == 0
     assert "Re-read these claims" in capsys.readouterr().out
+
+
+def test_dry_run_refreshes_nothing(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    before = (root / "runevidence.json").read_bytes()
+    (root / "e.tfevents").write_bytes(event() + event(value=0.6, step=2))
+    assert main(["rehash", str(root), "a", "--refresh-locators", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "Would re-record 1 file" in out
+    assert "Dry run: nothing was written." in out
+    assert (root / "runevidence.json").read_bytes() == before
+
+
+def test_unknown_id_and_default_refusal(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    assert main(["rehash", str(root), "missing", "--refresh-locators"]) == 2
+    assert "no artifact has ID 'missing'" in capsys.readouterr().out
+    assert main(["rehash", str(root), "a"]) == 2
+    assert "LOCATOR_REFRESH_UNSUPPORTED" in capsys.readouterr().out
+
+
+def test_missing_event_file_uses_the_state_message(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    (root / "e.tfevents").unlink()
+    before = (root / "runevidence.json").read_bytes()
+    assert main(["rehash", str(root), "a", "--refresh-locators"]) == 2
+    assert "Cannot refresh event bytes for 'a': the event file is missing" in capsys.readouterr().out
+    assert (root / "runevidence.json").read_bytes() == before
+
+
+def test_late_second_artifact_failure_writes_nothing(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    document = json.loads((root / "runevidence.json").read_text())
+    second = event(tag=b"other")
+    (root / "e2.tfevents").write_bytes(second)
+    document["artifacts"].append(
+        {
+            "id": "b",
+            "path": "e2.tfevents",
+            "sha256": hashlib.sha256(second).hexdigest(),
+            "size_bytes": len(second),
+        }
+    )
+    document["results"].append(
+        {
+            "id": "r2",
+            "run_id": "run",
+            "name": "other",
+            "value": 0.5,
+            "artifact_id": "b",
+            "locator": {"kind": "tensorboard", "tag": "other", "step": 1, "occurrence": 0},
+        }
+    )
+    (root / "runevidence.json").write_text(json.dumps(document), encoding="utf-8")
+    (root / "e.tfevents").write_bytes(event() + event(value=0.6, step=2))
+    (root / "e2.tfevents").write_bytes(event(tag=b"changed"))
+    before = (root / "runevidence.json").read_bytes()
+    assert main(["rehash", str(root), "a", "b", "--refresh-locators"]) == 2
+    assert "was not found" in capsys.readouterr().out
+    assert (root / "runevidence.json").read_bytes() == before
+
+
+def test_non_numeric_recorded_value_is_refused(tmp_path: Path, capsys):
+    root = make_root(tmp_path, value=True)
+    assert main(["rehash", str(root), "a", "--refresh-locators"]) == 2
+    assert "is not a TensorBoard scalar" in capsys.readouterr().out
+
+
+def test_same_size_digest_change_updates_only_the_digest(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    (root / "e.tfevents").write_bytes(event(value=0.75))
+    entry = root / "r.json"
+    entry.write_text('{"id":"r","value":0.75}', encoding="utf-8")
+    assert main(["result", "edit", str(root), "--file", str(entry)]) == 0
+    capsys.readouterr()
+    assert main(["rehash", str(root), "a", "--refresh-locators"]) == 0
+    out = capsys.readouterr().out
+    assert "sha256" in out
+    assert "-> " in out
+    assert "size " not in out
