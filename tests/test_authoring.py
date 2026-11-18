@@ -167,3 +167,24 @@ def test_whitespace_only_authoring_text_is_refused(tmp_path: Path, capsys):
     assert main(["evidence", "add", str(path), "--file", write_json(tmp_path / "c.json", claim)]) == 2
     assert "non-empty string 'claim'" in capsys.readouterr().out
     assert path.read_bytes() == before
+
+
+def test_evidence_add_refuses_a_claim_to_claim_link(tmp_path: Path, capsys):
+    path = make_manifest(tmp_path)
+    first = {"id": "c1", "claim": "data is intact", "supports": ["data"], "contradicts": []}
+    assert main(["evidence", "add", str(path), "--file", write_json(tmp_path / "c1.json", first)]) == 0
+    before = path.read_bytes()
+
+    second = {"id": "c2", "claim": "c1 holds", "supports": ["c1"], "contradicts": []}
+    assert main(["evidence", "add", str(path), "--file", write_json(tmp_path / "c2.json", second)]) == 2
+    assert "cannot link a evidence to a evidence" in capsys.readouterr().out
+    assert path.read_bytes() == before
+
+
+def test_relationship_add_refuses_a_disallowed_endpoint_kind(tmp_path: Path, capsys):
+    path = make_manifest(tmp_path)
+    relationship = {"source": "data", "target": "run", "type": "result_of"}
+    before = path.read_bytes()
+    assert main(["relationship", "add", str(path), "--file", write_json(tmp_path / "rel.json", relationship)]) == 2
+    assert "cannot link a artifact to a run" in capsys.readouterr().out
+    assert path.read_bytes() == before

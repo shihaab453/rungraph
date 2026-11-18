@@ -31,11 +31,32 @@ def _find(raw: dict, section: str, entry_id: str) -> int:
     raise AuthoringError(f"no {section[:-1] if section.endswith('s') else section} {entry_id!r}")
 
 
+def _check_link_types(manifest) -> None:
+    from .checks.graph import ALLOWED_ENDPOINTS, build_index, collect_edges
+
+    kinds, _ = build_index(manifest)
+    for edge in collect_edges(manifest):
+        source = kinds.get(edge.source)
+        target = kinds.get(edge.target)
+        if source is None or target is None:
+            continue
+        if (source, target) not in ALLOWED_ENDPOINTS[edge.type]:
+            allowed = ", ".join(
+                f"{left} -> {right}"
+                for left, right in sorted(ALLOWED_ENDPOINTS[edge.type])
+            )
+            raise AuthoringError(
+                f"{edge.origin}: {edge.type.value!r} cannot link a {source} to a "
+                f"{target}; allowed: {allowed}"
+            )
+
+
 def _validate(raw: dict) -> None:
     try:
-        validate_manifest(raw)
+        manifest = validate_manifest(raw)
     except Exception as exc:
         raise AuthoringError(f"the edited manifest is not valid: {exc}") from None
+    _check_link_types(manifest)
 
 
 def _text(entry: dict, key: str, what: str) -> str:

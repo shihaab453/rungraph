@@ -981,8 +981,9 @@ runevidence artifact remove path/to/experiment --id tuned-metrics
 ```
 
 Each command loads one validated manifest, applies one JSON object, checks that every
-referenced run/artifact/result/claim exists, validates the whole edited manifest and writes it
-atomically with a stale-byte check. `--dry-run` prints the plan and writes nothing; a refusal
+referenced run/artifact/result/claim exists and that each link uses an endpoint kind its
+relationship allows (for example, a claim cannot support another claim), validates the whole
+edited manifest and writes it atomically with a stale-byte check. `--dry-run` prints the plan and writes nothing; a refusal
 writes nothing. Removing a result, claim or artifact needs `--id`; removing a relationship needs its
 zero-based `--index` in the recorded `relationships` array. Removing an artifact untracks it
 but leaves the file on disk, and it refuses while a result, condition selector, claim or
