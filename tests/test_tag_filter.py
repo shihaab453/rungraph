@@ -64,8 +64,9 @@ def test_anchoring_vectors():
 def test_middle_window_and_charge_vectors():
     # middle "ab", later "b": window 4 - 1 - 0 = 3, two positions, 2 each.
     assert spent(["*ab*b"], "xxxx") == 4
-    # window 2 - 1 - 0 = 1, no position, so nothing is searched or charged.
-    assert spent(["*ab*b"], "ab") == 0
+    # window 2 - 1 - 0 = 1, no position: the pair is still charged once so
+    # an all-wildcard pattern cannot consume unlimited matching work for free.
+    assert spent(["*ab*b"], "ab") == 1
     assert spent(["*loss"], "xloss") == 4
     assert spent(["x*"], "xloss") == 1
 
@@ -93,7 +94,7 @@ def test_cache_prevents_double_charging_and_repeated_text_is_one_pair():
 def test_or_selection_does_not_short_circuit_later_patterns():
     tag_filter = TagFilter(["*", "ab"])
     assert tag_filter.matches("ab")
-    assert tag_filter.spent == 2
+    assert tag_filter.spent == 3
 
 
 def test_unmatched_patterns_preserve_input_order():
@@ -191,14 +192,14 @@ def test_two_patterns_bound_the_budget_at_seven_tags():
 
 def test_warning_pass_reads_the_cache():
     # The expensive pattern matches none of these tags; "*" selects all of
-    # them at zero cost, so a second pass must charge nothing.
+    # them at the one-unit minimum per pair, so a second pass charges nothing.
     tag_filter = TagFilter([EXPENSIVE, "*"])
     for tag in TAGS[:15]:
         assert tag_filter.matches(tag)
-    assert tag_filter.spent == 47_139_750
+    assert tag_filter.spent == 47_139_765
     for tag in TAGS[:15]:
         assert tag_filter.matches(tag)
-    assert tag_filter.spent == 47_139_750
+    assert tag_filter.spent == 47_139_765
     assert tag_filter.unmatched_patterns() == (EXPENSIVE,)
 
 
@@ -209,3 +210,16 @@ def test_repeated_expensive_pattern_text_stays_within_budget():
         assert not repeated.matches(tag)
     assert repeated.spent == 47_139_750
     assert repeated.unmatched_patterns() == (EXPENSIVE, EXPENSIVE)
+
+
+def test_adjacent_stars_are_one_wildcard():
+    assert TagFilter(["a**b"]).matches("aXYZb")
+    assert spent(["a**b"], "aXYZb") > 0
+
+
+def test_all_wildcard_patterns_cannot_bypass_the_budget():
+    patterns = ["*" * index for index in range(1, 65)]
+    tag_filter = TagFilter(patterns, budget=100)
+    with pytest.raises(TagPatternTooExpensive):
+        for index in range(10):
+            tag_filter.matches(f"tag-{index}")

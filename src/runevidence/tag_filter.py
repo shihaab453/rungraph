@@ -62,6 +62,7 @@ def _compile(source: str) -> _Pattern:
     chars: list[str] = []
     wildcards: list[bool] = []
     escaped = False
+    last_was_star = False
     consumed = 0
 
     def flush() -> None:
@@ -77,25 +78,31 @@ def _compile(source: str) -> _Pattern:
             chars.append(ch)
             wildcards.append(False)
             escaped = False
+            last_was_star = False
         elif ch == "\\":
             escaped = True
+            last_was_star = False
         elif ch == "*":
             consumed += 1
             if consumed > MAX_PATTERN_POINTS:
                 raise InvalidTagPattern("pattern over the code-point cap")
-            flush()
+            if not last_was_star:
+                flush()
+            last_was_star = True
         elif ch == "?":
             consumed += 1
             if consumed > MAX_PATTERN_POINTS:
                 raise InvalidTagPattern("pattern over the code-point cap")
             chars.append(ch)
             wildcards.append(True)
+            last_was_star = False
         else:
             consumed += 1
             if consumed > MAX_PATTERN_POINTS:
                 raise InvalidTagPattern("pattern over the code-point cap")
             chars.append(ch)
             wildcards.append(False)
+            last_was_star = False
 
     if escaped:
         raise InvalidTagPattern("a trailing backslash is not valid")
@@ -136,6 +143,10 @@ def _evaluate(pattern: _Pattern, tag: str) -> tuple[int, bool]:
             return len(segment.text), False
         return len(segment.text), _matches_at(segment, tag, 0)
 
+    suffix = [0] * (count + 1)
+    for index in range(count - 1, -1, -1):
+        suffix[index] = suffix[index + 1] + len(segments[index].text)
+
     first = segments[0]
     cost = len(first.text)
     if not _matches_at(first, tag, 0):
@@ -144,7 +155,7 @@ def _evaluate(pattern: _Pattern, tag: str) -> tuple[int, bool]:
 
     for index in range(1, count - 1):
         segment = segments[index]
-        later = sum(len(rest.text) for rest in segments[index + 1 :])
+        later = suffix[index + 1]
         window = len(tag) - later - position
         positions = max(0, window - len(segment.text) + 1)
         cost += positions * len(segment.text)
@@ -212,7 +223,9 @@ class TagFilter:
             cached = self._cache.get(key)
             if cached is None:
                 cost, hit = _evaluate(pattern, tag)
-                self._spent += cost
+                # A pair with no literal work still consumes one unit, so an
+                # all-wildcard pattern cannot be evaluated for free.
+                self._spent += cost or 1
                 if self._spent > self._budget:
                     self._exhausted = True
                     raise TagPatternTooExpensive("matching budget exhausted")
