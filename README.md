@@ -405,6 +405,7 @@ documents the document format, claim states and exit codes.
 | `rungraph report ROOT` | Consolidated evidence, claim states and impact (`--baseline`, `--strict`, `--directory-artifacts`, `--json`, `--markdown`). |
 | `rungraph db-export ROOT --output FILE` | Export a workspace to a derived SQLite cache (`--force`, `--json`); JSON remains the authority. |
 | `rungraph db-check ROOT --db FILE` | Compare a workspace SQLite cache with the document (`--json`); exit 1 on drift. |
+| `rungraph db-import --db FILE --output FILE` | Rebuild a workspace JSON document from a cache (`--force`, `--json`); the result is validated before writing. |
 | `rungraph runs ROOT` | Recorded runs across members with params, conditions and per-run artifact/result counts (`--member`, `--metadata`, `--summaries`, `--json`). |
 | `rungraph impact ROOT --from NODE` | Claims affected by one node, with the dependency path; JSON output. Exit `2` for an unknown node. |
 | `rungraph compare ROOT --metric NAME` | Recorded values for one metric across members with each pair's condition status (`--run`, `--latest`, `--text`, `--json`). |
