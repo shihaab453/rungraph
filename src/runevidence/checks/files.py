@@ -19,7 +19,7 @@ from ..findings import Code, Finding, Severity
 from ..hashing import sha256_file
 from ..locator_profiles import MAX_FILE_BYTES
 from ..manifest import LoadedManifest
-from ..models import Artifact, is_own_file
+from ..models import SCHEMA_VERSION_0_5, Artifact, TensorboardLocator, is_own_file
 
 # Folders never treated as experiment content when scanning for hints or
 # untracked files.
@@ -1148,6 +1148,7 @@ def check_artifact(
     targeted: bool = False,
     tensorboard_raised: bool = False,
     structured: bool = False,
+    refreshable: bool = False,
 ) -> TargetCheck:
     """The one artifact-level check. ``targeted`` chooses the protected
     snapshot instead of a streaming hash; every other rule is identical.
@@ -1219,13 +1220,20 @@ def check_artifact(
                         f"sha256 {art.sha256[:12]}... recorded, {snapshot.digest[:12]}... on disk.{size_note}"
                     ),
                     hint=(
-                        "This artifact feeds recorded values read through a structured locator, "
-                        "so `runevidence rehash` cannot accept its bytes. Restore the original "
-                        "file, or regenerate the manifest with the adapter that produced it."
-                        if structured
+                        "This artifact feeds recorded values read through a structured locator. "
+                        "If every recorded scalar locator still matches, refresh the bytes with "
+                        f"`runevidence rehash <folder> {art.id} --refresh-locators`; otherwise "
+                        "restore the original file."
+                        if refreshable
                         else (
-                            f"If the change is intended, accept it with `runevidence rehash <folder> {art.id}`; "
-                            "otherwise restore the original file."
+                            "This artifact feeds recorded values read through a structured locator, "
+                            "so `runevidence rehash` cannot accept its bytes. Restore the original "
+                            "file, or regenerate the manifest with the adapter that produced it."
+                            if structured
+                            else (
+                                f"If the change is intended, accept it with `runevidence rehash <folder> {art.id}`; "
+                                "otherwise restore the original file."
+                            )
                         )
                     ),
                 )
@@ -1612,6 +1620,15 @@ def check_files(
         for result in loaded.manifest.results
         if result.locator is not None and type(result.locator) is not str
     }
+    refreshable_ids: set[str] = set()
+    if loaded.manifest.schema_version == SCHEMA_VERSION_0_5:
+        by_artifact: dict[str, list] = {}
+        for result in loaded.manifest.results:
+            by_artifact.setdefault(result.artifact_id, []).append(result)
+        for artifact_id in structured_ids:
+            results = by_artifact.get(artifact_id, [])
+            if results and all(isinstance(result.locator, TensorboardLocator) for result in results):
+                refreshable_ids.add(artifact_id)
     for art in loaded.manifest.artifacts:
         targeted = art.id in targeted_ids
         state: Optional[TargetCheck] = None
@@ -1634,6 +1651,7 @@ def check_files(
                 targeted=targeted,
                 tensorboard_raised=targeted and art.id in tensorboard_snapshot_ids,
                 structured=art.id in structured_ids,
+                refreshable=art.id in refreshable_ids,
             )
         if targeted and on_targeted is not None:
             on_targeted(art, state, out)
