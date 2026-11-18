@@ -29,16 +29,25 @@ def import_sqlite(database: Path, output: Path, *, force: bool = False) -> dict[
         meta = dict(connection.execute("select key, value from meta"))
         if meta.get("format") != "runevidence-db-export-v1":
             raise ValueError("not a runevidence manifest export")
-        project = connection.execute(
-            "select id, name, description, metadata from project"
-        ).fetchone()
+        project_columns = {
+            row[1] for row in connection.execute("pragma table_info(project)")
+        }
+        if "tags" in project_columns:
+            project = connection.execute(
+                "select id, name, description, tags, metadata from project"
+            ).fetchone()
+        else:
+            legacy = connection.execute(
+                "select id, name, description, metadata from project"
+            ).fetchone()
+            project = legacy and (*legacy[:3], "[]", legacy[3])
         if project is None:
             raise ValueError("database has no project row")
         document: dict[str, Any] = {
             "schema_version": meta["schema_version"],
             "project": _drop_none({
                 "id": project[0], "name": project[1], "description": project[2],
-                "metadata": json.loads(project[3]),
+                "tags": json.loads(project[3]), "metadata": json.loads(project[4]),
             }),
             "runs": [
                 _drop_none({
@@ -48,7 +57,7 @@ def import_sqlite(database: Path, output: Path, *, force: bool = False) -> dict[
                     "metadata": json.loads(row[5]),
                 })
                 for row in connection.execute(
-                    "select id, name, started_at, params, conditions, metadata from runs order by id"
+                    "select id, name, started_at, params, conditions, metadata from runs order by rowid"
                 )
             ],
             "artifacts": [
@@ -60,7 +69,7 @@ def import_sqlite(database: Path, output: Path, *, force: bool = False) -> dict[
                 })
                 for row in connection.execute(
                     "select id, path, sha256, size_bytes, kind, run_id, volatile, "
-                    "artifact_type, digest_format, dataset_id, metadata from artifacts order by id"
+                    "artifact_type, digest_format, dataset_id, metadata from artifacts order by rowid"
                 )
             ],
             "results": [
@@ -74,7 +83,7 @@ def import_sqlite(database: Path, output: Path, *, force: bool = False) -> dict[
                 })
                 for row in connection.execute(
                     "select id, run_id, name, value, artifact_id, locator, metadata, "
-                    "metric_definition from results order by id"
+                    "metric_definition from results order by rowid"
                 )
             ],
             "relationships": [
@@ -96,7 +105,7 @@ def import_sqlite(database: Path, output: Path, *, force: bool = False) -> dict[
                 "supports": refs.get(row[0], {}).get("supports", []),
                 "contradicts": refs.get(row[0], {}).get("contradicts", []),
             })
-            for row in connection.execute("select id, claim, source, metadata from evidence order by id")
+            for row in connection.execute("select id, claim, source, metadata from evidence order by rowid")
         ]
     finally:
         connection.close()

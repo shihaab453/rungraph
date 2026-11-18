@@ -19,7 +19,7 @@ from .manifest import LoadedManifest
 FORMAT = "runevidence-db-export-v1"
 SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, metadata TEXT NOT NULL);
+CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, tags TEXT NOT NULL, metadata TEXT NOT NULL);
 CREATE TABLE runs (id TEXT PRIMARY KEY, name TEXT, started_at TEXT, params TEXT NOT NULL, conditions TEXT, metadata TEXT NOT NULL);
 CREATE TABLE artifacts (id TEXT PRIMARY KEY, path TEXT NOT NULL, sha256 TEXT, size_bytes INTEGER, kind TEXT, run_id TEXT, volatile INTEGER NOT NULL, artifact_type TEXT, digest_format TEXT, dataset_id TEXT, metadata TEXT NOT NULL);
 CREATE TABLE results (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, name TEXT NOT NULL, value TEXT, artifact_id TEXT, locator TEXT, metadata TEXT NOT NULL, metric_definition TEXT);
@@ -30,7 +30,7 @@ CREATE TABLE relationships (source TEXT NOT NULL, target TEXT NOT NULL, type TEX
 
 
 def _json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True)
+    return json.dumps(value, ensure_ascii=True, allow_nan=True, sort_keys=True)
 
 
 def export_sqlite(loaded: LoadedManifest, output: Path, *, force: bool = False) -> dict[str, Any]:
@@ -58,8 +58,8 @@ def export_sqlite(loaded: LoadedManifest, output: Path, *, force: bool = False) 
             )
             project = manifest.project
             connection.execute(
-                "INSERT INTO project(id, name, description, metadata) VALUES (?, ?, ?, ?)",
-                (project.id, project.name, project.description, _json(project.metadata)),
+                "INSERT INTO project(id, name, description, tags, metadata) VALUES (?, ?, ?, ?, ?)",
+                (project.id, project.name, project.description, _json(project.tags), _json(project.metadata)),
             )
             for run in manifest.runs:
                 connection.execute(
@@ -91,17 +91,18 @@ def export_sqlite(loaded: LoadedManifest, output: Path, *, force: bool = False) 
                     ),
                 )
             for result in manifest.results:
+                payload = result.model_dump(mode="json")
                 connection.execute(
                     "INSERT INTO results VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         result.id,
                         result.run_id,
                         result.name,
-                        _json(result.value),
+                        _json(payload["value"]),
                         result.artifact_id,
-                        _json(result.locator) if result.locator is not None else None,
+                        _json(payload["locator"]) if payload["locator"] is not None else None,
                         _json(result.metadata),
-                        _json(result.metric_definition) if getattr(result, "metric_definition", None) else None,
+                        _json(payload["metric_definition"]) if payload.get("metric_definition") else None,
                     ),
                 )
             for evidence in manifest.evidence:
@@ -199,7 +200,10 @@ def check_sqlite(loaded: LoadedManifest, database: Path) -> dict[str, Any]:
             for target in refs
         }
         expected_rows = {
-            "project": {(manifest.project.id, manifest.project.name)},
+            "project": {
+                (manifest.project.id, manifest.project.name, manifest.project.description,
+                 _json(manifest.project.tags), _json(manifest.project.metadata))
+            },
             "runs": {
                 (run.id, run.name, run.started_at.isoformat() if run.started_at else None,
                  _json(run.params),
@@ -230,7 +234,7 @@ def check_sqlite(loaded: LoadedManifest, database: Path) -> dict[str, Any]:
             "evidence_refs": expected_refs,
         }
         queries = {
-            "project": "select id, name from project",
+            "project": "select id, name, description, tags, metadata from project",
             "runs": "select id, name, started_at, params, conditions, metadata from runs",
             "artifacts": "select id, path, sha256, size_bytes, kind, run_id, volatile, artifact_type, digest_format, dataset_id, metadata from artifacts",
             "results": "select id, run_id, name, value, artifact_id, locator, metadata, metric_definition from results",
