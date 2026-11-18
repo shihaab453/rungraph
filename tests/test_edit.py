@@ -1087,3 +1087,14 @@ def test_rehash_on_a_0_2_manifest_preserves_first_class_fields(experiment, monke
     }
     assert after["results"][0]["metric_definition"] == {"definition_id": "accuracy"}
     assert artifact(after, doc["artifacts"][0]["id"])["dataset_id"] == "dataset-x"
+
+
+def test_edit_error_does_not_repeat_the_nothing_written_sentence(capsys):
+    from runevidence.cli import _edit_error
+    from runevidence.edit import EditError
+
+    assert _edit_error(EditError("bad summary. Nothing was written.")) == 2
+    assert capsys.readouterr().out == "ERROR: bad summary. Nothing was written.\n"
+
+    assert _edit_error(EditError("plain refusal.")) == 2
+    assert capsys.readouterr().out == "ERROR: plain refusal.\nNothing was written.\n"
