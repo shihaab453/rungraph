@@ -38,8 +38,16 @@ def stats_manifest(
             }
         )
     if latest:
-        keep = latest_names(row["name"] for row in rows)
-        rows = [row for row in rows if row["name"] in keep]
+        by_run: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            by_run.setdefault(row["run"], []).append(row)
+        keep: set[str] = set()
+        for run_rows in by_run.values():
+            names = latest_names(row["name"] for row in run_rows)
+            keep.update(
+                row["result"] for row in run_rows if row["name"] in names
+            )
+        rows = [row for row in rows if row["result"] in keep]
         for row in rows:
             row["name"] = split_step_name(row["name"])[0]
     if metric is not None:

@@ -94,3 +94,25 @@ def test_stats_latest_groups_step_families(tmp_path: Path, capsys):
     assert data["latest"] is True
     assert data["metrics"][0]["rows"] == 1
     assert data["metrics"][0]["mean"] == 0.5
+
+
+def test_stats_latest_keeps_the_highest_step_per_run(tmp_path: Path, capsys):
+    document = {
+        "schema_version": "0.1",
+        "project": {"id": "p", "name": "p"},
+        "runs": [{"id": "slow"}, {"id": "fast"}],
+        "results": [
+            {"id": "slow-5", "run_id": "slow", "name": "loss @ 5", "value": 0.9},
+            {"id": "slow-10", "run_id": "slow", "name": "loss @ 10", "value": 0.5},
+            {"id": "fast-3", "run_id": "fast", "name": "loss @ 3", "value": 0.8},
+            {"id": "fast-7", "run_id": "fast", "name": "loss @ 7", "value": 0.3},
+        ],
+    }
+    (tmp_path / "runevidence.json").write_text(json.dumps(document), encoding="utf-8")
+
+    assert main(["stats", str(tmp_path), "--metric", "loss", "--latest", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["metrics"][0]["rows"] == 2
+    assert data["metrics"][0]["mean"] == pytest.approx(0.4)
+    assert data["metrics"][0]["min"] == 0.3
+    assert data["metrics"][0]["max"] == 0.5
