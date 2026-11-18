@@ -1,13 +1,13 @@
-# TensorBoard scalar byte refresh — RFC v0.5
+# TensorBoard scalar byte refresh — RFC v0.6
 
 Status: design draft for review. New opt-in rehash behavior; no schema change.
 
 ## 0. Changes in this version
 
-v0.5 is the final exact-contract pass. It makes the schema refusal
-manifest-level, completes the import list, pins colon-token and empty-`id:`
-handling, corrects the `_targeted_parts` rationale, and pins the full output
-order, singular `_count`, path quoting and mixed changed/no-op summary.
+v0.6 is the closure pass. It adds the real-write trailer, pins the absent old
+size and size-only claim behavior, corrects the `_read_snapshot_parts`
+provenance, scopes the suffix rule to the new refusals, and fixes the remaining
+selector/order wording.
 
 The design remains schema 0.5 scalar locators only, explicit artifact IDs, one
 protected snapshot, verify-never-write values, artifact digest/size only, and
@@ -58,9 +58,9 @@ For the selected set, preflight **before reading any event bytes**:
    - satisfy the shared TensorBoard event predicate;
    - be non-volatile, have a recorded `sha256`, and the manifest must
      declare schema 0.5;
-   - have at least one result with a `TensorboardLocator`;
    - have **no** other locator style on that artifact (no string pointer, no
-     other structured kind, no locator-less summary).
+     other structured kind, no locator-less result);
+   - have at least one result with a `TensorboardLocator`.
 3. The manifest must pass the existing TensorBoard cap
    (`_tensorboard_cap`: 10,000 entries / 16 MiB tag metadata). A capped
    manifest is refused with the existing cap text.
@@ -87,8 +87,8 @@ Then, for each selected artifact:
   on it to be a supported scalar locator on the same path;
 - update `sha256` and `size_bytes` from the snapshot. No result value changes;
 - release the snapshot before reading the next artifact (no accumulation);
-- collect claims that rest on the changed artifact for the existing rehash
-  warning;
+- collect claims that rest on a digest-changed artifact for the existing
+  rehash warning; a size-only repair does not produce claim warnings;
 - add one positional warning whenever the digest changed: the exact
   `(tag, step, occurrence)` contract is positional, so duplicate insertion or
   deletion can retarget an occurrence even when its value is equal.
@@ -113,7 +113,8 @@ already match.
 Flag rules:
 
 - Requires explicit artifact targets: a bare ID or `id:ID` only. `--all`,
-  `run:`, `glob:`, `folder:` and path selectors are refused. `--all` has a
+  `run:`, `path:`, `glob:`, `folder:` and path-like selectors are refused.
+  `--all` has a
   separate fixed message; the other selectors use the same target-shape
   refusal.
 - `--volatile`, `--no-volatile` and `--directory` are refused.
@@ -169,8 +170,10 @@ ERROR: <message>
 Nothing was written.
 ```
 
-The exception message never contains `Nothing was written.`. The table below
-lists the `<message>` only and names the printer class.
+A new refresh-refusal message never contains `Nothing was written.`. (Some
+legacy summary `EditError`s in the delivered tree already do; this slice does
+not copy that pattern.) The table below lists the `<message>` only and names the
+printer class.
 `_locator_refresh_unsupported` is used only by the default (no-flag) refusal and
 is not used by the opt-in path.
 
@@ -191,7 +194,7 @@ Post-load refusals use `EditError`; the first failure in this order wins:
 | Condition | Message |
 | --- | --- |
 | schema is not 0.5 | `rehash cannot refresh: the manifest is not schema 0.5` |
-| unknown exact ID | `--refresh-locators accepts only exact artifact IDs; no artifact has ID 'V'` |
+| unknown exact ID | `--refresh-locators accepts only exact artifact IDs; no artifact has ID <V!r>` |
 | volatile target | `rehash cannot refresh 'ID': it is volatile` |
 | directory target | `rehash cannot refresh 'ID': it is a directory artifact` |
 | no `sha256` | `rehash cannot refresh 'ID': it has no recorded digest` |
@@ -200,8 +203,9 @@ Post-load refusals use `EditError`; the first failure in this order wins:
 | no scalar locator results | `rehash cannot refresh 'ID': the artifact has no TensorBoard scalar locators` |
 | manifest over cap | `the manifest exceeds the tensorboard verification limit (10,000 entries or 16 MiB of tag metadata); no TensorBoard scalar was read` |
 
-`ID` is the artifact ID in single quotes; `V` is the requested token. The
-schema check is manifest-level and runs before ID lookup. The per-artifact rows
+`ID` is the artifact ID in single quotes; `V` is the requested token with an
+`id:` prefix stripped, and `<V!r>` is its Python repr. The schema check is
+manifest-level and runs before ID lookup. The per-artifact rows
 run in target argument order and stop at the first failing artifact. The cap is
 checked after the per-artifact target shape and before any read. Event reads run
 in selection order; results are checked in manifest order and stop at the first
@@ -210,8 +214,9 @@ failure. Exactly one refusal is reported.
 With the flag, the CLI does not call `select_artifacts`. Only `run:`, `path:`,
 `folder:`, `glob:` and an empty `id:` are refused as selector shapes. `id:V`
 strips the prefix; every other token, including `foo:bar` or `runs/a`, is the
-bare ID `V`. An absent V is the post-load unknown-ID refusal. Duplicates are
-removed.
+bare ID `V`. An empty `id:` is a usage refusal; a non-empty absent ID is the
+post-load unknown-ID refusal. Duplicates are removed after stripping.
+
 ### 5.2 Snapshot states
 
 The protected reader uses exactly:
@@ -222,8 +227,8 @@ Build the parts with `_targeted_parts(root, art.path)`. If it returns a
 non-`ok` state (`refused-path` or `escapes-root`), use that state directly and
 do not call `_read_snapshot_parts`; only read when it returns `ok`. The other
 states (`missing`, `unreadable`, `changed`, `symlinked-parent`, `refused-alias`,
-`over-cap`) come from `_read_snapshot_parts`; pass those through too. Map
-non-`ok` states to:
+`escapes-root` from a leaf alias, `over-cap`) come from
+`_read_snapshot_parts`; pass those through too. Map non-`ok` states to:
 
 | State | Message |
 | --- | --- |
@@ -297,27 +302,31 @@ exact order:
 1. changed artifact lines, in target argument order;
 2. verified artifact lines, in target argument order;
 3. `plan.notes` lines (`  NOTE ...`), in target argument order;
-4. the existing claims line, if any;
+4. the existing claims line, only when at least one digest changed;
 5. summary;
-6. `Dry run: nothing was written.` only when a dry run has changes.
+6. real changed run: `Wrote <path>` and `Next: runevidence validate <path>`,
+   through `_finish_edit`; dry changed run: `Dry run: nothing was written.`.
+   A no-op prints no step 6 line.
 
 Lines:
 
 - digest update: `  <id>: sha256 <_short(old)> -> <_short(new)>` (plus
   `, <old> -> <new> bytes` when size changes; `none` when the old size is
   absent);
-- size-only repair: `  <id>: size <old> -> <new> bytes; sha256 unchanged`;
+- size-only repair: `  <id>: size <none|old> -> <new> bytes; sha256 unchanged`;
 - no-op: `  <id>: verified; bytes and locators match`.
 
-Summaries use `_count` so one file prints as `1 file`:
+Summaries use `_count(len(...), 'file')` so one file prints as `1 file`:
 
-- changed only: existing `Would re-record`/`Re-recorded <_count(changed)>`;
-- changed and verified: `Would re-record <_count(changed)> and verify
-  <_count(verified)>` / `Re-recorded <_count(changed)> and verified
-  <_count(verified)>`;
-- no-op only real: `Verified <_count(verified)>; no changes.`;
-- no-op only dry: `Would verify <_count(verified)>; no changes.`.
+- changed only: existing `Would re-record`/`Re-recorded
+  <_count(len(changed), 'file')>`;
+- changed and verified: `Would re-record <_count(len(changed), 'file')> and
+  verify <_count(len(verified), 'file')>` / `Re-recorded
+  <_count(len(changed), 'file')> and verified <_count(len(verified), 'file')>`;
+- no-op only real: `Verified <_count(len(verified), 'file')>; no changes.`;
+- no-op only dry: `Would verify <_count(len(verified), 'file')>; no changes.`.
 
+Claims are collected only from digest-changed artifacts, not size-only repairs.
 A dry run cannot detect a stale manifest because the check is inside
 `save_raw`; only a real refresh that writes can refuse stale bytes. A no-op
 never reaches `save_raw`.
@@ -349,7 +358,9 @@ never reaches `save_raw`.
   to false in `test_edit_route_grammar_only`.
 - `src/runevidence/checks/files.py`: no new reader; reuse
   `_read_snapshot_parts`. If a helper is added, import it lazily.
-- `README.md`: flag, exact-ID selector, schema 0.5 scope, value-first rule.
+- `README.md`: flag, exact-ID selector, schema 0.5 scope, value-first rule;
+  update the TensorBoard paragraph that currently states the unconditional
+  structured-locator refusal.
 - `docs/schema-0.5-tensorboard.md`: replace the unconditional rehash refusal
   paragraph with the opt-in rule. `docs/tensorboard-guide.md`: add the rule in
   its "Migration and refusals" section. `docs/authoring-files.md`: add it where
