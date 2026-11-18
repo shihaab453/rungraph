@@ -44,3 +44,14 @@ def test_workspace_db_check_detects_drift(tmp_path: Path, capsys):
     finally:
         connection.close()
     assert main(["db-check", "examples/workspace-study", "--db", str(output), "--json"]) == 1
+
+
+def test_workspace_db_import_round_trips(tmp_path: Path, capsys):
+    output = tmp_path / "workspace.sqlite"
+    target = tmp_path / "rungraph.json"
+    assert main(["db-export", "examples/workspace-study", "--output", str(output)]) == 0
+    capsys.readouterr()
+    assert main(["db-import", "--db", str(output), "--output", str(target), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["counts"]["members"] == 2
+    assert json.loads(target.read_text())["format"] == "rungraph-workspace"

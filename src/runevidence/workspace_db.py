@@ -134,3 +134,74 @@ def check_workspace(loaded: LoadedWorkspace, database: Path) -> dict[str, Any]:
         connection.close()
     return {"format": "rungraph-db-check-v1", "ok": not mismatches, "workspace_sha256": digest,
             "mismatches": mismatches, "exit_code": 0 if not mismatches else 1}
+
+
+def import_workspace(database: Path, output: Path, *, force: bool = False) -> dict[str, Any]:
+    database, output = Path(database), Path(output)
+    if not database.is_file():
+        raise ValueError("database-not-found")
+    if output.exists() and not force:
+        raise ValueError(f"{output} already exists; use --force to replace it")
+    connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+    try:
+        meta = dict(connection.execute("select key, value from meta"))
+        if meta.get("format") != FORMAT:
+            raise ValueError("not a workspace export")
+        row = connection.execute("select id, name, description, metadata from workspace").fetchone()
+        if row is None:
+            raise ValueError("database has no workspace row")
+        document: dict[str, Any] = {
+            "format": "rungraph-workspace", "version": "0.1",
+            "id": row[0], "name": row[1], "description": row[2],
+            "metadata": json.loads(row[3]),
+            "members": [
+                {"id": m[0], "path": m[1], "manifest": m[2], **({"role": m[3]} if m[3] else {})}
+                for m in connection.execute("select id, path, manifest, role from members order by id")
+            ],
+            "claims": [],
+            "relationships": [],
+        }
+        refs: dict[str, dict[str, list[dict[str, str]]]] = {}
+        for claim_id, relation, member, target in connection.execute(
+            "select claim_id, relation, member, target from claim_refs"
+        ):
+            ref = {"member": member, "id": target} if member else {"claim": target}
+            refs.setdefault(claim_id, {"supports": [], "contradicts": []})[relation].append(ref)
+        for claim_id, text, source, metadata in connection.execute(
+            "select id, text, source, metadata from claims order by id"
+        ):
+            document["claims"].append({
+                "id": claim_id, "claim": text,
+                **({"source": source} if source else {}),
+                "metadata": json.loads(metadata),
+                "supports": refs.get(claim_id, {}).get("supports", []),
+                "contradicts": refs.get(claim_id, {}).get("contradicts", []),
+            })
+        for item in connection.execute(
+            "select id, type, source_member, source_id, target_member, target_id, note from relationships"
+        ):
+            source = {"member": item[2], "id": item[3]} if item[2] else {"claim": item[3]}
+            target = {"member": item[4], "id": item[5]} if item[4] else {"claim": item[5]}
+            document["relationships"].append({
+                "id": item[0], "type": item[1], "source": source, "target": target,
+                **({"note": item[6]} if item[6] else {}),
+            })
+    finally:
+        connection.close()
+    from .workspace import Workspace
+    workspace = Workspace.model_validate(document)
+    from .workspace import canonical_document
+    data = canonical_document(workspace)
+    staging = output.with_name(f".{output.name}.tmp-{os.getpid()}")
+    try:
+        staging.write_bytes(data)
+        with staging.open("rb+") as handle:
+            os.fsync(handle.fileno())
+        os.replace(staging, output)
+    finally:
+        try: staging.unlink()
+        except OSError: pass
+    return {"format": "rungraph-db-import-v1", "version": "0.1", "path": str(output),
+            "workspace_sha256": hashlib.sha256(data).hexdigest(),
+            "counts": {"members": len(workspace.members), "claims": len(workspace.claims),
+                       "relationships": len(workspace.relationships)}, "exit_code": 0}

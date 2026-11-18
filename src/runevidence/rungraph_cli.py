@@ -31,7 +31,7 @@ from .workspace_consumers import (
     runs_data,
     stats_data,
 )
-from .workspace_db import check_workspace, export_workspace
+from .workspace_db import check_workspace, export_workspace, import_workspace
 from .workspace_graph import build_graph, claim_states, run_member_checks
 
 EXIT_OK = 0
@@ -558,6 +558,18 @@ def cmd_db_check(args: argparse.Namespace) -> int:
     return data["exit_code"]
 
 
+def cmd_db_import(args: argparse.Namespace) -> int:
+    try:
+        data = import_workspace(args.db, args.output, force=args.force)
+    except (OSError, ValueError) as exc:
+        return _error("db-import", "workspace", str(exc))
+    if args.json:
+        _print_json(data)
+    else:
+        print(f"Wrote {data['path']} ({data['counts']['members']} members).")
+    return EXIT_OK
+
+
 def cmd_runs(args: argparse.Namespace) -> int:
     try:
         loaded = load_workspace(Path(args.root))
@@ -785,6 +797,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", type=Path, required=True)
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_db_check)
+
+    p = sub.add_parser("db-import", help="import a workspace SQLite cache to JSON")
+    p.add_argument("--db", type=Path, required=True)
+    p.add_argument("--output", type=Path, required=True)
+    p.add_argument("--force", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_db_import)
 
     p = sub.add_parser("runs", help="list recorded runs across members")
     p.add_argument("root", nargs="?", default=".")
