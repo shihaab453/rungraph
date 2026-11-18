@@ -2,6 +2,16 @@
 
 **DRAFT. NOT PUBLISHED. NO VERSION OR RELEASE DECISION MADE.**
 
+> **2026-11-18 status update.** This draft predates later work and is not a
+> release announcement. The current repository also contains schemas through
+> 0.11 (TF2 media and `[k,3]` histograms), eight optional adapters (Hydra,
+> MLflow file store, TensorBoard, Sacred, Keras, Lightning, W&B summary), the
+> RunGraph workspace (`rungraph.json`), verified-value `assess`, per-metric
+> `stats`, run inventories with `--latest`/`--summaries`, Markdown reports,
+> run/artifact authoring, macOS CI, and a derived read-only SQLite cache with
+> export/check/query/import. JSON remains the authority. No tag, version bump
+> or publication has been made; release numbering remains an owner decision.
+
 This describes a limited alpha, not a general availability release. It does
 not claim fully verified metric freshness, scientific validity or a fair
 comparison.
