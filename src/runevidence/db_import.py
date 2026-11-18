@@ -29,6 +29,8 @@ def import_sqlite(database: Path, output: Path, *, force: bool = False) -> dict[
         meta = dict(connection.execute("select key, value from meta"))
         if meta.get("format") != "runevidence-db-export-v1":
             raise ValueError("not a runevidence manifest export")
+        if "schema_version" not in meta:
+            raise ValueError("database is missing the schema_version meta row")
         project_columns = {
             row[1] for row in connection.execute("pragma table_info(project)")
         }

@@ -95,6 +95,9 @@ HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
     # Suffix normalization pair, now historical after schema 0.11 volatile guard.
     "ab5d8530d1bd97859ec95094397132de1faf7a02c6bb79b74c9c4117a065fd44",  # LF
     "2fa8cd76d618595eb3b34937da67fbb78439867567fb5df74a68829069155958",  # CRLF
+    # Schema 0.11 volatile guard pair, now historical after db-import errors.
+    "de91024c80117ed694f4cd212001eb7b2ccfdbb3eb7e6e6c714c0e4fb509ae08",  # LF
+    "736da050db3bfb44549069b0be64bf8340ebe14061b39c401e58cf5bc9db2402",  # CRLF
     # Closed-output handling, now historical after the budget-summary text.
     "15bdc51f3dc5655a4c289bb6681e8cb297e960de13a26fed309e2c50c7a20601",  # LF
     "2b599651e40b68b1ade7ecc0d57d100ee15876b77738d9b28a603c18a75bccf9",  # CRLF
@@ -196,9 +199,9 @@ HISTORICAL_READER_DIGEST_23 = (
 # pin is an exact byte SHA-256. Nothing is normalized during checking. Static
 # != plugin safety.
 CLI_HASH = frozenset({
-    # Schema 0.11 volatile guard (2026-11-18): 38-route surface.
-    "de91024c80117ed694f4cd212001eb7b2ccfdbb3eb7e6e6c714c0e4fb509ae08",  # LF
-    "736da050db3bfb44549069b0be64bf8340ebe14061b39c401e58cf5bc9db2402",  # CRLF
+    # db-import error containment (2026-11-18): 38-route surface.
+    "c4ad10376fc341a00e0dd591fd7b7ecbeb5215264337a64ff03e35c96f6020dc",  # LF
+    "b5fbc7ec609b6c54befecb5e6c101405995697ce425679651a410374b94405d3",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.
