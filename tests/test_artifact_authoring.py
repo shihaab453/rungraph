@@ -161,3 +161,82 @@ def test_remove_artifact_refuses_claim_relationship_and_condition_references():
     condition["runs"][0]["conditions"] = {"evaluation_dataset_artifact_id": "data"}
     with pytest.raises(authoring.AuthoringError, match="condition 'evaluation_dataset_artifact_id'"):
         authoring.remove_artifact(condition, "data")
+
+
+def _add_keep_and_results(root: Path, count: int, *, cited: bool = False) -> None:
+    document = json.loads((root / "runevidence.json").read_text(encoding="utf-8"))
+    (root / "keep.csv").write_bytes(b"keep\n")
+    document["artifacts"].append(
+        {
+            "id": "keep",
+            "path": "keep.csv",
+            "sha256": hashlib.sha256(b"keep\n").hexdigest(),
+            "size_bytes": 5,
+        }
+    )
+    document["results"] = [
+        {
+            "id": f"r{index}",
+            "run_id": "r",
+            "name": f"metric-{index}",
+            "value": index,
+            "artifact_id": "data",
+        }
+        for index in range(count)
+    ]
+    document["results"].append(
+        {"id": "kept-result", "run_id": "r", "name": "keep", "value": 1, "artifact_id": "keep"}
+    )
+    if cited:
+        document["evidence"] = [
+            {"id": "claim", "claim": "one result", "supports": ["r0"], "contradicts": []}
+        ]
+    (root / "runevidence.json").write_text(json.dumps(document), encoding="utf-8")
+
+
+def test_remove_artifact_with_many_results_in_one_edit(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    _add_keep_and_results(root, 2_278)
+    assert main(["artifact", "remove", str(root), "--id", "data", "--with-results"]) == 0
+    document = json.loads((root / "runevidence.json").read_text(encoding="utf-8"))
+    assert [item["id"] for item in document["artifacts"]] == ["keep"]
+    assert [item["id"] for item in document["results"]] == ["kept-result"]
+    capsys.readouterr()
+    assert main(["validate", str(root), "--strict"]) == 0
+
+
+def test_remove_artifact_with_results_refuses_a_cited_result(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    _add_keep_and_results(root, 2, cited=True)
+    before = (root / "runevidence.json").read_bytes()
+    assert main(["artifact", "remove", str(root), "--id", "data", "--with-results"]) == 2
+    out = capsys.readouterr().out
+    assert "still cited" in out
+    assert "claim 'claim'" in out
+    assert (root / "runevidence.json").read_bytes() == before
+
+
+def test_remove_artifact_with_results_refuses_artifact_relationship(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    _add_keep_and_results(root, 2)
+    document = json.loads((root / "runevidence.json").read_text(encoding="utf-8"))
+    document["relationships"] = [
+        {"source": "data", "target": "r", "type": "input_to"}
+    ]
+    (root / "runevidence.json").write_text(json.dumps(document), encoding="utf-8")
+    before = (root / "runevidence.json").read_bytes()
+    assert main(["artifact", "remove", str(root), "--id", "data", "--with-results"]) == 2
+    assert "a relationship" in capsys.readouterr().out
+    assert (root / "runevidence.json").read_bytes() == before
+
+
+def test_with_results_is_remove_only_and_dry_run_is_clean(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    _add_keep_and_results(root, 2)
+    entry = write_entry(root, {"id": "data", "kind": "dataset"})
+    assert main(["artifact", "edit", str(root), "--file", str(entry), "--with-results"]) == 2
+    assert "--with-results is only valid" in capsys.readouterr().out
+
+    before = (root / "runevidence.json").read_bytes()
+    assert main(["artifact", "remove", str(root), "--id", "data", "--with-results", "--dry-run"]) == 0
+    assert (root / "runevidence.json").read_bytes() == before
