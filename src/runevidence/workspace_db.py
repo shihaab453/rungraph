@@ -136,6 +136,29 @@ def check_workspace(loaded: LoadedWorkspace, database: Path) -> dict[str, Any]:
             "mismatches": mismatches, "exit_code": 0 if not mismatches else 1}
 
 
+def _backup_output(output: Path) -> Path:
+    data = output.read_bytes()
+    generation = 1
+    while True:
+        suffix = ".bak" if generation == 1 else f".bak.{generation}"
+        candidate = output.with_name(output.name + suffix)
+        if not candidate.exists():
+            break
+        generation += 1
+    with candidate.open("xb") as handle:
+        try:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        except BaseException:
+            handle.close()
+            candidate.unlink(missing_ok=True)
+            raise
+    if candidate.read_bytes() != data:
+        raise OSError(f"backup {candidate} does not match the replaced output")
+    return candidate
+
+
 def import_workspace(database: Path, output: Path, *, force: bool = False) -> dict[str, Any]:
     database, output = Path(database), Path(output)
     if not database.is_file():
@@ -192,6 +215,7 @@ def import_workspace(database: Path, output: Path, *, force: bool = False) -> di
     workspace = Workspace.model_validate(document)
     from .workspace import canonical_document
     data = canonical_document(workspace)
+    backup = _backup_output(output) if output.exists() else None
     staging = output.with_name(f".{output.name}.tmp-{os.getpid()}")
     try:
         staging.write_bytes(data)
@@ -201,7 +225,10 @@ def import_workspace(database: Path, output: Path, *, force: bool = False) -> di
     finally:
         try: staging.unlink()
         except OSError: pass
-    return {"format": "rungraph-db-import-v1", "version": "0.1", "path": str(output),
-            "workspace_sha256": hashlib.sha256(data).hexdigest(),
-            "counts": {"members": len(workspace.members), "claims": len(workspace.claims),
-                       "relationships": len(workspace.relationships)}, "exit_code": 0}
+    result = {"format": "rungraph-db-import-v1", "version": "0.1", "path": str(output),
+              "workspace_sha256": hashlib.sha256(data).hexdigest(),
+              "counts": {"members": len(workspace.members), "claims": len(workspace.claims),
+                         "relationships": len(workspace.relationships)}, "exit_code": 0}
+    if backup is not None:
+        result["backup"] = str(backup)
+    return result

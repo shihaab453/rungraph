@@ -563,7 +563,10 @@ def cmd_db_check(args: argparse.Namespace) -> int:
 
 def cmd_db_import(args: argparse.Namespace) -> int:
     try:
-        data = import_workspace(args.db, args.output, force=args.force)
+        with workspace_lock(args.output.parent):
+            data = import_workspace(args.db, args.output, force=args.force)
+    except WorkspaceError as exc:
+        return _error("db-import", "workspace", str(exc))
     except (OSError, ValueError, sqlite3.Error, KeyError) as exc:
         message = f"database is missing required data: {exc}" if isinstance(exc, KeyError) else str(exc)
         return _error("db-import", "workspace", message)

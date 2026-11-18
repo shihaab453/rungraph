@@ -66,3 +66,15 @@ def test_workspace_db_import_refuses_a_corrupt_database_without_traceback(tmp_pa
     assert "db-import" in out
     assert "Traceback" not in out
     assert not target.exists()
+
+
+def test_workspace_db_import_force_keeps_the_replaced_output_bytes(tmp_path: Path, capsys):
+    output = tmp_path / "workspace.sqlite"
+    target = tmp_path / "rungraph.json"
+    assert main(["db-export", "examples/workspace-study", "--output", str(output)]) == 0
+    capsys.readouterr()
+    assert main(["db-import", "--db", str(output), "--output", str(target)]) == 0
+    capsys.readouterr()
+    before = target.read_bytes()
+    assert main(["db-import", "--db", str(output), "--output", str(target), "--force"]) == 0
+    assert target.with_name(target.name + ".bak").read_bytes() == before
