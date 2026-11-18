@@ -312,3 +312,10 @@ def test_same_size_digest_change_updates_only_the_digest(tmp_path: Path, capsys)
     assert "sha256" in out
     assert "-> " in out
     assert "size " not in out
+
+
+def test_validate_points_to_refresh_for_a_changed_scalar(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    (root / "e.tfevents").write_bytes(event(value=0.75))
+    assert main(["validate", str(root)]) == 1
+    assert "--refresh-locators" in capsys.readouterr().out
