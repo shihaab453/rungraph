@@ -104,6 +104,10 @@ claim reference is one key, not `{"claim", "id"}`.
 - `add` refuses an ID that already exists; `edit` requires the ID to exist.
 - `remove --id ID` refuses while another object cites it. Remove or edit the citing claim or
   relationship first.
+- A link must use an endpoint kind its relationship allows: claims support or contradict
+  results, artifacts or runs; `result_of` links a result to a run; `reported_in` links a result
+  to an artifact; `produced_by` and `input_to` link an artifact to a run; `derived_from` links
+  artifact-to-artifact or run-to-run.
 - Every command takes the manifest/workspace stale-byte check; a concurrent edit is refused
   rather than overwritten. `--json` returns a machine-readable success or error document.
 
