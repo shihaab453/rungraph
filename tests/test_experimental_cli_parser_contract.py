@@ -86,6 +86,9 @@ HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
     # Artifact removal current pair, now historical after closed-output handling.
     "6eb94c1abbd58df9bf3da6b4f1d39c4a8c6da32e5f7a3c9dc2df33a423171e1a",  # LF
     "3f5e5cc50435a07f834c6e9adb3ee37be1c731cdda679a2f15e709776124317e",  # CRLF
+    # Budget tag summary pair, now historical after TensorBoard refresh.
+    "8b64d752f1693016682de829c56e88843e594e27efd778c3381c45937e343742",  # LF
+    "90298f52b04fef202cb839a042b3a95b41856a82c7678e3a4d000a11fe9aebcd",  # CRLF
     # Closed-output handling, now historical after the budget-summary text.
     "15bdc51f3dc5655a4c289bb6681e8cb297e960de13a26fed309e2c50c7a20601",  # LF
     "2b599651e40b68b1ade7ecc0d57d100ee15876b77738d9b28a603c18a75bccf9",  # CRLF
@@ -187,9 +190,9 @@ HISTORICAL_READER_DIGEST_23 = (
 # pin is an exact byte SHA-256. Nothing is normalized during checking. Static
 # != plugin safety.
 CLI_HASH = frozenset({
-    # Budget tag summary (2026-11-18): 38-route surface.
-    "8b64d752f1693016682de829c56e88843e594e27efd778c3381c45937e343742",  # LF
-    "90298f52b04fef202cb839a042b3a95b41856a82c7678e3a4d000a11fe9aebcd",  # CRLF
+    # TensorBoard scalar byte refresh (2026-11-18): 38-route surface.
+    "4ad9cf1b4c4af13f2f4cabf1e07582de1ba02727a29eb27410aab2e5d77998fb",  # LF
+    "33fa92f0739e35aa9f10437f7df904792cc659698a19f86ccdfa1710c3c8b44c",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.
@@ -313,7 +316,7 @@ def parse_without_dispatch(argv):
 def test_edit_route_grammar_only():
     path = "Z:/__r14_impossible_sentinel__/manifest.json"
     rehash = parse_without_dispatch(["rehash", path, "--all", "--dry-run"])
-    assert (rehash.command, rehash.path, rehash.all, rehash.targets, rehash.volatile, rehash.dry_run) == ("rehash", Path(path), True, [], None, True)
+    assert (rehash.command, rehash.path, rehash.all, rehash.targets, rehash.volatile, rehash.refresh_locators, rehash.dry_run) == ("rehash", Path(path), True, [], None, False, True)
     file = "Z:/__r14_impossible_sentinel__/file"
     add = parse_without_dispatch(["add", path, file, "--dry-run", "--no-run"])
     assert (add.command, add.path, add.files, add.dry_run, add.no_run) == ("add", Path(path), [Path(file)], True, True)

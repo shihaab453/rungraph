@@ -21,13 +21,42 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
 from .adapters.generic import _unique, valid_slug
-from .checks.files import ScanLimitError, _is_absolute, _within, iter_files
+from .checks import _tensorboard_cap
+from .checks.files import (
+    TENSORBOARD_MAX_FILE_BYTES,
+    ScanLimitError,
+    _is_absolute,
+    _read_snapshot_parts,
+    _targeted_parts,
+    _within,
+    iter_files,
+)
 from .checks.graph import check_graph
-from .checks.results import _MISSING, MAX_JSON_BYTES, resolve_pointer, values_match
+from .checks.results import (
+    _MISSING,
+    MAX_JSON_BYTES,
+    TENSORBOARD_CAP_MESSAGE,
+    TENSORBOARD_PROFILE_HINT,
+    _tensorboard_path_matches,
+    resolve_pointer,
+    values_match,
+)
 from .findings import Code
 from .hashing import sha256_file
+from .locator_profiles import compare_tensorboard, display_locator
 from .manifest import LoadedManifest, artifact_to_dict, validate_manifest
-from .models import Artifact, Manifest, is_own_file
+from .models import (
+    SCHEMA_VERSION_0_5,
+    Artifact,
+    Manifest,
+    TensorboardLocator,
+    is_own_file,
+)
+from .tensorboard_events import (
+    EventFileError,
+    ScalarOutcome,
+    scan_scalars,
+)
 from .summaries import (
     SUMMARY_SCHEMAS,
     checked_summary,
@@ -387,6 +416,182 @@ def plan_rehash(
         )
     validate_manifest(raw)  # our own edit must leave a valid manifest
     return plan
+
+
+_REFRESH_STATE_MESSAGES = {
+    "missing": "the event file is missing",
+    "unreadable": "the event file is unreadable",
+    "changed": "the event file changed during the read or is not a regular file",
+    "symlinked-parent": "a parent of the event file is a symlink",
+    "refused-path": "the event path has a refused shape",
+    "refused-alias": "the event path resolves through a refused alias",
+    "escapes-root": "the event path escapes the experiment folder",
+    "over-cap": "the event file exceeds the 128 MiB TensorBoard limit",
+}
+
+_REFRESH_OUTCOMES = {
+    ScalarOutcome.mismatch: "was not found",
+    ScalarOutcome.unsupported_scalar: "selects an unsupported scalar encoding",
+    ScalarOutcome.unsupported_value: "selects an unsupported value",
+}
+
+
+def _refresh_error(artifact_id: str, message: str) -> EditError:
+    return EditError(f"rehash cannot refresh {artifact_id!r}: {message}")
+
+
+def _refresh_state_error(artifact_id: str, state: str) -> EditError:
+    return _refresh_error(
+        artifact_id,
+        _REFRESH_STATE_MESSAGES.get(state, "the event file could not be read"),
+    )
+
+
+def plan_refresh(loaded: LoadedManifest, raw: dict, targets: list[str]) -> RehashPlan:
+    """Verify schema-0.5 TensorBoard scalar locators and record only bytes.
+
+    Every value is read from the same protected snapshot as the digest. The
+    command never rewrites a result value; a changed value is refused and must
+    be recorded with ``result edit`` first.
+    """
+    manifest, root = loaded.manifest, loaded.root
+    if manifest.schema_version != SCHEMA_VERSION_0_5:
+        raise EditError("rehash cannot refresh: the manifest is not schema 0.5")
+
+    known = {artifact.id: artifact for artifact in manifest.artifacts}
+    selected: list[Artifact] = []
+    seen: set[str] = set()
+    for token in targets:
+        if token in seen:
+            continue
+        seen.add(token)
+        artifact = known.get(token)
+        if artifact is None:
+            raise EditError(
+                "--refresh-locators accepts only exact artifact IDs; "
+                f"no artifact has ID {token!r}"
+            )
+        selected.append(artifact)
+
+    by_artifact: dict[str, list] = {}
+    for result in manifest.results:
+        by_artifact.setdefault(result.artifact_id, []).append(result)
+
+    for artifact in selected:
+        if artifact.volatile:
+            raise _refresh_error(artifact.id, "it is volatile")
+        if getattr(artifact, "artifact_type", "file") != "file":
+            raise _refresh_error(artifact.id, "it is a directory artifact")
+        if artifact.sha256 is None:
+            raise _refresh_error(artifact.id, "it has no recorded digest")
+        if not _tensorboard_path_matches(artifact.path):
+            raise _refresh_error(artifact.id, "the path is not a TensorBoard event file")
+        results = by_artifact.get(artifact.id, [])
+        if any(not isinstance(result.locator, TensorboardLocator) for result in results):
+            raise _refresh_error(artifact.id, "the artifact mixes locator styles")
+        if not results:
+            raise _refresh_error(artifact.id, "the artifact has no TensorBoard scalar locators")
+
+    capped, _ = _tensorboard_cap(manifest)
+    if capped:
+        raise EditError(TENSORBOARD_CAP_MESSAGE)
+
+    files: list[FileChange] = []
+    notes: list[str] = []
+    digest_changed: set[str] = set()
+    for artifact in selected:
+        parts, path_state = _targeted_parts(root, artifact.path)
+        if path_state != "ok":
+            raise _refresh_state_error(artifact.id, path_state)
+        read = _read_snapshot_parts(
+            root,
+            parts,
+            cap=TENSORBOARD_MAX_FILE_BYTES,
+            tensorboard_raised=True,
+        )
+        if read.state != "ok" or read.snapshot is None or read.snapshot.data is None:
+            raise _refresh_state_error(artifact.id, read.state)
+        snapshot = read.snapshot
+        results = by_artifact[artifact.id]
+        try:
+            requests = [
+                (result.locator.tag.encode("utf-8"), result.locator.step, result.locator.occurrence)
+                for result in results
+            ]
+        except UnicodeEncodeError:
+            raise _refresh_error(artifact.id, "a locator tag is not valid UTF-8") from None
+        try:
+            selections = scan_scalars(snapshot.data, requests)
+        except EventFileError:
+            raise _refresh_error(artifact.id, TENSORBOARD_PROFILE_HINT) from None
+        for result, request in zip(results, requests):
+            selection = selections.get(request)
+            if selection is None or selection.outcome is not ScalarOutcome.value:
+                word = _REFRESH_OUTCOMES.get(
+                    selection.outcome if selection is not None else ScalarOutcome.mismatch,
+                    "was not found",
+                )
+                raise EditError(
+                    f"Cannot refresh result {result.id!r}: locator "
+                    f"{display_locator(result.locator)} {word} in {artifact.path!r}."
+                )
+            compared = compare_tensorboard(
+                result.value, selection.value, float32=selection.float32
+            )
+            if compared is None:
+                raise EditError(
+                    f"Cannot refresh result {result.id!r}: the recorded value is not a "
+                    "TensorBoard scalar. Fix it with 'runevidence result edit' first."
+                )
+            if not compared:
+                raise EditError(
+                    f"Cannot refresh result {result.id!r}: recorded value does not match the "
+                    "current locator. Record the intended value with 'runevidence result edit' "
+                    "first."
+                )
+        files.append(
+            FileChange(
+                artifact.id,
+                artifact.path,
+                artifact.sha256,
+                snapshot.digest,
+                artifact.size_bytes,
+                snapshot.size,
+                artifact.volatile,
+                False,
+            )
+        )
+        if snapshot.digest != artifact.sha256:
+            digest_changed.add(artifact.id)
+            notes.append(
+                f"{artifact.id}: accepted new event bytes; recorded scalar locators are "
+                "positional, so a duplicate insertion or deletion can retarget an occurrence "
+                "even when its value is unchanged"
+            )
+
+    # Stage only digest/size after every read and value check succeeded.
+    for artifact in selected:
+        change = next(item for item in files if item.id == artifact.id)
+        if not change.changed:
+            continue
+        entry = raw["artifacts"][_entry_index(raw["artifacts"], artifact.id, "artifact")]
+        if entry["path"] != artifact.path:
+            raise EditError(f"Artifact {artifact.id!r} no longer has its selected path {artifact.path!r}.")
+        entry["sha256"] = change.new_sha256
+        entry["size_bytes"] = change.new_size
+
+    claims: list[str] = []
+    if digest_changed:
+        claims = sorted(
+            {
+                finding.subject
+                for finding in check_graph(manifest, digest_changed)
+                if finding.code is Code.claim_at_risk and finding.subject
+            }
+        )
+    if any(change.changed for change in files):
+        validate_manifest(raw)
+    return RehashPlan(files=files, notes=notes, claims=claims)
 
 
 def _set_volatile(entry: dict) -> dict:
