@@ -101,6 +101,10 @@ _ARTIFACT_EDITABLE = {"kind", "dataset_id", "run_id", "metadata", "volatile"}
 _ARTIFACT_IMMUTABLE = {
     "id", "path", "sha256", "size_bytes", "artifact_type", "digest_format"
 }
+_CONDITION_ARTIFACT_FIELDS = (
+    "evaluation_dataset_artifact_id",
+    "model_checkpoint_artifact_id",
+)
 
 
 def edit_artifact(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
@@ -129,6 +133,40 @@ def edit_artifact(raw: dict, entry_id: str, patch: dict[str, Any]) -> None:
             item["id"] for item in raw.get("runs", [])
         }:
             raise AuthoringError(f"run {run_id!r} does not exist")
+    _validate(raw)
+
+
+def _artifact_references(raw: dict, artifact_id: str) -> list[str]:
+    used: list[str] = []
+    for result in raw.get("results", []):
+        if result.get("artifact_id") == artifact_id:
+            used.append(f"result {result.get('id')!r}")
+    for run in raw.get("runs", []):
+        conditions = run.get("conditions")
+        if not isinstance(conditions, dict):
+            continue
+        for field in _CONDITION_ARTIFACT_FIELDS:
+            if conditions.get(field) == artifact_id:
+                used.append(f"run {run.get('id')!r} condition {field!r}")
+    return used
+
+
+def remove_artifact(raw: dict, entry_id: str) -> None:
+    """Remove one recorded artifact after its recorded references are gone.
+
+    The file itself is untouched. Removing the record is how a researcher
+    accepts that an artifact should no longer be tracked, including a file
+    that was deleted intentionally. A result, condition selector, claim or
+    relationship that still names the artifact must be edited or removed first
+    so the edit cannot silently create a dangling reference.
+    """
+    used = _artifact_references(raw, entry_id) + _citations(raw, entry_id)
+    if used:
+        raise AuthoringError(
+            f"artifact {entry_id!r} is still used by {', '.join(dict.fromkeys(used))}; "
+            "remove or edit those references first"
+        )
+    raw["artifacts"].pop(_find(raw, "artifacts", entry_id))
     _validate(raw)
 
 
