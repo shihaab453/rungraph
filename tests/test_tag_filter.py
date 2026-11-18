@@ -223,3 +223,19 @@ def test_all_wildcard_patterns_cannot_bypass_the_budget():
     with pytest.raises(TagPatternTooExpensive):
         for index in range(10):
             tag_filter.matches(f"tag-{index}")
+
+
+def test_pattern_count_is_bounded():
+    with pytest.raises(InvalidTagPattern, match="too many patterns"):
+        TagFilter(["*"] * 257)
+    assert TagFilter(["*"] * 256).matches("x")
+
+
+def test_cache_size_is_bounded(monkeypatch):
+    from runevidence import tag_filter as tag_filter_module
+
+    monkeypatch.setattr(tag_filter_module, "MAX_CACHE_ENTRIES", 2)
+    tag_filter = TagFilter(["*", "a"])
+    for tag in ("a", "b", "c", "d"):
+        assert tag_filter.matches(tag)
+    assert len(tag_filter._cache) <= 2

@@ -18,6 +18,8 @@ from typing import Iterable
 
 MAX_PATTERN_POINTS = 1024
 MAX_TAG_BYTES = 4096
+MAX_PATTERNS = 256
+MAX_CACHE_ENTRIES = 65_536
 MATCH_BUDGET = 50_000_000
 
 __all__ = [
@@ -181,6 +183,8 @@ class TagFilter:
         if budget < 0:
             raise ValueError("budget must not be negative")
         self._sources = tuple(patterns)
+        if len(self._sources) > MAX_PATTERNS:
+            raise InvalidTagPattern("too many patterns")
         self._patterns = tuple(_compile(pattern) for pattern in self._sources)
         self._budget = budget
         self._spent = 0
@@ -229,7 +233,8 @@ class TagFilter:
                 if self._spent > self._budget:
                     self._exhausted = True
                     raise TagPatternTooExpensive("matching budget exhausted")
-                self._cache[key] = hit
+                if len(self._cache) < MAX_CACHE_ENTRIES:
+                    self._cache[key] = hit
             else:
                 hit = cached
             if hit:
