@@ -226,8 +226,9 @@ def plan_rehash(
         verb = "them" if len(blocked) > 1 else "it"
         raise LocatorRefreshUnsupported(
             f"rehash cannot accept new bytes for {names}: recorded values read "
-            f"{verb} through a structured locator. Re-run the adapter that "
-            "produced the manifest, or restore the original file."
+            f"{verb} through a structured locator. Restore the original file, or "
+            "re-run the adapter into a new folder and reconcile the result; replacing "
+            "this manifest with a fresh scan would discard authored values and locators."
         )
     unreadable: list[str] = []
     for i in indexes:

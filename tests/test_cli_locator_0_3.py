@@ -210,6 +210,7 @@ def test_rehash_allows_a_string_only_artifact_when_an_object_locator_is_elsewher
     assert out.startswith(
         "ERROR (LOCATOR_REFRESH_UNSUPPORTED): rehash cannot accept new bytes for 'b':"
     )
+    assert "reconcile the result" in out
     assert (root / "runevidence.json").read_bytes() == before
 
 
