@@ -172,22 +172,55 @@ def _artifact_references(raw: dict, artifact_id: str) -> list[str]:
     return used
 
 
-def remove_artifact(raw: dict, entry_id: str) -> None:
-    """Remove one recorded artifact after its recorded references are gone.
+def remove_artifact(raw: dict, entry_id: str, *, with_results: bool = False) -> None:
+    """Remove one recorded artifact, optionally with its direct results.
 
-    The file itself is untouched. Removing the record is how a researcher
-    accepts that an artifact should no longer be tracked, including a file
-    that was deleted intentionally. A result, condition selector, claim or
-    relationship that still names the artifact must be edited or removed first
-    so the edit cannot silently create a dangling reference.
+    The file itself is untouched. By default every reference must be gone
+    first. With ``with_results`` the results whose ``artifact_id`` is this
+    artifact are removed in the same edit, but only when no claim or
+    relationship cites any of those results; a condition selector, claim or
+    relationship that still names the artifact always refuses.
     """
-    used = _artifact_references(raw, entry_id) + _citations(raw, entry_id)
+    result_refs = [
+        result
+        for result in raw.get("results", [])
+        if result.get("artifact_id") == entry_id
+    ]
+    used: list[str] = []
+    if not with_results:
+        used.extend(f"result {result.get('id')!r}" for result in result_refs)
+    else:
+        cited: list[str] = []
+        for result in result_refs:
+            refs = _citations(raw, result.get("id"))
+            if refs:
+                cited.append(f"result {result.get('id')!r} ({', '.join(refs)})")
+        if cited:
+            raise AuthoringError(
+                f"artifact {entry_id!r} has results that are still cited: "
+                f"{', '.join(cited)}; remove or edit those references first"
+            )
+    for run in raw.get("runs", []):
+        conditions = run.get("conditions")
+        if not isinstance(conditions, dict):
+            continue
+        for field in _CONDITION_ARTIFACT_FIELDS:
+            if conditions.get(field) == entry_id:
+                used.append(f"run {run.get('id')!r} condition {field!r}")
+    used.extend(_citations(raw, entry_id))
     if used:
         raise AuthoringError(
             f"artifact {entry_id!r} is still used by {', '.join(dict.fromkeys(used))}; "
             "remove or edit those references first"
         )
-    raw["artifacts"].pop(_find(raw, "artifacts", entry_id))
+    index = _find(raw, "artifacts", entry_id)
+    if with_results:
+        raw["results"] = [
+            result
+            for result in raw.get("results", [])
+            if result.get("artifact_id") != entry_id
+        ]
+    raw["artifacts"].pop(index)
     _validate(raw)
 
 

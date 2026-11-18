@@ -133,6 +133,12 @@ a result names it through `artifact_id`, a run condition selects it as the evalu
 or model checkpoint, or a claim or relationship cites it. Remove or edit those references
 first, then remove the artifact.
 
+`remove --id ARTIFACT_ID --with-results` also removes every result whose `artifact_id` is the
+artifact, in the same validated edit. It refuses if any of those results is cited by a claim or
+relationship; conditions, claims or relationships naming the artifact itself always refuse.
+The result IDs, names and values are not rewritten, and results on other artifacts are
+preserved in order.
+
 
 ## TensorBoard scalar byte refresh (`runevidence rehash PATH ID --refresh-locators`)
 

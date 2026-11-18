@@ -101,6 +101,9 @@ HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
     # db-import error containment pair, now historical after writer containment.
     "c4ad10376fc341a00e0dd591fd7b7ecbeb5215264337a64ff03e35c96f6020dc",  # LF
     "b5fbc7ec609b6c54befecb5e6c101405995697ce425679651a410374b94405d3",  # CRLF
+    # db-import writer containment pair, now historical after artifact results.
+    "cb9e8ca85304545bcd8eb433883fefc0d91f9619f6f017dbbea0fc604c3be04d",  # LF
+    "ad277822a6bae89bb463db4f8a73e698670e6ba88fe095d93313ec2732de37bf",  # CRLF
     # Closed-output handling, now historical after the budget-summary text.
     "15bdc51f3dc5655a4c289bb6681e8cb297e960de13a26fed309e2c50c7a20601",  # LF
     "2b599651e40b68b1ade7ecc0d57d100ee15876b77738d9b28a603c18a75bccf9",  # CRLF
@@ -202,9 +205,9 @@ HISTORICAL_READER_DIGEST_23 = (
 # pin is an exact byte SHA-256. Nothing is normalized during checking. Static
 # != plugin safety.
 CLI_HASH = frozenset({
-    # db-import writer containment (2026-11-18): 38-route surface.
-    "cb9e8ca85304545bcd8eb433883fefc0d91f9619f6f017dbbea0fc604c3be04d",  # LF
-    "ad277822a6bae89bb463db4f8a73e698670e6ba88fe095d93313ec2732de37bf",  # CRLF
+    # artifact remove --with-results (2026-11-18): 38-route surface.
+    "70ea61c70dbb7b14a57be24fd328e7ded22d238166ed15ccd8e81c9bc4280a96",  # LF
+    "90ca3c6a8ab3665c46c1c78382b6dacc0d6af17480c988b11a78305ad58fb22c",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.
