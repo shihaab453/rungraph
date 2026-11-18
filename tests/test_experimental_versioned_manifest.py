@@ -351,12 +351,12 @@ def test_no_public_route_or_production_writer_reference():
     # M9-COMPARABILITY-STAGE3B-2C1 (2026-11-11): 25 routes after the explicit migrate addition.
     # M9-COMPARABILITY-STAGE3D3-2 (2026-11-11): 26 routes after the conditions addition.
     # Any addition or removal must fail here until it is re-reviewed.
-    current_public = {"validate", "validate-batch", "inspect", "compare", "comparability", "assess", "leaderboard", "stats", "matrix", "run", "db-export", "db-check", "db-query", "runs",
+    current_public = {"validate", "validate-batch", "inspect", "compare", "comparability", "assess", "leaderboard", "stats", "matrix", "run", "db-export", "db-check", "db-query", "db-import", "runs",
                       "claim", "lineage", "impact", "coverage", "coverage-gate", "fingerprint",
                       "fingerprint-compare", "coverage-diff", "review-diff", "impact-diff", "review-gate",
                       "result", "evidence", "artifact", "relationship",
                       "init", "migrate", "conditions", "capture", "rehash", "add", "schema", "adapters"}
-    assert historical_seven <= current_public and len(current_public) == 37
+    assert historical_seven <= current_public and len(current_public) == 38
     assert set(choices) == current_public
     # The protected property: no private, experimental, staging or SQLite route is public.
     assert not [c for c in choices if c.startswith("_")
