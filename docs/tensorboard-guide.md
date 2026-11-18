@@ -87,6 +87,8 @@ and so on.
 | Tensor dimensions / elements | 8 / 1,000,000 |
 | TF2 media payloads per entry | 64 |
 | TF2 media label | 4,096 bytes (not stored) |
+| Tag patterns per command | 256 |
+| Matcher cache entries | 65,536 (later pairs may be re-evaluated within the work budget) |
 
 Tensor payloads and media references add no manifest budget of their own; the
 shared 10,000-result and tag limits bound them.
