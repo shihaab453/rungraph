@@ -32,6 +32,7 @@ import hmac
 import re
 import io
 import os
+import signal
 import sqlite3
 import stat
 import sys
@@ -47,7 +48,7 @@ from . import run_comparability
 from .adapters import AdapterError, available_adapters, get_adapter
 from .tag_filter import InvalidTagPattern, TagFilter, TagPatternTooExpensive
 from .adapters.generic import valid_slug
-from .checks import EXIT_INVALID, EXIT_OK, Report, run_checks
+from .checks import EXIT_FINDINGS, EXIT_INVALID, EXIT_OK, Report, run_checks
 from .checks.results import _tensorboard_path_matches
 from .edit import EditError, glob_match, plan_add, plan_rehash, select_artifacts
 from .manifest import (LoadedManifest, ManifestLoadError, load_manifest, load_raw,
@@ -3392,7 +3393,38 @@ def _conditions_main(raw: list[str]) -> int:
     return args.func(args)
 
 
+def _broken_pipe() -> int:
+    """Leave quietly when the reader closes the pipe.
+
+    Redirect stdout to the null device before returning so the interpreter's
+    final flush cannot raise a second BrokenPipeError.
+    """
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.close(devnull)
+    except (OSError, ValueError):
+        pass
+    try:
+        sys.stdout.close()
+    except (OSError, ValueError):
+        pass
+    return EXIT_FINDINGS
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    if argv is None and hasattr(signal, "SIGPIPE"):
+        try:
+            signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+        except (OSError, ValueError):
+            pass
+    try:
+        return _main(argv)
+    except BrokenPipeError:
+        return _broken_pipe()
+
+
+def _main(argv: Optional[Sequence[str]] = None) -> int:
     # Claims and paths may contain any Unicode; never crash on a legacy console.
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
