@@ -91,6 +91,11 @@ and so on.
 Tensor payloads and media references add no manifest budget of their own; the
 shared 10,000-result and tag limits bound them.
 
+If a default scalar scan hits the 10,000-result limit, the refusal includes up
+to 20 tags ordered by entry count, with each tag JSON-escaped on its own line.
+That is enough to form `--tags` patterns without reading binary event files. It
+is a bounded diagnostic, not a complete inventory of every tag or kind.
+
 ## Human output
 
 Results render compactly:
