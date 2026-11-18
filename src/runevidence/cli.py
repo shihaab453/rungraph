@@ -616,8 +616,12 @@ def cmd_db_query(args: argparse.Namespace) -> int:
 def cmd_db_import(args: argparse.Namespace) -> int:
     try:
         data = import_sqlite(args.db, args.output, force=args.force)
-    except (OSError, ValueError, sqlite3.Error) as exc:
-        print(f"ERROR: {exc}\nNothing was written.")
+    except (OSError, ValueError, sqlite3.Error, KeyError) as exc:
+        message = f"database is missing required data: {exc}" if isinstance(exc, KeyError) else str(exc)
+        if args.json:
+            print(json.dumps({"format": "runevidence-db-import-v1", "ok": False, "error": message, "exit_code": EXIT_INVALID}, indent=2))
+        else:
+            print(f"ERROR: {message}\nNothing was written.")
         return EXIT_INVALID
     if args.json:
         print(json.dumps(data, indent=2))

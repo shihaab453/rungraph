@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import shutil
+import sqlite3
 import signal
 import sys
 from pathlib import Path
@@ -563,8 +564,9 @@ def cmd_db_check(args: argparse.Namespace) -> int:
 def cmd_db_import(args: argparse.Namespace) -> int:
     try:
         data = import_workspace(args.db, args.output, force=args.force)
-    except (OSError, ValueError) as exc:
-        return _error("db-import", "workspace", str(exc))
+    except (OSError, ValueError, sqlite3.Error, KeyError) as exc:
+        message = f"database is missing required data: {exc}" if isinstance(exc, KeyError) else str(exc)
+        return _error("db-import", "workspace", message)
     if args.json:
         _print_json(data)
     else:

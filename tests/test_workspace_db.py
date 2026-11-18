@@ -55,3 +55,14 @@ def test_workspace_db_import_round_trips(tmp_path: Path, capsys):
     data = json.loads(capsys.readouterr().out)
     assert data["counts"]["members"] == 2
     assert json.loads(target.read_text())["format"] == "rungraph-workspace"
+
+
+def test_workspace_db_import_refuses_a_corrupt_database_without_traceback(tmp_path: Path, capsys):
+    database = tmp_path / "bad.sqlite"
+    database.write_bytes(b"not a sqlite database")
+    target = tmp_path / "rungraph.json"
+    assert main(["db-import", "--db", str(database), "--output", str(target)]) == 2
+    out = capsys.readouterr().out
+    assert "db-import" in out
+    assert "Traceback" not in out
+    assert not target.exists()
