@@ -356,6 +356,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence result add\|edit\|remove PATH --file RESULT\|--id ID [--dry-run] [--json]` | Add, edit or remove a recorded result. References must resolve; the edited manifest is validated and written atomically with a stale-byte check. |
 | `runevidence evidence add\|edit\|remove PATH --file CLAIM\|--id ID [--dry-run] [--json]` | Add, edit or remove a claim/evidence entry and its `supports`/`contradicts` IDs. |
 | `runevidence relationship add\|remove PATH --file REL\|--index N [--dry-run] [--json]` | Add or remove a recorded relationship. |
+| `runevidence artifact edit\|remove PATH --file ARTIFACT\|--id ID [--dry-run] [--json]` | Edit recorded artifact metadata, or untrack an artifact whose file should no longer be recorded. Removal refuses while a result, condition selector, claim or relationship still names it. |
 | `runevidence schema [-o FILE\|--output FILE]` | Print the 0.1 manifest JSON Schema (also committed at `schema/runevidence.schema.json`). The separate 0.2 schema is `schema/runevidence-0.2.schema.json`. |
 | `runevidence db-export PATH --output FILE` | Export one validated manifest to a derived SQLite query cache (`--force`, `--json`); JSON remains the authority. |
 | `runevidence db-check PATH --db FILE` | Compare a derived SQLite cache with the manifest snapshot (`--json`); exit 1 on drift. |
@@ -976,13 +977,16 @@ runevidence result add path/to/experiment --file result.json
 runevidence evidence add path/to/experiment --file claim.json
 runevidence relationship add path/to/experiment --file relationship.json
 runevidence artifact edit path/to/experiment --file artifact.json
+runevidence artifact remove path/to/experiment --id tuned-metrics
 ```
 
 Each command loads one validated manifest, applies one JSON object, checks that every
 referenced run/artifact/result/claim exists, validates the whole edited manifest and writes it
 atomically with a stale-byte check. `--dry-run` prints the plan and writes nothing; a refusal
-writes nothing. Removing a result or claim needs `--id`; removing a relationship needs its
-zero-based `--index` in the recorded `relationships` array. The input shapes are listed in
+writes nothing. Removing a result, claim or artifact needs `--id`; removing a relationship needs its
+zero-based `--index` in the recorded `relationships` array. Removing an artifact untracks it
+but leaves the file on disk, and it refuses while a result, condition selector, claim or
+relationship still names it. The input shapes are listed in
 [Authoring JSON files](docs/authoring-files.md).
 
 ### Authoring run conditions

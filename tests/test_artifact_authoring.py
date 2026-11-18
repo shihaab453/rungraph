@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
+from runevidence import authoring
 from runevidence.cli import main
 
 
@@ -95,3 +99,65 @@ def test_unknown_field_and_dataset_id_on_0_1_are_refused(tmp_path: Path, capsys)
     old = make_root(old, schema="0.1")
     entry = write_entry(old, {"id": "data", "dataset_id": "ds"})
     assert main(["artifact", "edit", str(old), "--file", str(entry)]) == 2
+
+
+def test_remove_artifact_untracks_without_deleting_the_file(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    source = root / "data.csv"
+    before_source = source.read_bytes()
+    before_manifest = (root / "runevidence.json").read_bytes()
+
+    assert main(["artifact", "remove", str(root)]) == 2
+    assert "needs a non-empty --id" in capsys.readouterr().out
+    assert (root / "runevidence.json").read_bytes() == before_manifest
+
+    assert main(["artifact", "remove", str(root), "--id", "data", "--dry-run"]) == 0
+    assert (root / "runevidence.json").read_bytes() == before_manifest
+
+    assert main(["artifact", "remove", str(root), "--id", "data"]) == 0
+    manifest = json.loads((root / "runevidence.json").read_text(encoding="utf-8"))
+    assert manifest["artifacts"] == []
+    assert source.read_bytes() == before_source
+    capsys.readouterr()
+    assert main(["validate", str(root)]) == 0
+
+
+def test_remove_artifact_refuses_a_result_reference(tmp_path: Path, capsys):
+    root = make_root(tmp_path)
+    manifest = json.loads((root / "runevidence.json").read_text(encoding="utf-8"))
+    manifest["results"] = [
+        {"id": "metric", "run_id": "r", "name": "accuracy", "value": 1, "artifact_id": "data"}
+    ]
+    (root / "runevidence.json").write_text(json.dumps(manifest), encoding="utf-8")
+    before = (root / "runevidence.json").read_bytes()
+
+    assert main(["artifact", "remove", str(root), "--id", "data"]) == 2
+    assert "result 'metric'" in capsys.readouterr().out
+    assert (root / "runevidence.json").read_bytes() == before
+
+
+def test_remove_artifact_refuses_claim_relationship_and_condition_references():
+    def base() -> dict:
+        return {
+            "schema_version": "0.2",
+            "project": {"id": "p", "name": "p"},
+            "runs": [{"id": "r"}],
+            "artifacts": [{"id": "data", "path": "data.csv", "sha256": "0" * 64, "size_bytes": 1}],
+        }
+
+    claim = base()
+    claim["evidence"] = [{"id": "c", "claim": "c", "supports": ["data"]}]
+    with pytest.raises(authoring.AuthoringError, match="claim 'c'"):
+        authoring.remove_artifact(claim, "data")
+
+    relationship = base()
+    relationship["relationships"] = [
+        {"source": "data", "target": "r", "type": "input_to"}
+    ]
+    with pytest.raises(authoring.AuthoringError, match="a relationship"):
+        authoring.remove_artifact(relationship, "data")
+
+    condition = base()
+    condition["runs"][0]["conditions"] = {"evaluation_dataset_artifact_id": "data"}
+    with pytest.raises(authoring.AuthoringError, match="condition 'evaluation_dataset_artifact_id'"):
+        authoring.remove_artifact(condition, "data")

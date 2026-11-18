@@ -1119,6 +1119,19 @@ def cmd_evidence(args: argparse.Namespace) -> int:
 
 
 def cmd_artifact(args: argparse.Namespace) -> int:
+    if args.action == "remove":
+        if not args.id:
+            message = "artifact remove needs a non-empty --id"
+            if args.json:
+                print(json.dumps({"format": "runevidence-authoring-v1", "ok": False, "error": message, "exit_code": EXIT_INVALID}))
+            else:
+                print(f"ERROR: {message}\nNothing was written.")
+            return EXIT_INVALID
+        return _author_manifest(
+            args,
+            lambda raw: authoring.remove_artifact(raw, args.id),
+            f"remove artifact {args.id}",
+        )
     entry = _read_authoring_entry(args)
     if entry is None:
         return EXIT_INVALID
@@ -3091,8 +3104,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_evidence)
 
-    p = sub.add_parser("artifact", help="edit recorded artifact metadata")
-    p.add_argument("action", choices=("edit",))
+    p = sub.add_parser("artifact", help="edit metadata or remove a recorded artifact")
+    p.add_argument("action", choices=("edit", "remove"))
     p.add_argument("path", type=Path)
     p.add_argument("--id")
     p.add_argument("--file", help="one JSON object; see docs/authoring-files.md")
