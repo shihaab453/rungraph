@@ -1930,14 +1930,17 @@ def _short(digest: Optional[str]) -> str:
 
 def _locator_refresh_unsupported(exc: Exception) -> int:
     detail = str(exc) or "rehash cannot refresh an artifact read through a structured locator."
-    print(f"ERROR (LOCATOR_REFRESH_UNSUPPORTED): {detail} Nothing was written.")
+    suffix = "" if detail.rstrip().endswith("Nothing was written.") else " Nothing was written."
+    print(f"ERROR (LOCATOR_REFRESH_UNSUPPORTED): {detail}{suffix}")
     return EXIT_INVALID
 
 
 def _edit_error(exc: Exception) -> int:
     if getattr(exc, "code", None) == "LOCATOR_REFRESH_UNSUPPORTED":
         return _locator_refresh_unsupported(exc)
-    print(f"ERROR: {exc}\nNothing was written.")
+    message = str(exc)
+    suffix = "" if message.rstrip().endswith("Nothing was written.") else "\nNothing was written."
+    print(f"ERROR: {message}{suffix}")
     return EXIT_INVALID
 
 
