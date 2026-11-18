@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import shutil
+import signal
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
@@ -919,10 +920,19 @@ def _broken_pipe() -> int:
         os.close(devnull)
     except (OSError, ValueError):
         pass
+    try:
+        sys.stdout.close()
+    except (OSError, ValueError):
+        pass
     return EXIT_EVIDENCE
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    if argv is None and hasattr(signal, "SIGPIPE"):
+        try:
+            signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+        except (OSError, ValueError):
+            pass
     try:
         return _main(argv)
     except BrokenPipeError:
