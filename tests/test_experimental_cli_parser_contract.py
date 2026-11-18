@@ -86,6 +86,9 @@ HISTORICAL_26_ROUTE_CLI_HASH = frozenset({
     # Artifact removal current pair, now historical after closed-output handling.
     "6eb94c1abbd58df9bf3da6b4f1d39c4a8c6da32e5f7a3c9dc2df33a423171e1a",  # LF
     "3f5e5cc50435a07f834c6e9adb3ee37be1c731cdda679a2f15e709776124317e",  # CRLF
+    # Closed-output handling, now historical after the budget-summary text.
+    "15bdc51f3dc5655a4c289bb6681e8cb297e960de13a26fed309e2c50c7a20601",  # LF
+    "2b599651e40b68b1ade7ecc0d57d100ee15876b77738d9b28a603c18a75bccf9",  # CRLF
     "59e42297c6387012a33e73e008f376766871a9235e37f58982c92cd5c46ee340",  # LF
     "cbfc3de10aa22996eaa66646516116ec4ea0dd37e2f6d86e7144f05b857e1a7d",  # CRLF
     # M47-S4-2A G4-2a 3rd review fix (2026-11-12): superseded by the 4th review
@@ -184,9 +187,9 @@ HISTORICAL_READER_DIGEST_23 = (
 # pin is an exact byte SHA-256. Nothing is normalized during checking. Static
 # != plugin safety.
 CLI_HASH = frozenset({
-    # Closed-output handling (2026-11-18): 38-route surface.
-    "15bdc51f3dc5655a4c289bb6681e8cb297e960de13a26fed309e2c50c7a20601",  # LF
-    "2b599651e40b68b1ade7ecc0d57d100ee15876b77738d9b28a603c18a75bccf9",  # CRLF
+    # Budget tag summary (2026-11-18): 38-route surface.
+    "8b64d752f1693016682de829c56e88843e594e27efd778c3381c45937e343742",  # LF
+    "90298f52b04fef202cb839a042b3a95b41856a82c7678e3a4d000a11fe9aebcd",  # CRLF
 })
 # PC3R2 corrected loader plus the PC4, Stage 2b, Stage 3d-2c1 and Stage 3d-3
 # route-set reconciliations.

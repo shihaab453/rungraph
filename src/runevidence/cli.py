@@ -1472,6 +1472,8 @@ def _init_under_lock(args: argparse.Namespace, root: Path, out: Path) -> int:
         return EXIT_INVALID
     except AdapterError as exc:
         print(f"ERROR: adapter {adapter.name!r} cannot read {root}: {exc}")
+        for line in getattr(exc, "tag_summary", ()):
+            print(f"  {line}")
         return EXIT_INVALID
     except ValidationError as exc:
         print(f"ERROR: adapter {adapter.name!r} produced an invalid manifest: {_validation_summary(exc)}")

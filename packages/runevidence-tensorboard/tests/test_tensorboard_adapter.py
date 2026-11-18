@@ -654,6 +654,42 @@ def test_result_budget_accepts_10000_and_refuses_10001(tmp_path):
     assert str(excinfo.value) == BUDGET_MESSAGE
 
 
+def test_budget_error_carries_a_bounded_top_tag_summary(tmp_path):
+    root = tmp_path / "experiment"
+    path = root / "events.out.tfevents.1"
+    events = [
+        _scalar_event(b"a" if index < 5_001 else b"b", 0.5, step=index)
+        for index in range(10_001)
+    ]
+    _write(path, _records(*events))
+    with pytest.raises(AdapterError) as excinfo:
+        _extract(root)
+    summary = excinfo.value.tag_summary
+    assert summary[0] == "top tags by entries (2 distinct):"
+    assert summary[1] == '  "a": 5001'
+    assert summary[2] == '  "b": 5000'
+
+
+def test_cli_budget_refusal_prints_the_tag_summary(tmp_path, capsys):
+    root = tmp_path / "experiment"
+    path = root / "events.out.tfevents.1"
+    _write(
+        path,
+        _records(
+            *[
+                _scalar_event(b"a" if index < 5_001 else b"b", 0.5, step=index)
+                for index in range(10_001)
+            ]
+        ),
+    )
+    assert main(["init", str(root), "--adapter", "tensorboard"]) == 2
+    out = capsys.readouterr().out
+    assert "10,000-result" in out
+    assert "top tags by entries (2 distinct):" in out
+    assert '  "a": 5001' in out
+    assert not (root / MANIFEST_FILENAME).exists()
+
+
 def test_tag_budget_accepts_16_mib_and_refuses_one_byte_over(tmp_path):
     root = tmp_path / "experiment"
     path = root / "events.out.tfevents.1"

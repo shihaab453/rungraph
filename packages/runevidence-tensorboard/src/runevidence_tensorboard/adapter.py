@@ -41,6 +41,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -509,6 +510,7 @@ class _State:
     budget: _Budget = field(default_factory=_Budget)
     failures: dict[int, Exception] = field(default_factory=dict)
     selected: dict[str, bool] = field(default_factory=dict)
+    tag_counts: Counter[str] = field(default_factory=Counter)
     filter_stopped: bool = False
 
     def record(self, rank: int, error: Exception) -> None:
@@ -674,8 +676,9 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
                 tf2_occurrence = occurrences.get(tf2_key, 0)
                 occurrences[tf2_key] = tf2_occurrence + 1
                 for element, raw in record.elements:
+                    state.tag_counts[tf2_tag] += 1
                     if state.budget.over or not state.budget.charge(len(record.tag)):
-                        state.record(_BUDGET, AdapterError(_budget_message(state)))
+                        state.record(_BUDGET, _budget_error(state))
                         break
                     value = (
                         ImageValue.model_validate(raw)
@@ -761,10 +764,11 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
                         separators=(",", ":"),
                     ).encode("utf-8")
                 )
+            state.tag_counts[tag] += 1
             if state.budget.over or not state.budget.charge(
                 len(record.tag), text_bytes, hist_bytes
             ):
-                state.record(_BUDGET, AdapterError(_budget_message(state)))
+                state.record(_BUDGET, _budget_error(state))
                 continue
             value: Any = record.value
             if is_text:
@@ -814,10 +818,11 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
                         separators=(",", ":"),
                     ).encode("utf-8")
                 )
+                state.tag_counts[tag] += 1
                 if state.budget.over or not state.budget.charge(
                     len(record.tag), 0, hist_bytes
                 ):
-                    state.record(_BUDGET, AdapterError(_budget_message(state)))
+                    state.record(_BUDGET, _budget_error(state))
                     continue
                 observations.append(
                     _Observation(
@@ -922,6 +927,28 @@ def _budget_message(state: _State) -> str:
     if state.include_histograms:
         return BUDGET_MESSAGE_07 if state.include_strings else BUDGET_MESSAGE_07_HIST
     return BUDGET_MESSAGE_06 if state.include_strings else BUDGET_MESSAGE
+
+
+TAG_SUMMARY_LIMIT = 20
+
+
+def _budget_error(state: _State) -> AdapterError:
+    """Build the fixed budget refusal and attach a bounded tag summary."""
+    error = AdapterError(_budget_message(state))
+    if state.tag_counts:
+        ordered = sorted(
+            state.tag_counts.items(), key=lambda item: (-item[1], item[0])
+        )
+        shown = ordered[:TAG_SUMMARY_LIMIT]
+        lines = [f"top tags by entries ({len(ordered)} distinct):"]
+        lines.extend(
+            f"  {json.dumps(tag, ensure_ascii=True)}: {count}"
+            for tag, count in shown
+        )
+        if len(ordered) > TAG_SUMMARY_LIMIT:
+            lines.append(f"  ... {len(ordered) - TAG_SUMMARY_LIMIT} more")
+        error.tag_summary = tuple(lines)
+    return error
 
 
 def _claimed_histogram_tensor(value: Any) -> bool:
