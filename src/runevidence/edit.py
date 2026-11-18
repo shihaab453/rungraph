@@ -440,8 +440,12 @@ def _refresh_error(artifact_id: str, message: str) -> EditError:
     return EditError(f"rehash cannot refresh {artifact_id!r}: {message}")
 
 
+def _refresh_bytes_error(artifact_id: str, message: str) -> EditError:
+    return EditError(f"Cannot refresh event bytes for {artifact_id!r}: {message}")
+
+
 def _refresh_state_error(artifact_id: str, state: str) -> EditError:
-    return _refresh_error(
+    return _refresh_bytes_error(
         artifact_id,
         _REFRESH_STATE_MESSAGES.get(state, "the event file could not be read"),
     )
@@ -523,7 +527,7 @@ def plan_refresh(loaded: LoadedManifest, raw: dict, targets: list[str]) -> Rehas
         try:
             selections = scan_scalars(snapshot.data, requests)
         except EventFileError:
-            raise _refresh_error(artifact.id, TENSORBOARD_PROFILE_HINT) from None
+            raise _refresh_bytes_error(artifact.id, TENSORBOARD_PROFILE_HINT) from None
         for result, request in zip(results, requests):
             selection = selections.get(request)
             if selection is None or selection.outcome is not ScalarOutcome.value:
@@ -568,6 +572,7 @@ def plan_refresh(loaded: LoadedManifest, raw: dict, targets: list[str]) -> Rehas
                 "positional, so a duplicate insertion or deletion can retarget an occurrence "
                 "even when its value is unchanged"
             )
+        del read, snapshot
 
     # Stage only digest/size after every read and value check succeeded.
     for artifact in selected:

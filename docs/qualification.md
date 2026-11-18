@@ -39,12 +39,16 @@ platform bounds, F3 and B6, listed under Limitations.
 
 ## Verification evidence
 
-- **Full suite**: 6,424 passed, 138 skipped on Python 3.12; 6,421 passed, 141 skipped on
+- **Full suite**: 6,432 passed, 138 skipped on Python 3.12; 6,429 passed, 141 skipped on
   Python 3.10 with pydantic 2.6.4.
 - **Monorepo CI**: Ubuntu and Windows × Python 3.10 and 3.14, plus minimum dependencies on
   3.10; the packaging advisory and the install-and-run wheel smoke run on every pull request.
 - **Wheel smoke**: all eight wheels build, install into a clean venv, and run
   `runevidence init/validate` and `rungraph discover/init/validate`.
+- **TensorBoard scalar byte refresh**: `rehash --refresh-locators` verifies every
+  recorded schema-0.5 scalar locator from one protected snapshot, updates only
+  artifact digest/size, requires values to match, and refuses unsupported
+  targets before reading. Covered by `tests/test_refresh_locators.py`.
 - **Schema 0.11 (P3)**: structured TF2 `[k,3]` histograms, covered by
   `tests/test_schema_0_11.py`, `test_schema_0_11_migration.py`, `test_cli_tf2_histograms.py`
   and `test_tensorboard_tf2_histograms.py`.
@@ -227,10 +231,10 @@ cycles, over-cap readers, malformed hooks, stale documents, refused writes and e
   reproducibility, statistical equivalence or scientific truth.
 - **Directory artifacts**: read-only checking is Linux-only and authoring is Linux/ext4 only;
   other filesystems fail closed, and Windows is not claimed.
-- **Keras, Lightning and Sacred adapters**: all require POSIX directory-descriptor support
-  for protected reads; hosts without it refuse `--adapter keras`, `--adapter lightning` or
-  `--adapter sacred` rather than fall back to an unprotected read. The generic adapter
-  remains available.
+- **Keras, Lightning, Sacred and W&B adapters**: all require POSIX directory-descriptor
+  support for protected reads; hosts without it refuse `--adapter keras`, `--adapter
+  lightning`, `--adapter sacred` or `--adapter wandb` rather than fall back to an
+  unprotected read. The generic adapter remains available.
 - **Adapters**: the MLflow adapter reads a local file store only; no tracking server, remote
   URI or network access.
 - **Accepted changes**: `rehash` records the new bytes and value; it does not re-adjudicate
@@ -246,7 +250,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" -e ./packages/runevidence-tensorboard \
   -e ./packages/runevidence-mlflow -e ./packages/runevidence-hydra \
   -e ./packages/runevidence-sacred -e ./packages/runevidence-keras \
-  -e ./packages/runevidence-lightning
+  -e ./packages/runevidence-lightning -e ./packages/runevidence-wandb
 python -m pytest
 runevidence validate examples/tensorboard-scalars --strict
 rungraph validate examples/workspace-study --strict

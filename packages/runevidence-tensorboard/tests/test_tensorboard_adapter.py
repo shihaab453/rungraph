@@ -37,8 +37,10 @@ from runevidence.cli import _event_artifact_is_volatile, main  # noqa: E402
 from runevidence.models import (  # noqa: E402
     MANIFEST_FILENAME,
     SCHEMA_VERSION_0_5,
+    SCHEMA_VERSION_0_11,
     Artifact,
     Manifest05,
+    Manifest11,
     Project,
     Run,
     TensorboardLocator,
@@ -665,9 +667,31 @@ def test_budget_error_carries_a_bounded_top_tag_summary(tmp_path):
     with pytest.raises(AdapterError) as excinfo:
         _extract(root)
     summary = excinfo.value.tag_summary
-    assert summary[0] == "top tags by entries (2 distinct):"
+    assert summary[0] == "top tags by entries at the limit (2 distinct):"
     assert summary[1] == '  "a": 5001'
     assert summary[2] == '  "b": 5000'
+
+
+def test_budget_summary_is_built_once(tmp_path, monkeypatch):
+    root = tmp_path / "experiment"
+    path = root / "events.out.tfevents.1"
+    _write(
+        path,
+        _records(
+            *[_scalar_event(b"m", 0.5, step=index) for index in range(10_001)]
+        ),
+    )
+    calls = []
+    real = adapter_module._budget_error
+
+    def counted(state):
+        calls.append(1)
+        return real(state)
+
+    monkeypatch.setattr(adapter_module, "_budget_error", counted)
+    with pytest.raises(AdapterError):
+        _extract(root)
+    assert calls == [1]
 
 
 def test_cli_budget_refusal_prints_the_tag_summary(tmp_path, capsys):
@@ -685,7 +709,7 @@ def test_cli_budget_refusal_prints_the_tag_summary(tmp_path, capsys):
     assert main(["init", str(root), "--adapter", "tensorboard"]) == 2
     out = capsys.readouterr().out
     assert "10,000-result" in out
-    assert "top tags by entries (2 distinct):" in out
+    assert "top tags by entries at the limit (2 distinct):" in out
     assert '  "a": 5001' in out
     assert not (root / MANIFEST_FILENAME).exists()
 
@@ -1419,6 +1443,18 @@ def test_volatile_predicate_ignores_directory_artifacts():
         evidence=[],
     )
     assert _event_artifact_is_volatile(file_artifact, ["x.tfevents"])
+
+
+def test_volatile_predicate_covers_schema_0_11():
+    manifest = Manifest11(
+        schema_version=SCHEMA_VERSION_0_11,
+        project=Project(id="p", name="P"),
+        runs=[Run(id="r", name=".")],
+        artifacts=[Artifact(id="f", path="x.tfevents", sha256="a" * 64, size_bytes=1)],
+        results=[],
+        evidence=[],
+    )
+    assert _event_artifact_is_volatile(manifest, ["x.tfevents"])
 
 
 def test_signature_failure_maps_to_the_contract_error(monkeypatch, tmp_path, capsys):

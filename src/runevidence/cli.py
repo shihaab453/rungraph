@@ -67,6 +67,7 @@ from .models import (
     Manifest08,
     Manifest09,
     Manifest10,
+    Manifest11,
     backup_generation,
     json_schema,
 )
@@ -1890,7 +1891,7 @@ def _event_artifact_is_volatile(manifest: Manifest, patterns: list[str]) -> bool
     """
     if not isinstance(
         manifest,
-        (Manifest05, Manifest06, Manifest07, Manifest08, Manifest09, Manifest10),
+        (Manifest05, Manifest06, Manifest07, Manifest08, Manifest09, Manifest10, Manifest11),
     ):
         return False
     return any(

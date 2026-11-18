@@ -677,7 +677,9 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
                 occurrences[tf2_key] = tf2_occurrence + 1
                 for element, raw in record.elements:
                     state.tag_counts[tf2_tag] += 1
-                    if state.budget.over or not state.budget.charge(len(record.tag)):
+                    if state.budget.over:
+                        continue
+                    if not state.budget.charge(len(record.tag)):
                         state.record(_BUDGET, _budget_error(state))
                         break
                     value = (
@@ -765,9 +767,9 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
                     ).encode("utf-8")
                 )
             state.tag_counts[tag] += 1
-            if state.budget.over or not state.budget.charge(
-                len(record.tag), text_bytes, hist_bytes
-            ):
+            if state.budget.over:
+                continue
+            if not state.budget.charge(len(record.tag), text_bytes, hist_bytes):
                 state.record(_BUDGET, _budget_error(state))
                 continue
             value: Any = record.value
@@ -819,9 +821,9 @@ def _read_event_file(root: Path, rel: str, state: _State) -> _EventFile | None:
                     ).encode("utf-8")
                 )
                 state.tag_counts[tag] += 1
-                if state.budget.over or not state.budget.charge(
-                    len(record.tag), 0, hist_bytes
-                ):
+                if state.budget.over:
+                    continue
+                if not state.budget.charge(len(record.tag), 0, hist_bytes):
                     state.record(_BUDGET, _budget_error(state))
                     continue
                 observations.append(
@@ -940,7 +942,7 @@ def _budget_error(state: _State) -> AdapterError:
             state.tag_counts.items(), key=lambda item: (-item[1], item[0])
         )
         shown = ordered[:TAG_SUMMARY_LIMIT]
-        lines = [f"top tags by entries ({len(ordered)} distinct):"]
+        lines = [f"top tags by entries at the limit ({len(ordered)} distinct):"]
         lines.extend(
             f"  {json.dumps(tag, ensure_ascii=True)}: {count}"
             for tag, count in shown
