@@ -50,7 +50,7 @@ from .tag_filter import InvalidTagPattern, TagFilter, TagPatternTooExpensive
 from .adapters.generic import valid_slug
 from .checks import EXIT_FINDINGS, EXIT_INVALID, EXIT_OK, Report, run_checks
 from .checks.results import _tensorboard_path_matches
-from .edit import EditError, glob_match, plan_add, plan_rehash, select_artifacts
+from .edit import EditError, glob_match, plan_add, plan_refresh, plan_rehash, select_artifacts
 from .manifest import (LoadedManifest, ManifestLoadError, load_manifest, load_raw,
                        parse_manifest_source, resolve_manifest_path, save_manifest,
                        save_raw)
@@ -2518,7 +2518,105 @@ def _cmd_rehash_directory(args: argparse.Namespace) -> int:
         return _directory_failure("INTERNAL_ERROR", phase="before-cell")
 
 
+_REFRESH_USAGE = "--refresh-locators accepts only exact artifact IDs"
+
+
+def _refresh_targets(targets: list[str]) -> list[str] | None:
+    parsed: list[str] = []
+    seen: set[str] = set()
+    for raw in targets:
+        if raw.startswith(("run:", "path:", "folder:", "glob:")) or raw == "id:":
+            print(f"ERROR: {_REFRESH_USAGE}")
+            return None
+        value = raw[3:] if raw.startswith("id:") else raw
+        if not value:
+            print(f"ERROR: {_REFRESH_USAGE}")
+            return None
+        if value not in seen:
+            seen.add(value)
+            parsed.append(value)
+    return parsed
+
+
+def _cmd_refresh_locators(args: argparse.Namespace) -> int:
+    if args.all:
+        print("ERROR: --refresh-locators requires explicit artifact targets; --all is not accepted")
+        return EXIT_INVALID
+    if args.volatile is not None or getattr(args, "directory", False):
+        print(
+            "ERROR: --refresh-locators cannot be combined with --volatile, "
+            "--no-volatile or --directory"
+        )
+        return EXIT_INVALID
+    if not args.targets:
+        print("ERROR: --refresh-locators needs at least one artifact target")
+        return EXIT_INVALID
+    targets = _refresh_targets(args.targets)
+    if targets is None:
+        return EXIT_INVALID
+    if not args.dry_run and not _writer_target_folder_exists(args.path):
+        loaded = _load_or_report(args.path, False)
+        if loaded is None:
+            return EXIT_INVALID
+        return _lock_unavailable_failure()
+    try:
+        with _writer_lock(args.path, enabled=not args.dry_run) as manifest_path:
+            return _refresh_under_lock(args, manifest_path, targets)
+    except _WriterBusy:
+        return _busy_failure()
+    except _WriterLockUnavailable:
+        return _lock_unavailable_failure()
+
+
+def _refresh_under_lock(
+    args: argparse.Namespace, manifest_path, targets: list[str]
+) -> int:
+    loaded = _load_or_report(manifest_path, False)
+    if loaded is None:
+        return EXIT_INVALID
+    raw = load_raw(loaded)
+    try:
+        plan = plan_refresh(loaded, raw, targets)
+    except (EditError, OSError, ValidationError) as exc:
+        return _edit_error(exc)
+
+    changed = plan.changed_files
+    verified = [item for item in plan.files if not item.changed]
+    for item in changed:
+        if item.old_sha256 == item.new_sha256 and item.old_size != item.new_size:
+            old_size = "none" if item.old_size is None else item.old_size
+            print(f"  {item.id}: size {old_size} -> {item.new_size} bytes; sha256 unchanged")
+            continue
+        line = f"  {item.id}: sha256 {_short(item.old_sha256)} -> {_short(item.new_sha256)}"
+        if item.old_size != item.new_size:
+            old_size = "none" if item.old_size is None else item.old_size
+            line += f", {old_size} -> {item.new_size} bytes"
+        print(line)
+    for item in verified:
+        print(f"  {item.id}: verified; bytes and locators match")
+    for note in plan.notes:
+        print(f"  NOTE {note}")
+    if plan.claims:
+        print(f"Re-read these claims; they rest on what changed: {', '.join(plan.claims)}")
+    if changed:
+        prefix = "Would re-record" if args.dry_run else "Re-recorded"
+        if verified:
+            action = "verify" if args.dry_run else "verified"
+            summary = (
+                f"{prefix} {_count(len(changed), 'file')}"
+                f" and {action} {_count(len(verified), 'file')}"
+            )
+        else:
+            summary = f"{prefix} {_count(len(changed), 'file')}"
+        return _finish_edit(args, raw, loaded, summary)
+    prefix = "Would verify" if args.dry_run else "Verified"
+    print(f"{prefix} {_count(len(verified), 'file')}; no changes.")
+    return EXIT_OK
+
+
 def cmd_rehash(args: argparse.Namespace) -> int:
+    if getattr(args, "refresh_locators", False):
+        return _cmd_refresh_locators(args)
     if getattr(args, "directory", False):
         return _cmd_rehash_directory(args)
     if args.targets and args.all:
@@ -3274,6 +3372,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--directory",
         action="store_true",
         help="re-record exactly one directory artifact by exact ID (Linux/ext4 only; text output)",
+    )
+    p.add_argument(
+        "--refresh-locators",
+        action="store_true",
+        help=(
+            "verify recorded schema-0.5 TensorBoard scalar locators and re-record only "
+            "artifact bytes; explicit exact IDs; values must already match"
+        ),
     )
     p.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
     p.set_defaults(func=cmd_rehash, volatile=None)

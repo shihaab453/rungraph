@@ -121,6 +121,12 @@ comparability covers 0.2–0.11, and `init --force` refuses to regenerate a
 declared manifest whose schema it cannot carry over. An event artifact can never
 be marked `--volatile`.
 
+For a schema 0.5 manifest, `rehash PATH ID --refresh-locators` verifies every
+recorded TensorBoard scalar locator from one protected read and updates only the
+artifact digest and size. Values must already match; record an intentional
+change with `result edit` first. It accepts explicit exact IDs only and refuses
+`--all`, volatile, directory, mixed-locator and schema 0.6+ targets.
+
 ## Deliberate limits
 
 - TF2 `tf.summary.image`/`tf.summary.audio` are read under `--include-tf2-media` (0.10).

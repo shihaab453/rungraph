@@ -310,8 +310,12 @@ The optional package `packages/runevidence-tensorboard` registers the
 - `conditions` remains 0.2-only and names 0.3, 0.4 and 0.5 in its refusal;
   `comparability` refuses 0.5; `fingerprint` keeps v1's 0.1-only guard;
   `rehash` refuses an artifact read through a `tensorboard` locator
-  (`LOCATOR_REFRESH_UNSUPPORTED`) but accepts unrelated artifacts in the same
-  manifest; `add` accepts a 0.5 manifest.
+  (`LOCATOR_REFRESH_UNSUPPORTED`) unless `--refresh-locators` is used with
+  explicit exact IDs. That opt-in verifies every recorded scalar locator and
+  updates only the artifact digest/size; a value must be recorded with
+  `result edit` first. It refuses `--all`, volatile, directory, mixed-locator
+  and schema 0.6+ targets. Unrelated artifacts are accepted; `add` accepts a
+  0.5 manifest.
 - `validate`, `inspect`, `validate-batch` and the other manifest-reading routes
   load 0.5 through the one dispatcher. The `schema` CLI route is unchanged (it
   prints 0.1); the 0.5 schema is available as a file and through
