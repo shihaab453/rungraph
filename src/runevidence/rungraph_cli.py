@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -911,7 +912,24 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _broken_pipe() -> int:
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.close(devnull)
+    except (OSError, ValueError):
+        pass
+    return EXIT_EVIDENCE
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    try:
+        return _main(argv)
+    except BrokenPipeError:
+        return _broken_pipe()
+
+
+def _main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
