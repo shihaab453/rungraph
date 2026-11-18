@@ -29,3 +29,18 @@ def test_workspace_db_export_refuses_overwrite(tmp_path: Path):
     output.write_bytes(b"keep")
     assert main(["db-export", "examples/workspace-study", "--output", str(output)]) == 2
     assert output.read_bytes() == b"keep"
+
+
+def test_workspace_db_check_detects_drift(tmp_path: Path, capsys):
+    import sqlite3
+    output = tmp_path / "workspace.sqlite"
+    assert main(["db-export", "examples/workspace-study", "--output", str(output)]) == 0
+    capsys.readouterr()
+    assert main(["db-check", "examples/workspace-study", "--db", str(output), "--json"]) == 0
+    connection = sqlite3.connect(output)
+    try:
+        connection.execute("delete from members where rowid=1")
+        connection.commit()
+    finally:
+        connection.close()
+    assert main(["db-check", "examples/workspace-study", "--db", str(output), "--json"]) == 1

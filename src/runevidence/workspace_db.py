@@ -85,3 +85,52 @@ def export_workspace(loaded: LoadedWorkspace, output: Path, *, force: bool = Fal
         },
         "exit_code": 0,
     }
+
+
+def check_workspace(loaded: LoadedWorkspace, database: Path) -> dict[str, Any]:
+    database = Path(database)
+    if not database.is_file():
+        return {"format": "rungraph-db-check-v1", "ok": False, "error": "database-not-found", "exit_code": 2}
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return {"format": "rungraph-db-check-v1", "ok": False, "error": "database-unreadable", "exit_code": 2}
+    digest = hashlib.sha256(loaded.path.read_bytes()).hexdigest()
+    mismatches: list[dict[str, Any]] = []
+    try:
+        row = connection.execute("select value from meta where key='workspace_sha256'").fetchone()
+        if row is None or row[0] != digest:
+            mismatches.append({"table": "meta", "reason": "workspace-changed"})
+        expected = {
+            "members": {(m.id, m.path, m.manifest, m.role) for m in loaded.document.members},
+            "claims": {(c.id, c.claim, c.source) for c in loaded.document.claims},
+            "relationships": {
+                (r.id, r.type.value, r.source.member, r.source.id or r.source.claim,
+                 r.target.member, r.target.id or r.target.claim, r.note)
+                for r in loaded.document.relationships
+            },
+            "claim_refs": {
+                (c.id, relation, ref.member, ref.id or ref.claim or "")
+                for c in loaded.document.claims
+                for relation, refs in (("supports", c.supports), ("contradicts", c.contradicts))
+                for ref in refs
+            },
+        }
+        queries = {
+            "members": "select id, path, manifest, role from members",
+            "claims": "select id, text, source from claims",
+            "relationships": "select id, type, source_member, source_id, target_member, target_id, note from relationships",
+            "claim_refs": "select claim_id, relation, member, target from claim_refs",
+        }
+        for table, expected_rows in expected.items():
+            try:
+                actual = {tuple(item) for item in connection.execute(queries[table])}
+            except sqlite3.Error:
+                mismatches.append({"table": table, "reason": "table-missing"})
+                continue
+            if actual != expected_rows:
+                mismatches.append({"table": table, "missing": sorted(expected_rows - actual), "extra": sorted(actual - expected_rows)})
+    finally:
+        connection.close()
+    return {"format": "rungraph-db-check-v1", "ok": not mismatches, "workspace_sha256": digest,
+            "mismatches": mismatches, "exit_code": 0 if not mismatches else 1}
