@@ -366,7 +366,7 @@ diverged job. Write-up: [docs/dogfood-mlp-sweep-20261025.md](https://github.com/
 | `runevidence db-export PATH --output FILE` | Export one validated manifest to a derived SQLite query cache (`--force`, `--json`); JSON remains the authority. |
 | `runevidence db-check PATH --db FILE` | Compare a derived SQLite cache with the manifest snapshot (`--json`); exit 1 on drift. |
 | `runevidence db-query --db FILE --sql SELECT` | Run one read-only SELECT/WITH query against the derived cache (`--limit`, JSON); writes are refused. |
-| `runevidence db-import --db FILE --output FILE` | Rebuild a JSON manifest from a derived cache (`--force`, `--json`); the imported JSON is validated before writing. |
+| `runevidence db-import --db FILE --output FILE` | Rebuild a JSON manifest from a derived cache (`--force`, `--json`); the imported JSON is validated before writing. A replaced output is kept as a new `.bak` generation, and the write takes the normal admission lock where supported. |
 | `runevidence adapters` | List installed adapters (`--json` for names, descriptions and modules). The optional packages are Hydra, MLflow, TensorBoard, Sacred, Keras, Lightning and W&B summary. |
 
 ### Analysis and review commands
@@ -411,7 +411,7 @@ documents the document format, claim states and exit codes.
 | `rungraph report ROOT` | Consolidated evidence, claim states and impact (`--baseline`, `--strict`, `--directory-artifacts`, `--json`, `--markdown`). |
 | `rungraph db-export ROOT --output FILE` | Export a workspace to a derived SQLite cache (`--force`, `--json`); JSON remains the authority. |
 | `rungraph db-check ROOT --db FILE` | Compare a workspace SQLite cache with the document (`--json`); exit 1 on drift. |
-| `rungraph db-import --db FILE --output FILE` | Rebuild a workspace JSON document from a cache (`--force`, `--json`); the result is validated before writing. |
+| `rungraph db-import --db FILE --output FILE` | Rebuild a workspace JSON document from a cache (`--force`, `--json`); the result is validated before writing. A replaced output is kept as a new `.bak` generation, and the write is locked. |
 | `rungraph runs ROOT` | Recorded runs across members with params, conditions and per-run artifact/result counts (`--member`, `--metadata`, `--summaries`, `--json`). |
 | `rungraph impact ROOT --from NODE` | Claims affected by one node, with the dependency path; JSON output. Exit `2` for an unknown node. |
 | `rungraph compare ROOT --metric NAME` | Recorded values for one metric across members with each pair's condition status (`--run`, `--latest`, `--text`, `--json`). |

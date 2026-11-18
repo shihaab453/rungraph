@@ -615,7 +615,12 @@ def cmd_db_query(args: argparse.Namespace) -> int:
 
 def cmd_db_import(args: argparse.Namespace) -> int:
     try:
-        data = import_sqlite(args.db, args.output, force=args.force)
+        with _writer_lock(args.output, follow_manifest_symlink=False):
+            data = import_sqlite(args.db, args.output, force=args.force)
+    except _WriterBusy:
+        return _busy_failure()
+    except _WriterLockUnavailable:
+        return _lock_unavailable_failure()
     except (OSError, ValueError, sqlite3.Error, KeyError) as exc:
         message = f"database is missing required data: {exc}" if isinstance(exc, KeyError) else str(exc)
         if args.json:

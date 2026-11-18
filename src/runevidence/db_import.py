@@ -18,6 +18,29 @@ def _drop_none(value: dict[str, Any]) -> dict[str, Any]:
     return {key: item for key, item in value.items() if item is not None}
 
 
+def _backup_output(output: Path) -> Path:
+    data = output.read_bytes()
+    generation = 1
+    while True:
+        suffix = ".bak" if generation == 1 else f".bak.{generation}"
+        candidate = output.with_name(output.name + suffix)
+        if not candidate.exists():
+            break
+        generation += 1
+    with candidate.open("xb") as handle:
+        try:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        except BaseException:
+            handle.close()
+            candidate.unlink(missing_ok=True)
+            raise
+    if candidate.read_bytes() != data:
+        raise OSError(f"backup {candidate} does not match the replaced output")
+    return candidate
+
+
 def import_sqlite(database: Path, output: Path, *, force: bool = False) -> dict[str, Any]:
     database, output = Path(database), Path(output)
     if not database.is_file():
@@ -113,6 +136,7 @@ def import_sqlite(database: Path, output: Path, *, force: bool = False) -> dict[
         connection.close()
     manifest = validate_manifest(document)
     data = dump_manifest(manifest).encode("utf-8")
+    backup = _backup_output(output) if output.exists() else None
     staging = output.with_name(f".{output.name}.tmp-{os.getpid()}")
     try:
         staging.write_bytes(data + b"\n")
@@ -124,7 +148,7 @@ def import_sqlite(database: Path, output: Path, *, force: bool = False) -> dict[
             staging.unlink()
         except OSError:
             pass
-    return {
+    result = {
         "format": FORMAT, "version": "0.1", "path": str(output),
         "schema_version": manifest.schema_version,
         "manifest_sha256": hashlib.sha256(data + b"\n").hexdigest(),
@@ -134,3 +158,6 @@ def import_sqlite(database: Path, output: Path, *, force: bool = False) -> dict[
         },
         "exit_code": 0,
     }
+    if backup is not None:
+        result["backup"] = str(backup)
+    return result

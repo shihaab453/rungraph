@@ -61,3 +61,19 @@ def test_db_import_reports_missing_meta_without_a_traceback(tmp_path: Path, caps
     assert "schema_version" in out
     assert "Traceback" not in out
     assert not target.exists()
+
+
+def test_db_import_force_keeps_the_replaced_output_bytes(tmp_path: Path, capsys):
+    source = Path("examples/generic-experiment")
+    database = tmp_path / "cache.sqlite"
+    target = tmp_path / "imported.json"
+    assert main(["db-export", str(source), "--output", str(database)]) == 0
+    capsys.readouterr()
+    assert main(["db-import", "--db", str(database), "--output", str(target)]) == 0
+    capsys.readouterr()
+    before = target.read_bytes()
+    assert main(["db-import", "--db", str(database), "--output", str(target), "--force"]) == 0
+    out = capsys.readouterr().out
+    assert "Wrote" in out
+    backup = target.with_name(target.name + ".bak")
+    assert backup.read_bytes() == before

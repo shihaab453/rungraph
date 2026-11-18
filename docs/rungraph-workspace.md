@@ -131,7 +131,7 @@ cycles are reported per strongly connected component with a bounded example list
 - `db-check` compares a workspace SQLite cache with the current document and exits `1` on
   drift; `--db` names the cache and `--json` prints the comparison. `db-import` rebuilds a
   validated `rungraph.json` from a cache to `--output`; `--force` replaces an existing file
-  and `--json` prints a summary. JSON remains the authority.
+  after keeping it as a new `.bak` generation, and `--json` prints a summary. JSON remains the authority.
 - `runs` lists every recorded run across members with its params, recorded conditions, start
   time and per-run artifact/result counts. Adapter metadata is opt-in with `--metadata`;
   `--summaries` adds whitelisted MLflow/Sacred/W&B fields without raw metadata;
